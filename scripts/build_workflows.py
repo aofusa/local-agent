@@ -294,9 +294,11 @@ ROLE_SECTION = {
     "pose": "\n\n[Pose reference tags]\n",
     "style": "\n\n[Style reference tags]\n",
 }
+# bbox_detector None: the whole image is one figure. The YOLOX person detector often misses furry
+# characters and its TorchScript build failed intermittently on ROCm (Windows) in testing.
 DWPOSE_INPUTS = {
     "detect_hand": "enable", "detect_body": "enable", "detect_face": "enable", "resolution": 1024,
-    "bbox_detector": "yolox_l.torchscript.pt", "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+    "bbox_detector": "None", "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
     "scale_stick_for_xinsr_cn": "enable",
 }
 # Preprocessor variants the planner may pick (never free text). union_type is SetUnionControlNetType.type.

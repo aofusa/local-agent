@@ -11,7 +11,7 @@
        models\controlnet\controlnet-union-sdxl-1.0-promax.safetensors   (xinsir, openpose/depth/canny)
        models\ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors            (h94)
        models\clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors     (h94 image encoder)
-       custom_nodes\comfyui_controlnet_aux\ckpts\...                      (DWPose TorchScript, Depth Anything V2 Small)
+       custom_nodes\comfyui_controlnet_aux\ckpts\...                      (DWPose TorchScript pose model, Depth Anything V2 Small)
   Restart ComfyUI afterwards.
 
 .EXAMPLE
@@ -82,8 +82,6 @@ Get-Model "$hf/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensor
 $ckpts = Join-Path $aux "ckpts"
 Get-Model "$hf/hr16/DWPose-TorchScript-BatchSize5/resolve/main/dw-ll_ucoco_384_bs5.torchscript.pt" `
     (Join-Path $ckpts "hr16\DWPose-TorchScript-BatchSize5\dw-ll_ucoco_384_bs5.torchscript.pt")
-Get-Model "$hf/hr16/yolox-onnx/resolve/main/yolox_l.torchscript.pt" `
-    (Join-Path $ckpts "hr16\yolox-onnx\yolox_l.torchscript.pt")
 Get-Model "$hf/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth" `
     (Join-Path $ckpts "depth-anything\Depth-Anything-V2-Small\depth_anything_v2_vits.pth")
 
