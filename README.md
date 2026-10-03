@@ -293,6 +293,15 @@ Chroma 経路の違い:
 | テキストエンコーダ | `t5xxl_fp8_e4m3fn.safetensors` | `models\text_encoders` | `CHROMA_TEXT_ENCODER` |
 | VAE | `ae.safetensors`（Flux VAE） | `models\vae` | `CHROMA_VAE` |
 
+速度（確認済み構成 Radeon 890M、fp8、拡散モデルの一部をオフロード）: 1024×1024 で 1 ステップ約 64 秒（28 ステップで約 30 分）、
+768×768 で約 26 秒、512×512 で約 12 秒。遅い GPU では `.env` で上限を下げます。
+
+```
+CHROMA_MAX_PIXELS=589824     # 768x768 相当。縦長・横長も同じ画素数に縮める（既定 1048576 = 1024x1024）
+CHROMA_STEPS=28              # 既定 28
+COMFYUI_TIMEOUT_S=1200       # 画像生成がタイムアウトより長くなる場合
+```
+
 GPU メモリ別の目安（作業指示書 §2.2）: 24GB 以上は BF16（`CHROMA_WEIGHT_DTYPE=default`）、16GB / 12GB / UMA は fp8（既定）か GGUF の Q8_0〜Q5_K_M
 （GGUF は ComfyUI-GGUF が必要で、このリポジトリのワークフローは未対応）。8GB 以下は対象外です。
 
@@ -334,6 +343,7 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `flux`（Chroma1-HD、英語の説明文） |
 | `CHROMA_UNET_NAME` / `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | Chroma のモデルファイルと読み込み精度（「4. 使い方 › Chroma1-HD」） |
 | `CHROMA_LORAS` | 空 | Chroma に適用する LoRA（書式は `LORAS` と同じ） |
+| `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` | 空（1048576 / 28） | Chroma の画素数の上限とステップ数（遅い GPU 向け） |
 | `LMSTUDIO_MODEL` | セットアップが設定 | ワークフローが呼ぶ LM Studio のモデルキー |
 | `COMFYUI_MAIN_DIR` ほか `COMFYUI_*` | セットアップが設定 | `start-comfyui.ps1` が使う ComfyUI の場所 |
 | `COMFYUI_EXTRA_ARGS` | 空 | ComfyUI の追加引数（例 `--enable-manager`） |

@@ -538,7 +538,7 @@ AGENTS.md と設計書（`docs/lmstudio-comfyui-workflow-design.md`）が優先�
 
 ### 11.4 メモリ（fp8 変換）
 
-BF16 の `chroma_v10HD.safetensors` を `weight_dtype=fp8_e4m3fn` で読む実験では、T5 のロード直後に ComfyUI のプロセスがエラーを出さずに終了した
+BF16 の `chroma_v10HD.safetensors` を `weight_dtype=fp8_e4m3fn` で読む最初の実験では、T5 のロード直後に ComfyUI のプロセスがエラーを出さずに終了した
 （`user\comfyui_8188.log` は T5 の部分 unload の行で途切れている）。BF16 の重み全体をいったん RAM に読む必要があり、24GB 機では足りないと判断した。
 そのため `setup-comfyui-chroma.ps1` が一度だけ `chroma_v10HD_fp8_e4m3fn.safetensors`（8.3GB。2 次元の `.weight` 243 個を float8_e4m3fn に、
 残り 400 個は BF16 のまま。読み込み時の変換と同じ処理）を作り、`ckpt` はそれがあれば使う。変換は 1 テンソルずつ書き出すので約 2 分。
@@ -548,13 +548,21 @@ BF16 の `chroma_v10HD.safetensors` を `weight_dtype=fp8_e4m3fn` で読む実�
 | # | 基準 | 状況 |
 |---|---|---|
 | 1 | 無指定の依頼が改修前と同じチェックポイント | テストで確認（`test_default_request_stays_on_sdxl`、`test_generated_files_are_up_to_date` で SDXL テンプレートが不変） |
-| 2 | UNET が Chroma1-HD、T5、`ae.safetensors` | テストで確認（`test_env_family_runs_chroma`）。実機の ComfyUI 履歴は未確認（下記） |
-| 3 | positive にタグ列が無い | 実機の LLM（Qwen3.8 27B IQ3_M）で 1 件確認（英語 4 文）。タグ列が返ったときは応答に警告 |
-| 4 | negative が空でない、CFG 3.0〜4.0 | テストで確認（cfg 3.5、`default_negative` あり） |
-| 5 | 別ホストで画像表示、`127.0.0.1:8188` への要求なし | 画像は base64 で返す既存契約のまま。実機は未確認（下記） |
+| 2 | UNET が Chroma1-HD、T5、`ae.safetensors` | 実機で確認。ComfyUI ログ「loaded chroma_v10HD.safetensors (fp8_e4m3fn) + t5xxl_fp8_e4m3fn.safetensors (chroma) + ae.safetensors」（変換済み fp8 を使用） |
+| 3 | positive にタグ列が無い | 実機で確認（英語 3〜4 文。例「An anthropomorphic dragon man with blue scales looks back over his shoulder on the Kobe harbor at dusk, full body view. …」）。タグ列が返ったときは応答に警告 |
+| 4 | negative が空でない、CFG 3.0〜4.0 | 実機で確認（cfg 3.5、euler / beta、negative は既定の英語 1 行） |
+| 5 | 別ホストで画像表示、`127.0.0.1:8188` への要求なし | LAN アドレス `http://192.168.11.41:2024` 経由でスレッドの最終メッセージが text + image ブロックであること、UI のビルドが `192.168.11.41:2024` を向くことを確認。画像は base64 で返し ComfyUI の URL は出さない。別ホストのブラウザでの目視は未実施 |
 | 6 | モデル名を変えると欠落ファイル名を返す | テストで確認（`test_missing_chroma_file_is_named_without_fallback`） |
 | 7 | 参照画像付きは生成せず理由を返す | テストで確認（`test_chroma_pose_reference_is_refused`） |
 | 8 | 同じ seed とプロンプトで履歴パラメータが一致 | テストで確認（`test_chroma_same_plan_gives_same_prompt`）。seed は `seed 1234` で指定できる |
 
-実機の画像生成は未確認。ComfyUI に新しいノードを読み込ませる再起動を作業中に行えず、さらに上記 11.4 の実験で ComfyUI が終了したため。
-ComfyUI（`start-comfyui.ps1`）と LangGraph（`start-langgraph.ps1`）を起動し直したあと、§8 の確認用プロンプトで確認する。
+実機の確認（2026-10-04、Radeon 890M）: LangGraph API（agent-chat-ui と同じ `/threads/{id}/runs/wait`）から
+「夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている。清潔なイラスト、全身」を送り、768×768 の画像 1 枚が返り、
+ComfyUI の `output/furry_ja/chroma_00001_.png` とリポジトリの `outputs/` に保存された。eject の後に `ckpt` が LM Studio の unload を確認している
+（「LM Studio verified unloaded before diffusion model/KSampler」）。所要時間は約 20 分（LLM 約 3 分、サンプリング 28 ステップ約 16 分）。
+
+### 11.6 速度
+
+この機械では 1 ステップあたり 1024×1024 で約 64 秒、768×768 で約 26〜35 秒、512×512 で約 12 秒（拡散モデル約 3.7GB をオフロード）。
+1024×1024 × 28 ステップは約 30 分でタイムアウトを超えるため、`.env` に `CHROMA_MAX_PIXELS`（画素数の上限）と `CHROMA_STEPS` を追加した。
+この機械の `.env` は `CHROMA_MAX_PIXELS=589824`（768×768）、`COMFYUI_TIMEOUT_S=1200`。
