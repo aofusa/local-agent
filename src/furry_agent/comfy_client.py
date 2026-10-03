@@ -17,6 +17,7 @@ import httpx
 import websockets
 
 log = logging.getLogger("furry_agent.comfy")
+_OBJECT_INFO_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 class ComfyError(RuntimeError):
@@ -44,6 +45,20 @@ def _history_error(entry: dict) -> str | None:
     return "ComfyUI reported an execution error"
 
 
+def summarize_prompt_error(body: dict) -> str:
+    """One line per failing node from a /prompt rejection; the full JSON stays in the log."""
+    lines = []
+    error = body.get("error") or {}
+    if isinstance(error, dict) and error.get("message"):
+        lines.append(str(error["message"]))
+    for node_id, info in (body.get("node_errors") or {}).items():
+        reasons = "; ".join(
+            f"{e.get('message', '')} {e.get('details', '')}".strip() for e in info.get("errors") or []
+        )
+        lines.append(f"{node_id} ({info.get('class_type', '?')}): {reasons}"[:300])
+    return " / ".join(lines)
+
+
 class ComfyClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout_s: float = 600.0):
         self.base_url = base_url.rstrip("/")
@@ -58,6 +73,38 @@ class ComfyClient:
             r = await http.get("/system_stats")
             r.raise_for_status()
             return r.json()
+
+    async def object_info(self, max_age_s: float = 300.0) -> dict:
+        """Full /object_info, cached per base URL (it is large and rarely changes)."""
+        cached = _OBJECT_INFO_CACHE.get(self.base_url)
+        if cached and time.monotonic() - cached[0] < max_age_s:
+            return cached[1]
+        async with self._http(60) as http:
+            r = await http.get("/object_info")
+            r.raise_for_status()
+            info = r.json()
+        _OBJECT_INFO_CACHE[self.base_url] = (time.monotonic(), info)
+        return info
+
+    async def node_types(self) -> set[str]:
+        return set(await self.object_info())
+
+    async def loras(self) -> list[str]:
+        info = await self.object_info()
+        return list(info.get("LoraLoader", {}).get("input", {}).get("required", {}).get("lora_name", [[]])[0])
+
+    async def input_exists(self, name: str) -> bool:
+        """True when ComfyUI already has ``subfolder/name`` in its input folder."""
+        subfolder, _, filename = name.rpartition("/")
+        async with self._http(30) as http:
+            r = await http.get("/view", params={"filename": filename, "subfolder": subfolder, "type": "input"})
+        return r.status_code == 200
+
+    async def interrupt(self, prompt_id: str) -> None:
+        """Stop ``prompt_id`` if it is running and drop it from the pending queue (FR-12)."""
+        async with self._http(10) as http:
+            await http.post("/queue", json={"delete": [prompt_id]})
+            await http.post("/interrupt", json={"prompt_id": prompt_id})
 
     async def checkpoints(self, node_class: str = "FurryJaCheckpointLoaderAfterEject") -> list[str]:
         async with self._http(30) as http:
@@ -97,11 +144,10 @@ class ComfyClient:
     async def submit(self, prompt: dict, client_id: str) -> str:
         async with self._http(60) as http:
             r = await http.post("/prompt", json={"prompt": prompt, "client_id": client_id})
-        if r.status_code != 200:
-            raise ComfyError(f"/prompt rejected ({r.status_code}): {r.text[:2000]}")
-        body = r.json()
-        if body.get("node_errors"):
-            raise ComfyError(f"/prompt node_errors: {json.dumps(body['node_errors'])[:2000]}")
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code != 200 or body.get("node_errors"):
+            log.error("/prompt rejected (%s): %s", r.status_code, r.text[:20000])
+            raise ComfyError(f"キュー投入を ComfyUI が拒否しました（{r.status_code}）: {summarize_prompt_error(body) or r.text[:300]}")
         return body["prompt_id"]
 
     async def history(self, prompt_id: str) -> dict | None:
