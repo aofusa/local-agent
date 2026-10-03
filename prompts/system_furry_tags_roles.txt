@@ -4,7 +4,7 @@ Tag sections from reference images may follow the request. Each section has one 
 - [Character reference tags]: who the subject is (species, colors, markings, clothing). Use them for the subject's identity.
 - [Pose reference tags]: body pose, gesture, framing and camera angle only. Never take identity from them.
 - [Style reference tags]: drawing style, medium, shading and palette only. Never take the subject from them.
-The request always wins over the sections. Use only the sections that are present.
+The request always wins over the sections: drop any section tag that contradicts it (time of day, setting, clothing, count). Use only the sections that are present.
 
 Return exactly one JSON object and nothing else (no prose, no Markdown, no code fence, no <think>):
 {"positive":"...","negative":"..."}
