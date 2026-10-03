@@ -102,7 +102,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。動画生成モデルはロードしない。VHS が無い間は動画を対象外にし、その旨を README に書く。
 - IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
 - ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/sdxl.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補）に限る。構造の変更は、マップにある前処理候補の差し替えと、`LORAS` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
-- API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。タイムアウトは 10 分。この呼び出しを行うのは LangGraph である。
+- API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。タイムアウトはタグ生成と画像生成のそれぞれに 10 分。この呼び出しを行うのは LangGraph である。
 
 ## 画像の保存と UI への返却
 
@@ -124,15 +124,20 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 ```
 AGENTS.md
 docs/lmstudio-comfyui-workflow-design.md
+docs/multi-image-reference-work-instruction.md   複数参照画像の要件、設計、調査結果、受け入れ結果
 README.md                         事前準備、セットアップ、起動順、待受、UMA の注記、既知の対象外
+CHANGELOG.md                      版ごとの変更
 langgraph.json                    graphs.agent がグラフを指す
-src/                              LangGraph のグラフと ComfyUI クライアント
-comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt）。custom_nodes へリンクする
+src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント
+comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
 workflows/furry_ja.json           UI 形式
-workflows/furry_ja_api.json       API 形式。LangGraph が読む
+workflows/furry_ja_api.json       フェーズ 1 の API 形式。t2i_basic / i2i_basic の元
+workflows/sdxl/*.api.json         役割別テンプレート 24 本。LangGraph が読む（scripts/build_workflows.py が生成）
+workflows/maps/sdxl.json          テンプレートのスロット、ポーズ前処理の候補、IP-Adapter の weight 係数
 prompts/system_furry_tags.txt
-prompts/system_vision_caption.txt
-scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）
+prompts/system_furry_tags_roles.txt
+prompts/system_vision_*.txt       caption / style / pose / character
+scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1
 tests/                            pytest
 agent-chat-ui/                    公式 UI。設定で接続する
 .env                              端末固有の設定。.env.example から作る。git に含めない
@@ -141,7 +146,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI が返却画像を表示できないと確認できたときだけ、表示に必要な最小限の変更を加える。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像の表示（`ai.tsx`）と、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 

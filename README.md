@@ -11,6 +11,8 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 
 クラウド API は使いません。すべてローカルで動きます。
 
+変更履歴: [CHANGELOG.md](CHANGELOG.md)
+
 仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）
 
 ```
@@ -339,8 +341,8 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 | `llm_backend` | LMConnectLMStudioBackend | `http://127.0.0.1:1234/v1`、auto-eject on、thinking off |
 | `llm_backend_vision` | LMConnectLMStudioBackend | Vision 用。auto-eject off（直後の `prompt_node` で 27B を再ロードしないため） |
 | `user_prompt` | PrimitiveStringMultiline | 日本語指示（LangGraph が書き換え） |
-| `ref_image` / `ref_image_2` | LoadImage | 参照画像（参照なしの実行では削除） |
-| `vision` | LMConnectVision | 参照画像をタグ化。長辺 768 |
+| `ref_image` | LoadImage | 修正する元画像（参照なしの実行では削除） |
+| `vision` | LMConnectVision | 元画像をタグ化。長辺 768 |
 | `prompt_join` | StringConcatenate | 指示 + `[Reference image tags]` |
 | `prompt_node` | LMConnectPromptWithSystem | JSON `{"positive","negative"}` を返させる |
 | `eject` | LMConnectEjectLMStudioModel | LM Studio のモデルを unload し、テキストを passthrough |
