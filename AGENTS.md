@@ -4,7 +4,7 @@
 
 ## 現状
 
-リポジトリにある仕様は、このファイルと `docs/lmstudio-comfyui-workflow-design.md` だけである。LangGraph のグラフ、ワークフロー JSON、UI、README はまだ無い。利用者が実装を指示するまで、それらを作り始めない。
+フェーズ 1（テキスト、参照画像 0〜2 枚）は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -83,7 +83,8 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 詳細、システムプロンプトの要件、失敗時の切り分け、フェーズ順は設計書に従う。実装時にずらしやすい点だけここに置く。
 
 - LLM は LM Studio 上の Qwen3.8 27B abliterated。画像入力にはテキスト GGUF に加え `mmproj` をロードする。API は `http://127.0.0.1:1234/v1`。thinking は無効。
-- 画像生成は ComfyUI 上の furry 系チェックポイント。既定ファイル名は `yiffinhell.safetensors`。環境変数 `CKPT_NAME` で差し替える。
+- 画像生成は ComfyUI 上の furry 系チェックポイント。既定ファイル名は `yiffInHell_yihVANTABLACK.safetensors`。環境変数 `CKPT_NAME` で差し替える。
+- 24GB 級の共有メモリでは Q4 の 27B がページングで実用にならないため、既定ではセットアップが同じモデルを IQ3_M に再量子化して使う（`scripts/setup-lmstudio.ps1`、README §6）。モデルキーは `.env` の `LMSTUDIO_MODEL`。
 - 27B とチェックポイントは同時常駐しない。順序は、LLM がタグを返す、LM Studio から unload する、その後に CheckpointLoader と KSampler、で固定する。eject の前に KSampler へ進めたら失敗である。
 - ComfyUI プロセス内に GGUF を載せない。ローカル LLM の実行は LM Studio のサーバだけが行う。
 - LLM の出力は次の JSON だけである。説明、Markdown の囲み、思考タグは禁止する。
@@ -113,21 +114,27 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 
 ## 置く場所
 
-プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と LM Studio 本体は、それぞれの既存インストールのまま使う。カスタムノードの導入先は、ComfyUI インストール配下の `custom_nodes/` である。そのパスは未確定なので、推測で固定しない。発見できないときは利用者に確認する。
+プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と LM Studio 本体は、それぞれの既存インストールのまま使う。カスタムノードの導入先は、ComfyUI インストール配下の `custom_nodes/` である。そのパスは端末ごとに違うので、リポジトリに固定値を書かない。`scripts/setup-comfyui.ps1` が検出して `.env`（git 管理外）に保存する。検出できないときは利用者に確認する。
 
 実装時の配置は次とする。
 
 ```
 AGENTS.md
 docs/lmstudio-comfyui-workflow-design.md
-README.md                         起動順、待受、UMA の注記、既知の対象外
+README.md                         事前準備、セットアップ、起動順、待受、UMA の注記、既知の対象外
 langgraph.json                    graphs.agent がグラフを指す
 src/                              LangGraph のグラフと ComfyUI クライアント
+comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt）。custom_nodes へリンクする
 workflows/furry_ja.json           UI 形式
 workflows/furry_ja_api.json       API 形式。LangGraph が読む
 prompts/system_furry_tags.txt
+prompts/system_vision_caption.txt
+scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）
+tests/                            pytest
 agent-chat-ui/                    公式 UI。設定で接続する
+.env                              端末固有の設定。.env.example から作る。git に含めない
 outputs/                          生成画像の複製。git に含めない
+logs/ tools/                      実行ログ、ダウンロードしたツール。git に含めない
 artifacts/                        下記。git に含めない
 ```
 
@@ -194,11 +201,14 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 
 次は決めていない。実装中に都合のよい値へ確定しない。必要になったら利用者に確認する。
 
-- ComfyUI と LM Studio のインストールディレクトリ。
-- チェックポイントの実ファイル名。接続できるまでは `CKPT_NAME` の既定 `yiffinhell.safetensors` を使う。
 - 他ホスト向け待受の認証方式。
-- agent-chat-ui の、画像を描画する content block の正確な形。採用する版の実装を見て決める。
 - 共有メモリの UMA 割当。実装対象外であり、README に注記するだけにする。
+
+実装時に決めたもの:
+
+- ComfyUI と LM Studio のインストールディレクトリは端末ごとに違う。セットアップスクリプトが検出し、`.env` に保存する。
+- チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（`CKPT_NAME`）。
+- agent-chat-ui に返す画像は `{"type": "image", "mimeType": "image/png", "data": <base64>}`。在庫の UI は AI メッセージの画像を描画しないため、`ai.tsx` に最小限の変更を加えた。
 
 ## 作業規則
 
