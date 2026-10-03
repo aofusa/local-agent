@@ -16,7 +16,7 @@ PROMPTS = ROOT / "prompts"
 WORKFLOWS = ROOT / "workflows"
 
 LMSTUDIO_URL = "http://127.0.0.1:1234/v1"
-LMSTUDIO_MODEL = "huihui-qwen3.8-27b-abliterated-nomtp"
+LMSTUDIO_MODEL = "huihui-qwen3.8-27b-abliterated@iq3_m"
 CKPT_NAME = "yiffInHell_yihVANTABLACK.safetensors"
 REF_PLACEHOLDER = "furry_ja_ref.png"
 REF_JOIN_DELIMITER = "\n\n[Reference image tags]\n"

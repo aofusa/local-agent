@@ -104,7 +104,7 @@ def _route(state: State) -> str:
 
 
 async def ingest(state: State, config: RunnableConfig) -> dict:
-    _setup_file_logging(_settings(config).logs_dir)
+    await asyncio.to_thread(_setup_file_logging, _settings(config).logs_dir)
     progress_id = f"progress-{uuid.uuid4()}"
     try:
         request = _request(state)

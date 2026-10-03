@@ -181,3 +181,14 @@ async def test_unknown_checkpoint(settings):
     state = await _run("テスト", fake, settings)
     assert "missing.safetensors" in state["messages"][-1].content
     assert fake.submitted is None
+
+
+async def test_no_blocking_calls_in_event_loop(settings):
+    # langgraph dev runs nodes under blockbuster and fails runs that block the loop.
+    from blockbuster import blockbuster_ctx
+
+    fake = FakeComfy()
+    graph_module.log.handlers.clear()
+    with blockbuster_ctx():
+        state = await _run("テスト", fake, settings)
+    assert not state.get("error")
