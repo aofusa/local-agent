@@ -1,9 +1,15 @@
-"""LangGraph agent (graph id ``agent``): chat input -> ComfyUI furry_ja workflow -> image in chat.
+"""LangGraph agent (graph id ``agent``): chat input -> registered ComfyUI template -> image in chat.
 
-LangGraph never calls LM Studio. The ComfyUI workflow calls the LLM, ejects it,
-and only then loads the checkpoint (design doc §4). This graph uploads media,
-submits the API workflow, waits on ComfyUI, saves the image under outputs/ and
-returns the image bytes as a chat content block.
+LangGraph never calls LM Studio. The ComfyUI workflow calls the LLM, ejects it, and only then loads
+the checkpoint, IP-Adapter and ControlNet (design doc §4). This graph:
+
+    ingest    read the message, normalize up to 4 reference images (or the previous output) into references
+    plan      rule-based roles -> template id -> clamped parameters, and a summary before running (WI §4.6)
+    confirm   LangGraph interrupt when the roles are ambiguous (agent-chat-ui HITL card)
+    submit    upload (deduplicated by sha256), inject through the node map, validate node types, /prompt
+    await_tags / await_image   wait on ComfyUI, verify the LLM unload, save under outputs/, return the image
+
+Reference image bytes never enter the graph state: only sha256, role, size and the ComfyUI filename (NFR-1).
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ import json
 import logging
 import logging.handlers
 import queue
-import random
+import re
 import time
 import uuid
 from datetime import datetime
@@ -24,16 +30,40 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.types import interrupt
+from PIL import Image
 
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import Settings
-from furry_agent.media import MediaError, Request, parse_request
-from furry_agent.workflow import build_prompt, load_workflow
+from furry_agent.media import IMAGE_ROLES, MAX_IMAGES, Media, MediaError, Request, parse_request
+from furry_agent.planner import (
+    GenerationPlan,
+    Intent,
+    ReferenceImage,
+    build_plan,
+    classify_intent,
+    resolve_roles,
+    select_workflow,
+    wants_previous_output,
+)
+from furry_agent.templates import (
+    LoraSpec,
+    TemplateError,
+    build_run_prompt,
+    load_template,
+    parse_loras,
+    resolve_lora_names,
+    unknown_node_types,
+)
 
 log = logging.getLogger("furry_agent")
 
 DEFAULT_TEXT_FOR_IMAGES = "参照画像の内容をもとに、同じ主題で描いてください。"
+CONFIRM_ACTION = "generate_image"
+_REFETCH = re.compile(r"再取得\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 _submit_lock: asyncio.Lock | None = None
+# sha256 -> ComfyUI input filename, so the same image is uploaded once (WI §4.6 upload_images).
+_uploaded: dict[str, str] = {}
 
 
 def _setup_file_logging(logs_dir: Path) -> None:
@@ -48,7 +78,7 @@ def _setup_file_logging(logs_dir: Path) -> None:
     handler._furry_agent = True  # type: ignore[attr-defined]
     listener = logging.handlers.QueueListener(q, file_handler)
     listener.start()
-    log.addHandler(handler)
+    log.addHandler(handler)  # furry_agent.comfy propagates here
     log.setLevel(logging.INFO)
 
 
@@ -57,6 +87,19 @@ class State(MessagesState):
     job: dict[str, Any]
     tags: dict[str, Any]
     error: str | None
+    references: list[ReferenceImage]
+    plan: GenerationPlan | None
+    proposal: dict[str, Any] | None
+    comfy_prompt_id: str | None
+    outputs: list[str]
+
+
+class StageError(RuntimeError):
+    """An error with the stage it happened in (WI §1.3: which step failed)."""
+
+    def __init__(self, stage: str, exc: Exception | str):
+        super().__init__(str(exc))
+        self.stage = stage
 
 
 def _settings(config: RunnableConfig | None) -> Settings:
@@ -80,109 +123,355 @@ def _request(state: State) -> Request:
     human = _last_human(state)
     if human is None:
         raise MediaError("ユーザーのメッセージが見つかりません")
-    request = parse_request(human.content)
-    if not request.text and request.images:
-        request.text = DEFAULT_TEXT_FOR_IMAGES
-    if not request.text:
-        raise MediaError("日本語で描きたい内容を入力してください（画像は 0〜2 枚まで添付できます）。")
-    return request
+    return parse_request(human.content)
 
 
 def _progress(state: State, text: str) -> AIMessage:
     return AIMessage(id=state["progress_id"], content=text)
 
 
-def _fail(state: State, exc: Exception) -> dict:
-    log.error("run failed: %s", exc)
-    text = f"⚠️ 生成できませんでした: {exc}"
+def _fail(state: State, exc: Exception, stage: str | None = None) -> dict:
+    stage = getattr(exc, "stage", None) or stage
+    log.error("run failed stage=%s: %s", stage, exc)
+    prefix = f"［{stage}］" if stage else ""
+    text = f"⚠️ 生成できませんでした{prefix}: {exc}"
     message = AIMessage(id=state.get("progress_id") or f"error-{uuid.uuid4()}", content=text)
     return {"messages": [message], "error": str(exc)}
 
 
-async def _fail_and_free(state: State, exc: Exception, client: ComfyClient) -> dict:
-    """Report the error and release whatever ComfyUI loaded (e.g. the checkpoint) before failing."""
+async def _release(client: ComfyClient) -> None:
     try:
         await client.free()
-    except Exception as free_exc:  # pragma: no cover - best effort
-        log.warning("ComfyUI /free failed: %s", free_exc)
-    return _fail(state, exc)
+    except Exception as exc:  # pragma: no cover - best effort
+        log.warning("ComfyUI /free failed: %s", exc)
+
+
+async def _cancel(client: ComfyClient, prompt_id: str) -> None:
+    """The run was cancelled from the UI: stop the ComfyUI prompt too (FR-12)."""
+    try:
+        await client.interrupt(prompt_id)
+        await client.free()
+        log.info("cancelled prompt_id=%s (ComfyUI interrupted)", prompt_id)
+    except Exception as exc:  # pragma: no cover - best effort
+        log.warning("ComfyUI interrupt failed for %s: %s", prompt_id, exc)
 
 
 def _route(state: State) -> str:
     return END if state.get("error") else "next"
 
 
+# --- ingest ------------------------------------------------------------------------------------------
+
+
+def _reference(image_id: str, media: Media, source: str = "attachment", local_path: str | None = None) -> ReferenceImage:
+    return ReferenceImage(
+        image_id=image_id, role=media.role, resolved_role=None, filename_on_comfy=None, sha256=media.sha256,
+        width=media.width, height=media.height, strength=media.strength, source=source,
+        local_path=local_path, mime=media.mime,
+    )
+
+
+def _configurable_roles(config: RunnableConfig | None, images: list[Media]) -> None:
+    """Fallback channel when a UI cannot keep block metadata: configurable.references = [{index, role, strength}]."""
+    for item in ((config or {}).get("configurable", {}).get("references") or []):
+        index = int(item.get("index", 0))
+        if 1 <= index <= len(images) and images[index - 1].role == "auto":
+            role = str(item.get("role") or "auto")
+            if role not in IMAGE_ROLES:
+                raise MediaError(f"画像の役割 {role!r} は使えません")
+            images[index - 1].role = role
+            if item.get("strength") is not None:
+                images[index - 1].strength = float(item["strength"])
+
+
+def _previous_output(state: State) -> Media | None:
+    for path in reversed(state.get("outputs") or []):
+        file = Path(path)
+        if file.exists():
+            data = file.read_bytes()
+            with Image.open(file) as image:
+                width, height = image.size
+            return Media(mime="image/png", data=data, name=file.name, role="base", width=width, height=height)
+    return None
+
+
 async def ingest(state: State, config: RunnableConfig) -> dict:
     await asyncio.to_thread(_setup_file_logging, _settings(config).logs_dir)
     progress_id = f"progress-{uuid.uuid4()}"
+    reset = {"progress_id": progress_id, "error": None, "tags": {}, "plan": None, "proposal": None,
+             "comfy_prompt_id": None, "references": []}
     try:
         request = _request(state)
-    except MediaError as exc:
-        return _fail({**state, "progress_id": progress_id}, exc)
-    mode = "img2img" if request.images else "txt2img"
-    log.info("request mode=%s refs=%d text=%s", mode, len(request.images), request.text)
+        _configurable_roles(config, request.images)
+        refetch = _REFETCH.search(request.text)
+        if refetch and not request.images:
+            prompt_id = refetch.group(1)
+            log.info("refetch prompt_id=%s", prompt_id)
+            return {**reset, "comfy_prompt_id": prompt_id,
+                    "job": {"mode": "refetch", "prompt_id": prompt_id, "client_id": uuid.uuid4().hex,
+                            "seed": None, "ckpt_name": None, "refs": [], "template_id": "?",
+                            "deadline": time.time() + _settings(config).timeout_s},
+                    "messages": [AIMessage(id=progress_id, content=f"prompt_id {prompt_id} の結果を ComfyUI から取得しています…")]}
+        references = [_reference(f"img_{i}", m) for i, m in enumerate(request.images, start=1)]
+        if wants_previous_output(request.text, bool(request.images)) and not any(m.role == "base" for m in request.images):
+            previous = await asyncio.to_thread(_previous_output, state)
+            if previous is not None:
+                if len(references) >= MAX_IMAGES:
+                    raise MediaError(f"前回の生成画像を含めると {MAX_IMAGES} 枚を超えます")
+                references.append(_reference("prev", previous, "previous_output", str(state["outputs"][-1])))
+        if not request.text and not references:
+            raise MediaError(f"日本語で描きたい内容を入力してください（画像は 0〜{MAX_IMAGES} 枚まで添付できます）。")
+    except (MediaError, ValueError) as exc:
+        return _fail({**state, "progress_id": progress_id}, exc, "入力")
+    log.info("request refs=%s text=%s", [(r["image_id"], r["role"], r["sha256"][:12]) for r in references], request.text)
     return {
-        "progress_id": progress_id,
-        "error": None,
-        "tags": {},
-        "job": {"mode": mode, "n_refs": len(request.images)},
-        "messages": [AIMessage(
-            id=progress_id,
-            content=f"受け付けました（{mode}、参照画像 {len(request.images)} 枚）。ComfyUI の空きを確認しています…",
-        )],
+        **reset,
+        "references": references,
+        "job": {"text": request.text or DEFAULT_TEXT_FOR_IMAGES},
+        "messages": [AIMessage(id=progress_id, content=f"受け付けました（参照画像 {len(references)} 枚）。役割とテンプレートを決めています…")],
     }
+
+
+def _route_ingest(state: State) -> str:
+    if state.get("error"):
+        return END
+    return "refetch" if state["job"].get("mode") == "refetch" else "next"
+
+
+# --- plan / confirm --------------------------------------------------------------------------------
+
+
+def _image_label(ref: ReferenceImage) -> str:
+    if ref["source"] == "previous_output":
+        return "前回の生成画像"
+    return f"画像{ref['image_id'].split('_')[-1]}"
+
+
+def _summary(plan: GenerationPlan, references: list[ReferenceImage], roles: dict[str, str],
+             ignored: dict[str, str], loras: list[str]) -> str:
+    lines = [f"**テンプレート**: {plan['template_id']}（{plan['model_family']}）"]
+    for ref in references:
+        role = roles.get(ref["image_id"])
+        if role is None:
+            lines.append(f"- {_image_label(ref)}: 不使用（{ignored.get(ref['image_id'], '')}）")
+            continue
+        detail = ""
+        if role in plan["strengths"]:
+            detail = f" 強度 {plan['strengths'][role]:.2f}"
+        if role == "pose":
+            detail += f"（{plan['pose_preprocessor']}）"
+        if role == "base" and plan["denoise"] is not None:
+            detail = f" denoise {plan['denoise']:.2f}"
+        lines.append(f"- {_image_label(ref)}: {role}{detail}")
+    size = "参照画像に合わせる" if "base" in roles.values() else f"{plan['width']}×{plan['height']}"
+    lines.append(f"- サイズ {size} / seed {plan['seed']} / steps {plan['steps']} / cfg {plan['cfg']}")
+    lines.append(f"- LoRA: {', '.join(loras) if loras else 'なし'}")
+    lines += [f"- ※ {note}" for note in plan["notes"]]
+    return "\n".join(lines)
+
+
+def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] | None = None) -> dict:
+    """Pure planning step shared by plan and confirm. Returns a state update (no messages)."""
+    references = [dict(r) for r in state["references"]]
+    if proposal_roles:
+        for ref in references:
+            ref["role"] = proposal_roles.get(ref["image_id"], ref["role"])
+    intent: Intent = classify_intent(state["job"]["text"], references)
+    resolution = resolve_roles(references, intent)
+    for ref in references:
+        ref["resolved_role"] = resolution.roles.get(ref["image_id"])
+    template_id = select_workflow(resolution.roles.values()) if not resolution.needs_confirmation else None
+    if template_id:
+        load_template(settings.model_family, template_id, settings.workflows_dir)  # TemplateError when missing
+    plan = build_plan(template_id or "?", settings.model_family, references, resolution.roles, intent)
+    plan["needs_confirmation"] = resolution.needs_confirmation
+    plan["confirmation_reason"] = resolution.reason
+    return {"references": references, "plan": plan, "resolution": resolution}
+
+
+async def plan(state: State, config: RunnableConfig) -> dict:
+    settings = _settings(config)
+    try:
+        loras = [s.name for s in parse_loras(settings.loras)]
+        result = await asyncio.to_thread(_make_plan, state, settings)
+    except (ValueError, TemplateError) as exc:
+        return _fail(state, exc, "ワークフロー選択")
+    resolution, plan_ = result["resolution"], result["plan"]
+    if plan_["needs_confirmation"]:
+        proposal = {
+            "roles": resolution.proposal,
+            "reason": resolution.reason,
+            "labels": {r["image_id"]: _image_label(r) for r in result["references"]},
+        }
+        log.info("needs confirmation: %s proposal=%s", resolution.reason, resolution.proposal)
+        return {"references": result["references"], "plan": plan_, "proposal": proposal,
+                "messages": [_progress(state, f"画像の役割を確認させてください: {resolution.reason}")]}
+    log.info("plan template=%s roles=%s seed=%d", plan_["template_id"], resolution.roles, plan_["seed"])
+    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras)
+    return {"references": result["references"], "plan": plan_, "proposal": None,
+            "job": {**state["job"], "summary": summary},
+            "messages": [_progress(state, f"次の内容で生成します。\n\n{summary}\n\nComfyUI の空きを確認しています…")]}
+
+
+def _route_plan(state: State) -> str:
+    if state.get("error"):
+        return END
+    return "confirm" if state.get("proposal") else "submit"
+
+
+def _decision_roles(decision: dict, proposal: dict) -> dict[str, str] | None:
+    """Map the agent-chat-ui HITL decision to roles; None means the user cancelled."""
+    kind = decision.get("type")
+    if kind in ("reject", "ignore"):
+        return None
+    if kind == "edit":
+        args = (decision.get("edited_action") or {}).get("args") or {}
+        roles = {}
+        for image_id in proposal["roles"]:
+            value = str(args.get(image_id, proposal["roles"][image_id])).strip().lower()
+            if value not in IMAGE_ROLES or value == "auto":
+                raise ValueError(f"{proposal['labels'].get(image_id, image_id)} の役割 {value!r} は使えません"
+                                 f"（{' / '.join(r for r in IMAGE_ROLES if r != 'auto')}）")
+            roles[image_id] = value
+        return roles
+    return dict(proposal["roles"])
+
+
+async def confirm(state: State, config: RunnableConfig) -> dict:
+    proposal = state["proposal"]
+    description = (
+        f"{proposal['reason']}。\n提案した役割で実行するなら承認、変える場合は各画像の値を "
+        "style / pose / character / base / mask に書き換えて送信、やめる場合は却下してください。\n"
+        + "\n".join(f"- {image_id} = {proposal['labels'][image_id]}" for image_id in proposal["roles"])
+    )
+    response = interrupt({
+        "action_requests": [{"name": CONFIRM_ACTION, "args": dict(proposal["roles"]), "description": description}],
+        "review_configs": [{"action_name": CONFIRM_ACTION, "allowed_decisions": ["approve", "edit", "reject"]}],
+    })
+    decisions = response.get("decisions") if isinstance(response, dict) else response
+    decision = (decisions or [{"type": "approve"}])[0] if isinstance(decisions, list) else {"type": "approve"}
+    settings = _settings(config)
+    try:
+        roles = _decision_roles(decision, proposal)
+        if roles is None:
+            log.info("user cancelled at confirmation")
+            return {"error": "cancelled", "proposal": None,
+                    "messages": [_progress(state, "中止しました。役割を指定して送り直してください。")]}
+        explicit_state = {**state, "references": [{**r, "role": roles[r["image_id"]]} for r in state["references"]]}
+        result = await asyncio.to_thread(_make_plan, explicit_state, settings)
+        if result["plan"]["needs_confirmation"]:
+            raise ValueError(result["plan"]["confirmation_reason"])
+    except (ValueError, TemplateError) as exc:
+        return _fail(state, exc, "役割推定")
+    resolution, plan_ = result["resolution"], result["plan"]
+    loras = [s.name for s in parse_loras(settings.loras)]
+    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras)
+    log.info("confirmed template=%s roles=%s", plan_["template_id"], resolution.roles)
+    return {"references": result["references"], "plan": plan_, "proposal": None,
+            "job": {**state["job"], "summary": summary},
+            "messages": [_progress(state, f"次の内容で生成します。\n\n{summary}\n\nComfyUI の空きを確認しています…")]}
+
+
+# --- submit ------------------------------------------------------------------------------------------
+
+
+def _reference_bytes(state: State, ref: ReferenceImage) -> Media:
+    if ref["source"] == "previous_output":
+        path = Path(ref["local_path"] or "")
+        return Media(mime="image/png", data=path.read_bytes(), name=path.name)
+    index = int(ref["image_id"].split("_")[1]) - 1
+    return _request(state).images[index]
+
+
+async def _upload(client: ComfyClient, media: Media, sha256: str) -> str:
+    known = _uploaded.get(sha256)
+    if known and await client.input_exists(known):
+        return known
+    name = await client.upload_image(media.data, f"ref_{sha256[:20]}.{media.extension}", media.mime)
+    _uploaded[sha256] = name
+    return name
 
 
 async def submit(state: State, config: RunnableConfig) -> dict:
     global _submit_lock
     settings = _settings(config)
     client = _client(config, settings)
+    plan_ = state["plan"]
+    stage = "キュー待ち"
     try:
-        request = _request(state)
-        workflow = await asyncio.to_thread(load_workflow, settings.workflow_path)
+        loras: list[LoraSpec] = parse_loras(settings.loras)
         if _submit_lock is None:
             _submit_lock = asyncio.Lock()
         async with _submit_lock:
             # One generation at a time: never queue while ComfyUI is still busy.
             await client.wait_queue_idle(settings.timeout_s)
-            # Drop ComfyUI's cached checkpoint so the 27B has the shared memory.
+            # Drop ComfyUI's cached models so the 27B has the shared memory.
             await client.free()
             await asyncio.sleep(2.0)
-            ckpt_name = settings.ckpt_name or workflow["ckpt"]["inputs"]["ckpt_name"]
-            available = await client.checkpoints()
-            if ckpt_name not in available:
+            stage = "ワークフロー注入"
+            template, _ = await asyncio.to_thread(load_template, settings.model_family, plan_["template_id"],
+                                                  settings.workflows_dir)
+            ckpt_name = settings.ckpt_name or template["ckpt"]["inputs"]["ckpt_name"]
+            if ckpt_name not in await client.checkpoints():
                 raise ComfyError(f"チェックポイント {ckpt_name} が ComfyUI に見つかりません")
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            ref_names = []
-            for i, media in enumerate(request.images):
-                ref_names.append(await client.upload_image(
-                    media.data, f"ref_{stamp}_{uuid.uuid4().hex[:6]}_{i + 1}.{media.extension}", media.mime
-                ))
-            seed = random.randint(0, 2**32 - 1)
-            prompt = build_prompt(workflow, request.text, seed, ref_names, ckpt_name)
+            if loras:
+                loras = resolve_lora_names(loras, await client.loras())
+            stage = "アップロード"
+            images, references = {}, []
+            for ref in state["references"]:
+                ref = dict(ref)
+                if ref["resolved_role"]:
+                    media = await asyncio.to_thread(_reference_bytes, state, ref)
+                    ref["filename_on_comfy"] = await _upload(client, media, ref["sha256"])
+                    images[ref["resolved_role"]] = ref["filename_on_comfy"]
+                references.append(ref)
+            stage = "ワークフロー注入"
+            prompt = await asyncio.to_thread(build_run_prompt, settings.model_family, plan_, images,
+                                             state["job"]["text"], ckpt_name, loras, settings.workflows_dir)
+            missing = unknown_node_types(prompt, await client.node_types())
+            if missing:
+                raise TemplateError(
+                    f"この環境の ComfyUI に無いノードがあります: {', '.join(missing)}。"
+                    "scripts\\setup-comfyui-refs.ps1 を実行して ComfyUI を再起動してください")
+            stage = "キュー投入"
             client_id = uuid.uuid4().hex
             prompt_id = await client.submit(prompt, client_id)
-    except (ComfyError, MediaError, OSError, ValueError) as exc:
-        return _fail(state, exc)
+    except (ComfyError, MediaError, TemplateError, OSError, ValueError) as exc:
+        return _fail(state, exc, stage)
     except Exception as exc:  # httpx / websockets errors
-        return _fail(state, ComfyError(f"ComfyUI に接続できません: {exc!r}"))
+        return _fail(state, ComfyError(f"ローカルの ComfyUI（{settings.comfyui_url}）に接続できません: {exc!r}"), stage)
 
     deadline = time.time() + settings.timeout_s
-    job = {**state["job"], "prompt_id": prompt_id, "client_id": client_id, "seed": seed,
-           "ckpt_name": ckpt_name, "refs": ref_names, "deadline": deadline}
-    log.info("submitted prompt_id=%s seed=%d mode=%s refs=%s", prompt_id, seed, job["mode"], ref_names)
-    steps = "参照画像のタグ付け → " if ref_names else ""
+    job = {**state["job"], "mode": plan_["template_id"], "template_id": plan_["template_id"], "prompt_id": prompt_id,
+           "client_id": client_id, "seed": plan_["seed"], "ckpt_name": ckpt_name,
+           "loras": [f"{s.name}:{s.strength_model}" for s in loras],
+           "refs": [(r["image_id"], r["resolved_role"], r["filename_on_comfy"]) for r in references],
+           "deadline": deadline}
+    log.info("submitted prompt_id=%s template=%s seed=%d refs=%s loras=%s", prompt_id, plan_["template_id"],
+             plan_["seed"], job["refs"], job["loras"])
+    vision = "参照画像の役割別タグ付け → " if images else ""
     return {
         "job": job,
+        "references": references,
+        "comfy_prompt_id": prompt_id,
         "messages": [_progress(state, (
-            f"ComfyUI に投入しました（{job['mode']}、seed {seed}）。\n\n"
-            f"{steps}LM Studio の Qwen3.8 27B でタグを生成中です。モデルのロードを含め数分かかります…"
+            f"ComfyUI に投入しました（prompt_id {prompt_id}）。\n\n{job.get('summary', '')}\n\n"
+            f"{vision}LM Studio の Qwen3.8 27B でタグを生成中です。モデルのロードを含め数分かかります…"
         ))],
     }
 
 
+# --- wait ----------------------------------------------------------------------------------------------
+
+
 def _monotonic_deadline(job: dict) -> float:
     return time.monotonic() + max(1.0, job["deadline"] - time.time())
+
+
+def _timeout_hint(exc: Exception, job: dict) -> Exception:
+    if "タイムアウト" in str(exc):
+        return StageError("タイムアウト", f"{exc}。prompt_id {job['prompt_id']}。完了後に「再取得 {job['prompt_id']}」と送ると結果を取得できます")
+    return exc
 
 
 async def await_tags(state: State, config: RunnableConfig) -> dict:
@@ -192,8 +481,12 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     try:
         result = await client.wait(job["prompt_id"], job["client_id"], until_node="split",
                                    deadline=_monotonic_deadline(job))
+    except asyncio.CancelledError:
+        await asyncio.shield(_cancel(client, job["prompt_id"]))
+        raise
     except Exception as exc:
-        return await _fail_and_free(state, exc, client)
+        await _release(client)
+        return _fail(state, _timeout_hint(exc, job), "生成")
     split = result.outputs.get("split") or {}
     tags = {
         "positive": (split.get("positive") or [""])[0],
@@ -206,20 +499,27 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
         # ckpt usually runs before split, so keep its unload check for the image phase.
         "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}},
         "messages": [_progress(state, (
-            "タグを生成しました。LM Studio のモデルを unload してから、yiffInHell で画像を生成しています…\n\n"
+            "タグを生成しました。LM Studio のモデルを unload してから画像を生成しています…\n\n"
             f"**positive**: {tags['positive']}\n\n**negative**: {tags['negative']}"
         ))],
     }
 
 
-def _save_outputs(outputs_dir: Path, job: dict, tags: dict, name: str, data: bytes) -> Path:
+def _save_outputs(outputs_dir: Path, job: dict, tags: dict, plan_: dict | None, name: str, data: bytes) -> Path:
     outputs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = outputs_dir / f"{stamp}_{job['prompt_id'][:8]}_{name}"
     path.write_bytes(data)
-    meta = {k: job.get(k) for k in ("prompt_id", "seed", "mode", "ckpt_name", "refs")}
+    meta = {k: job.get(k) for k in ("prompt_id", "seed", "template_id", "ckpt_name", "refs", "loras")}
+    if plan_:
+        meta.update({k: plan_.get(k) for k in ("strengths", "denoise", "pose_preprocessor", "width", "height")})
     path.with_suffix(".json").write_text(json.dumps({**meta, **tags}, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _image_block(data: bytes, name: str) -> dict:
+    return {"type": "image", "mimeType": "image/png", "data": base64.b64encode(data).decode("ascii"),
+            "metadata": {"name": name}}
 
 
 async def await_image(state: State, config: RunnableConfig) -> dict:
@@ -237,6 +537,7 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
             log.info("KSampler started prompt_id=%s; LM Studio unloaded at checkpoint load=%s",
                      job["prompt_id"], gate.get("lmstudio_unloaded"))
 
+    saved, blocks = [], []
     try:
         result = await client.wait(job["prompt_id"], job["client_id"],
                                    deadline=_monotonic_deadline(job), on_event=on_event)
@@ -249,46 +550,54 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
         images = (outputs.get("save") or {}).get("images") or []
         if not images:
             raise ComfyError("Save Image の出力が見つかりません")
-        blocks, saved = [], []
         for image in images:
             data = await client.view(image["filename"], image.get("subfolder", ""), image.get("type", "output"))
             path = await asyncio.to_thread(_save_outputs, settings.outputs_dir, job, state.get("tags", {}),
-                                           image["filename"], data)
+                                           state.get("plan"), image["filename"], data)
             saved.append((image, path))
-            blocks.append({
-                "type": "image",
-                "mimeType": "image/png",
-                "data": base64.b64encode(data).decode("ascii"),
-                "metadata": {"name": image["filename"]},
-            })
+            blocks.append(_image_block(data, image["filename"]))
+        # Pose templates also return the extracted skeleton/depth so a failed extraction is visible.
+        for image in (outputs.get("pose_preview") or {}).get("images") or []:
+            data = await client.view(image["filename"], image.get("subfolder", ""), image.get("type", "temp"))
+            blocks.append(_image_block(data, f"pose_{image['filename']}"))
+    except asyncio.CancelledError:
+        await asyncio.shield(_cancel(client, job["prompt_id"]))
+        raise
     except Exception as exc:
-        return _fail(state, exc)
-    finally:
-        try:
-            await client.free()  # release the checkpoint before the next LLM load
-        except Exception as exc:  # pragma: no cover - best effort
-            log.warning("ComfyUI /free failed: %s", exc)
+        await _release(client)
+        return _fail(state, _timeout_hint(exc, job), "生成")
+    await _release(client)  # release the checkpoint before the next LLM load
 
     for image, path in saved:
         log.info("saved prompt_id=%s comfy=%s/%s local=%s", job["prompt_id"], image.get("subfolder"),
                  image["filename"], path)
     tags = state.get("tags", {})
     comfy_file = "/".join(p for p in (saved[0][0].get("subfolder"), saved[0][0]["filename"]) if p)
+    pose_note = "\n\n2 枚目はポーズ参照から抽出した ControlNet 入力です。" if len(blocks) > len(saved) else ""
     text = (
-        f"生成しました（{job['mode']}、seed {job['seed']}、{job['ckpt_name']}）。\n\n"
+        f"生成しました（{job.get('template_id', '?')}、seed {job.get('seed')}、{job.get('ckpt_name')}）。\n\n"
+        f"{job.get('summary', '')}\n\n"
         f"**positive**: {tags.get('positive', '')}\n\n**negative**: {tags.get('negative', '')}\n\n"
-        f"保存先: ComfyUI output/{comfy_file}、リポジトリ outputs/{saved[0][1].name}"
+        f"保存先: ComfyUI output/{comfy_file}、リポジトリ outputs/{saved[0][1].name}\n\n"
+        f"この画像を続けて直すときは「さっきの画像を…」と送ってください。{pose_note}"
     )
-    return {"messages": [AIMessage(id=state["progress_id"], content=[{"type": "text", "text": text}, *blocks])]}
+    return {
+        "outputs": [*(state.get("outputs") or []), *(str(p) for _, p in saved)][-20:],
+        "messages": [AIMessage(id=state["progress_id"], content=[{"type": "text", "text": text}, *blocks])],
+    }
 
 
 builder = StateGraph(State)
 builder.add_node("ingest", ingest)
+builder.add_node("plan", plan)
+builder.add_node("confirm", confirm)
 builder.add_node("submit", submit)
 builder.add_node("await_tags", await_tags)
 builder.add_node("await_image", await_image)
 builder.add_edge(START, "ingest")
-builder.add_conditional_edges("ingest", _route, {"next": "submit", END: END})
+builder.add_conditional_edges("ingest", _route_ingest, {"next": "plan", "refetch": "await_image", END: END})
+builder.add_conditional_edges("plan", _route_plan, {"confirm": "confirm", "submit": "submit", END: END})
+builder.add_conditional_edges("confirm", _route, {"next": "submit", END: END})
 builder.add_conditional_edges("submit", _route, {"next": "await_tags", END: END})
 builder.add_conditional_edges("await_tags", _route, {"next": "await_image", END: END})
 builder.add_edge("await_image", END)
