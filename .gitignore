@@ -24,3 +24,6 @@ node_modules/
 *.pt
 *.bin
 logs/
+
+# Downloaded tools (llama.cpp for requantization)
+tools/

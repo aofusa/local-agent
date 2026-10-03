@@ -4,11 +4,14 @@ Node IDs follow design doc §4.1. The system prompts are embedded from prompts/,
 so re-run this script after editing a prompt:
 
     uv run python scripts/build_workflows.py
+
+LMSTUDIO_MODEL / CKPT_NAME environment variables override the model key and checkpoint name.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,8 +19,9 @@ PROMPTS = ROOT / "prompts"
 WORKFLOWS = ROOT / "workflows"
 
 LMSTUDIO_URL = "http://127.0.0.1:1234/v1"
-LMSTUDIO_MODEL = "huihui-qwen3.8-27b-abliterated@iq3_m"
-CKPT_NAME = "yiffInHell_yihVANTABLACK.safetensors"
+# scripts/setup-lmstudio.ps1 sets LMSTUDIO_MODEL to the key LM Studio assigned on this machine.
+LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL") or "huihui-qwen3.8-27b-abliterated@iq3_m"
+CKPT_NAME = os.environ.get("CKPT_NAME") or "yiffInHell_yihVANTABLACK.safetensors"
 REF_PLACEHOLDER = "furry_ja_ref.png"
 REF_JOIN_DELIMITER = "\n\n[Reference image tags]\n"
 VISION_USER_PROMPT = "Tag the reference image(s)."

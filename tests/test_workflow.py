@@ -102,3 +102,17 @@ def test_ui_workflow_is_consistent():
     for link_id, src, src_slot, dst, dst_slot, _type in ui["links"]:
         assert link_id in nodes[src]["outputs"][src_slot]["links"]
         assert nodes[dst]["inputs"][dst_slot]["link"] == link_id
+
+
+def test_build_workflows_env_override(tmp_path, monkeypatch):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("build_workflows", ROOT / "scripts" / "build_workflows.py")
+    monkeypatch.setenv("LMSTUDIO_MODEL", "some-model@q4_k_m")
+    monkeypatch.setenv("CKPT_NAME", "other.safetensors")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    api = module.api_workflow()
+    assert api["llm_backend"]["inputs"]["model"] == "some-model@q4_k_m"
+    assert api["llm_backend_vision"]["inputs"]["model"] == "some-model@q4_k_m"
+    assert api["ckpt"]["inputs"]["ckpt_name"] == "other.safetensors"
