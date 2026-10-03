@@ -158,6 +158,7 @@ export function Thread() {
     resetBlocks: _resetBlocks,
     dragOver,
     handlePaste,
+    updateBlockMetadata,
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
@@ -486,6 +487,7 @@ export function Thread() {
                       <ContentBlocksPreview
                         blocks={contentBlocks}
                         onRemove={removeBlock}
+                        onUpdate={updateBlockMetadata}
                       />
                       <textarea
                         value={input}
