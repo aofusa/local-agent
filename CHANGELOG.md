@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 — Chroma1-HD
+
+- `.env` の `COMFY_MODEL_FAMILY=chroma`（`chroma_hd`）で、Flux.1 由来の Chroma1-HD（`CKPT_NAME=chroma_v10HD.safetensors`）に切り替えられるようにした。既定（空 / `sdxl`）は従来の yiffInHell とタグ生成のまま。
+- Chroma では LLM が Danbooru タグではなく 1〜3 文の英語の説明文を作る（`prompts/system_chroma_prose.txt`）。`split` は重み構文や `masterpiece` などを取り除き、negative を空にしない。LLM の呼び出し → eject → ロードの順序は SDXL と同じ。
+- Chroma のワークフロー（`workflows/chroma_hd/`、公式ワークフローを `workflows/reference/` に同梱）: 拡散モデル + T5-XXL fp8（CLIPLoader type chroma）+ Flux VAE を eject の後に読む `FurryJaDiffusionLoaderAfterEject`、ModelSamplingAuraFlow shift 1.0、1024×1024、steps 28、cfg 3.5、euler / beta。
+- Chroma の参照画像は元画像 1 枚の img2img だけ。ポーズ・画風・キャラクター・マスクの画像は生成せず理由を返す。LoRA は `CHROMA_LORAS`。
+- モデルファイル（拡散モデル・テキストエンコーダ・VAE）の不足は、投入前にファイル名を挙げて返す。
+- `scripts/setup-comfyui-chroma.ps1`（T5 と VAE の取得、拡散モデルの fp8 変換）と `scripts/convert_chroma_fp8.py` を追加。
+
 ## v0.2.0 — 複数参照画像と LoRA
 
 - 1 メッセージに参照画像を最大 4 枚添付し、各画像に役割（キャラクター / ポーズ・構図 / 画風 / 修正する元画像 / マスク）と強度を指定できるようにした。役割は UI で選ぶか、指示の文（`このキャラをこのポーズにして`、`AのキャラをBのポーズ、Cの画風で` など）から決める。

@@ -83,7 +83,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 3. Comfy Desktop を使う場合、セットアップ中は Comfy Desktop を終了しておく（起動引数を書き換えるため）。
 4. （任意）Chroma1-HD を使う場合は、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) の拡散モデル
    （BF16 約 17.8GB。Civitai 配布名 `chroma_v10HD.safetensors`）を `models\diffusion_models` か `models\checkpoints` に置き、
-   セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 とVAE を取得。「4. 使い方 › Chroma1-HD」）。
+   セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 と VAE を取得し、拡散モデルを fp8 に変換。「4. 使い方 › Chroma1-HD」）。
 
 ### 1-4. ネットワーク
 
@@ -287,13 +287,18 @@ Chroma 経路の違い:
 
 | 部品 | 既定 | 置き場所 | `.env` |
 |---|---|---|---|
-| 拡散モデル | `chroma_v10HD.safetensors`（BF16 を fp8 で読む） | `models\diffusion_models` または `models\checkpoints` | `CKPT_NAME` / `CHROMA_UNET_NAME`（`CKPT_NAME` が空のとき） |
-| 読み込み精度 | `fp8_e4m3fn`（約 8.9GB） | — | `CHROMA_WEIGHT_DTYPE`（`default` で BF16 のまま） |
+| 拡散モデル | `chroma_v10HD.safetensors`（BF16） | `models\diffusion_models` または `models\checkpoints` | `CKPT_NAME` / `CHROMA_UNET_NAME`（`CKPT_NAME` が空のとき） |
+| fp8 変換済み | `chroma_v10HD_fp8_e4m3fn.safetensors`（約 8.3GB） | `models\diffusion_models`（`setup-comfyui-chroma.ps1` が作る） | 指定不要。あれば `ckpt` が自動で使う |
+| 読み込み精度 | `fp8_e4m3fn` | — | `CHROMA_WEIGHT_DTYPE`（`default` で BF16 のまま。32GB 以上の RAM 向け） |
 | テキストエンコーダ | `t5xxl_fp8_e4m3fn.safetensors` | `models\text_encoders` | `CHROMA_TEXT_ENCODER` |
 | VAE | `ae.safetensors`（Flux VAE） | `models\vae` | `CHROMA_VAE` |
 
 GPU メモリ別の目安（作業指示書 §2.2）: 24GB 以上は BF16（`CHROMA_WEIGHT_DTYPE=default`）、16GB / 12GB / UMA は fp8（既定）か GGUF の Q8_0〜Q5_K_M
 （GGUF は ComfyUI-GGUF が必要で、このリポジトリのワークフローは未対応）。8GB 以下は対象外です。
+
+BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み全体がいったん RAM に載ります。24GB 機ではこれで ComfyUI が落ちたため、
+`setup-comfyui-chroma.ps1` が一度だけ `<名前>_fp8_e4m3fn.safetensors` を作り（`scripts\convert_chroma_fp8.py`、1 テンソルずつ書くので RAM は数百 MB、約 2 分）、
+`ckpt` は精度が `fp8_e4m3fn` でその変換済みファイルがあればそれを読みます。`-NoConvert` で変換を省きます。
 
 ファイルが無いときは不足しているファイル名を返し、SDXL へ自動で切り替えません。
 
@@ -376,6 +381,7 @@ scripts/setup*.ps1                    セットアップ（scripts/lib/common.ps
 scripts/start-*.ps1, doctor.ps1       起動と確認
 scripts/open-firewall.ps1             ファイアウォール（管理者）
 scripts/build_workflows.py            workflows/（テンプレートとマップを含む）を prompts/ から生成
+scripts/convert_chroma_fp8.py         Chroma の BF16 拡散モデルを fp8 に変換（setup-comfyui-chroma.ps1 が呼ぶ）
 agent-chat-ui/                        公式 UI（langchain-ai/agent-chat-ui@cf72cb0、画像表示と役割選択の変更あり）
 tests/                                pytest（Python と PowerShell スクリプトの両方）
 outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
