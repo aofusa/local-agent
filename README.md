@@ -82,7 +82,7 @@ PowerShell で、リポジトリ直下から実行します。
 |---|---|
 | ComfyUI カスタムノード | `<ComfyUI のベースフォルダ>\custom_nodes\LM_Connect`（eedali/LM_Connect）。依存は requests / Pillow / numpy のみ。llama-cpp-python は入れていません |
 | ComfyUI カスタムノード | `custom_nodes\furry_ja` → このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション |
-| Comfy Desktop | `%APPDATA%\Comfy Desktop\installations.json` の launchArgs を `--listen 127.0.0.1 --port 8188 --enable-manager` に変更（元は `--port 8000`）。元の設定は変更前に控えてあります |
+| Comfy Desktop | `%APPDATA%\Comfy Desktop\installations.json` の launchArgs を `--listen 127.0.0.1 --port 8188 --enable-manager` に変更（元は `--port 8000`）。変更前のファイルは `artifacts/installations.json.orig`（git 管理外）に控えてあります |
 | LM Studio サーバ | `127.0.0.1` で待受（元は `0.0.0.0`）、JIT ロード有効、JIT モデル TTL 300 秒（eject の保険） |
 | LM Studio ランタイム | llama.cpp Vulkan / CPU を 2.51.0 に更新（2.13.0 は Qwen3.8 の MTP 層付き GGUF を読めない） |
 | LLM | `huihui-qwen3.8-27b-abliterated@iq3_m`（下記）。既定設定: context 4096、GPU offload 0.45、flash attention、並列 1、thinking 無効、temperature 0.4 |
