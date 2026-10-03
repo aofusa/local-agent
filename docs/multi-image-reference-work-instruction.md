@@ -590,7 +590,7 @@ tests/
 | LM Studio URL とビジョン可否 | `http://127.0.0.1:1234/v1`、`LMSTUDIO_MODEL`=`huihui-qwen3.8-27b-abliterated@iq3_m`（mmproj 付き VLM）。**LangGraph からは呼ばない**（AGENTS.md の禁止事項）。呼ぶのは ComfyUI の LM_Connect ノード（Vision は最大 5 画像、prompt は JSON パース） | `AGENTS.md`, `workflows/furry_ja_api.json` |
 | 添付画像の現行形式 | agent-chat-ui の `{"type":"image","mimeType","data":base64,"metadata":{"name"}}`。`metadata` は送信時に保持される。上限 2 枚、PNG/JPEG/WebP/GIF、サイズ上限無し | `media.py`, `agent-chat-ui/src/lib/multimodal-utils.ts` |
 | 使用チェックポイント系統 | SDXL 系（Illustrious / Pony 系 furry）。既定 `yiffInHell_yihVANTABLACK.safetensors`。他に SDXL 系多数と `chroma_v10HD`（Flux 系、未設定） | ComfyUI `models/checkpoints` |
-| 利用可能カスタムノード | `LM_Connect`、`furry_ja` のみ。IP-Adapter / InstantID / PuLID / ControlNet preprocessor 無し。組込みの `ControlNetLoader` はあるが controlnet・clip_vision・style_models・ipadapter のモデルは 0 件。LoRA は 11 本（`LoraLoader` 組込み） | `/object_info`、`models/` |
+| 利用可能カスタムノード | 調査時点は `LM_Connect`、`furry_ja` のみ。IP-Adapter / InstantID / PuLID / ControlNet preprocessor 無し、controlnet・clip_vision・ipadapter のモデル 0 件。LoRA は 11 本（`LoraLoader` 組込み）。利用者の許可を得て `scripts/setup-comfyui-refs.ps1` で ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose、Depth Anything V2 Small を追加した | `/object_info`、`models/` |
 | interrupt の既存利用 | 無し。agent-chat-ui は HITL 形式（`action_requests` / `review_configs`、resume は `{decisions:[...]}`）を描画できる | `agent-chat-ui/src/lib/agent-inbox-interrupt.ts` |
 | 出力画像の返却方法 | `/view` で取得したバイトを base64 の image block として AI メッセージに載せる。`outputs/` に複製と JSON メタ | `graph.py` |
 
@@ -619,13 +619,16 @@ tests/
 
 - 差分 1: 本書 §4.2/§4.6 の `classify_intent` は LangGraph から LM Studio を呼ぶ前提だが、AGENTS.md は LangGraph → LM Studio の直接呼び出しと、ComfyUI グラフ外での LLM ロード（27B とチェックポイントの同時常駐の危険）を禁じている。
 - 吸収案 1: `classify_intent` は LangGraph 内の決定的なルールベース分類（日本語キーワード、序数「1枚目」「A/B/C」、曖昧語）にする。確信度はルールから算出し、閾値 0.65 で確認 interrupt。LLM の責務（プロンプト整形、各画像の役割別タグ化）は ComfyUI 内の LM_Connect が行い、unload 順は従来どおりグラフが決める。NFR-3 の「LLM 障害時も明示役割で継続」は常に満たす。
-- 差分 2: IP-Adapter / InstantID / PuLID / ControlNet（ノード・モデル）が環境に無い。本書 §4.4 はノードが無いテンプレートを選択不能とする。
-- 吸収案 2: 組込みノードだけで役割を実現するテンプレートを登録する。style と character は役割専用の Vision システムプロンプトでタグ化し、(a) LLM の統合入力へ節として渡し、(b) そのタグの条件付けを `ConditioningSetAreaStrength`（強度）+ `ConditioningCombine` で positive に合成する。pose は参照をグレースケール化して `VAEEncode` し、強度から denoise を決める img2img（設計書 §4.3「構図だけ借りるなら denoise 0.7 前後」）と、骨格・構図だけをタグ化する Vision。mask は `ImageToMask` + `SetLatentNoiseMask` の inpaint。IP-Adapter / ControlNet 版は環境に入った時点でテンプレートを追加する（今回は見送り）。
+- 差分 2: 調査時点では IP-Adapter / ControlNet（ノード・モデル）が環境に無かった。利用者の指示（「ControlNet などが必要であれば追加してよい」）により `scripts/setup-comfyui-refs.ps1` で導入した。InstantID / PuLID は人の顔向けで furry キャラクターに合わないため入れていない。
+- 吸収案 2: character は IP-Adapter Plus（weight = 強度 × 0.5）、style は IP-Adapter の `style transfer`、pose は DWPose（人物検出なし、ONNX を CPU で実行）/ Depth Anything V2 / Canny → ControlNet Union promax。どの役割も役割専用の Vision システムプロンプトでタグ化し、LLM の統合入力へ節として渡す。mask は `ImageToMask` + `SetLatentNoiseMask`。IP-Adapter・ControlNet・前処理のローダーはすべて `ckpt`（eject 後）に依存させ、27B と同時に載らないようにした。
+- 差分 2b: 実機（Radeon 890M / ROCm、ComfyUI 0.38）で次を確認し対処した。IP-Adapter weight 0.85 で色焼け → キャラクターは強度 × 0.5。同一プロセス 2 回目以降の IP-Adapter 生成が破損 → ComfyUI を `--cache-none` で起動。DWPose の TorchScript が GPU で不安定 → ONNX を CPU。GPU 予算超過で UNet が全オフロード → KSampler 直前でエンコーダを外す `FurryJaReleaseEncoders`。
 - 差分 3: 本書 NFR-5 のタイムアウト初期値 180 秒、§4.7 の既定解像度 1024 と i2i 既定 denoise 0.55 は、AGENTS.md / 設計書（10 分、832×1216、img2img 0.45）と食い違う。ComfyUI 連携は設計書優先のため、既定値は設計書側を維持し、`COMFYUI_TIMEOUT_S` で変更可能とする。WI の denoise 規則は役割付きテンプレート（pose を伴う i2i 0.65 相当、inpaint 0.75）に適用する。
 - 差分 4: 参照画像の上限が AGENTS.md では 2 枚。利用者の今回の依頼（複数画像）と本書 FR-1 に従い 4 枚に拡張し、AGENTS.md と README を更新する。
 - 差分 5: ノードマップは YAML ではなく JSON（`workflows/maps/sdxl.json`）。PyYAML を新たな実行時依存にしないため。
 - 差分 6: GIF 添付は現行で受け付けているため維持する（本書は PNG/JPEG/WebP）。
-- 実装しないこと: IP-Adapter / ControlNet / InstantID / PuLID テンプレート（環境に無い）、Flux 系テンプレート（参照ノード無し。`COMFY_MODEL_FAMILY=flux` は未登録エラー）、ポーズ抽出プレビュー（preprocessor 無し）、カスタムノードやモデルの自動導入、LangGraph からの LM Studio 呼び出し。
+- 差分 7: LoRA（本書の非目標は「LoRA の学習」のみ）。利用者の依頼により、`.env` の `LORAS` で指定した LoRA を全テンプレートの `ckpt` 直後に挿入する。
+- 差分 8: タイムアウトは投入から一括ではなく、タグ生成と画像生成のそれぞれに 600 秒。キャラクター + ポーズで LLM 段だけで 7 分超かかったため。
+- 実装しないこと: InstantID / PuLID テンプレート、Flux 系テンプレート（`COMFY_MODEL_FAMILY=flux` は未登録エラー）、実行時のカスタムノードやモデルの自動導入（セットアップスクリプトで事前に導入する）、LangGraph からの LM Studio 呼び出し。
 
 ## 12. 参照した外部事実
 
