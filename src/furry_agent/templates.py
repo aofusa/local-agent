@@ -165,7 +165,7 @@ def build_run_prompt(
 ) -> dict:
     """Fill a template for one run. ``images`` maps role -> ComfyUI input filename.
 
-    ``models`` overrides model-file slots other than the checkpoint (chroma_hd: clip_name, vae_name, weight_dtype).
+    ``models`` overrides model-file slots other than the checkpoint (flux: clip_name, vae_name, weight_dtype).
     """
     template_id = plan["template_id"]
     prompt, entry = load_template(family, template_id, workflows_dir)
@@ -185,7 +185,7 @@ def build_run_prompt(
     for slot, value in (models or {}).items():
         if slot in slots and value:
             _set(prompt, slots[slot], value)
-    # Sampler settings are slots only in families that keep them in the map (chroma_hd); sdxl keeps the template.
+    # Sampler settings are slots only in families that keep them in the map (flux); sdxl keeps the template.
     for slot, cast in (("steps", int), ("cfg", float), ("sampler_name", str), ("scheduler", str)):
         if slot in slots and plan.get(slot) is not None:
             _set(prompt, slots[slot], cast(plan[slot]))

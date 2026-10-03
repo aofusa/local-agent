@@ -525,11 +525,11 @@ AGENTS.md と設計書（`docs/lmstudio-comfyui-workflow-design.md`）が優先�
 | この文書 | 実装 | 理由 |
 |---|---|---|
 | LangGraph の LLM ノードがファミリ別にコンパイルする（§5.1、§5.3） | ComfyUI ワークフローの `prompt_node` の system prompt をファミリで替える（`prompts/system_chroma_prose.txt`） | AGENTS.md は LangGraph から LM Studio を直接呼ぶことを禁止。LLM → eject → ロードの順序を ComfyUI グラフに残すため |
-| リクエストの `model_family`、`/model chroma`、「chroma で」で選ぶ（§5.2） | `.env` の `COMFY_MODEL_FAMILY` だけで選ぶ（`chroma` / `chroma_hd` → Chroma、空 / `sdxl` → SDXL） | 利用者の指示（チャットのコマンドは不要） |
-| ファミリ名 `illustrious` | `sdxl`（`illustrious` は別名として受け付ける） | 既存の `COMFY_MODEL_FAMILY=sdxl` とテンプレートの置き場を変えないため |
+| リクエストの `model_family`、`/model chroma`、「chroma で」で選ぶ（§5.2） | `.env` の `COMFY_MODEL_FAMILY` だけで選ぶ（`flux` → Chroma1-HD、空 / `sdxl` → SDXL） | 利用者の指示（チャットのコマンドは不要、設定値は `flux` のみ） |
+| ファミリ名 `illustrious` / `chroma_hd` | `sdxl`（`illustrious` は別名）/ `flux`（テンプレートは `workflows/flux/`、マップは `workflows/maps/flux.json`） | 既存の `COMFY_MODEL_FAMILY=sdxl` とテンプレートの置き場を変えないため |
 | JSON 以外なら 1 回修復を依頼、カンマ率が高ければ拒否（§5.3、§5.7） | 修復の再呼び出しはしない。`split` が生文字列を positive にして生成まで進め、タグ列やフォールバックは応答に警告を出す | 設計書「分割に失敗してもリトライしない」 |
 | 出力 JSON に width / height / notes | `{"positive","negative"}` のまま。サイズは LangGraph のルール（既定 1024×1024、`縦長` 832×1216、`横長` 1216×832、上限約 1MP） | AGENTS.md の JSON 契約 |
-| `config/models.yaml` | `workflows/maps/chroma_hd.json`（モデルファイル、サンプラー既定値、対応する役割）+ `.env` の `CHROMA_*` | 既存の設定方式（ノードマップと `.env`）に合わせた |
+| `config/models.yaml` | `workflows/maps/flux.json`（モデルファイル、サンプラー既定値、対応する役割）+ `.env` の `CHROMA_*` | 既存の設定方式（ノードマップと `.env`）に合わせた |
 | UNETLoader + CLIPLoader + VAELoader | `ckpt` = `FurryJaDiffusionLoaderAfterEject`（3 つを eject の後にまとめて読み、LM Studio の unload を確認） | ノード ID `ckpt` と eject ゲート、LoRA 挿入を SDXL と共通にするため。拡散モデルは `diffusion_models` と `checkpoints` の両方から探す |
 | SamplerCustomAdvanced + BetaSamplingScheduler(0.45, 0.45) | `KSampler`（euler / beta、steps 28、cfg 3.5） | §2.3 の指示どおり。`sampler` のノード ID・seed・denoise を保つため（beta の α/β は KSampler 既定の 0.6） |
 | タイムアウト 120 / 180 秒（§5.4） | 既存の `COMFYUI_TIMEOUT_S`（タグ生成・画像生成それぞれ 600 秒） | AGENTS.md の確定値 |

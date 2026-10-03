@@ -459,7 +459,7 @@ def node_map(api: dict | None = None) -> tuple[dict, dict[str, dict]]:
 # SamplerCustomAdvanced chain is replaced by KSampler (WI §2.3) so `sampler` keeps its id, seed slot and denoise.
 # The LLM part is the same as sdxl (prompt_node -> eject -> split -> ckpt); only the system prompt differs.
 
-CHROMA_FAMILY = "chroma_hd"
+CHROMA_FAMILY = "flux"
 CHROMA_UNET = os.environ.get("CHROMA_UNET_NAME") or "chroma_v10HD.safetensors"
 CHROMA_MODELS = {
     "unet_name": CHROMA_UNET,
@@ -480,7 +480,7 @@ CHROMA_NEGATIVE = "low quality, ugly, unfinished, out of focus, deformed, blurry
 
 
 def chroma_template(template_id: str) -> tuple[dict, dict]:
-    """Return (API prompt, slot map) for chroma_hd t2i_basic / i2i_basic."""
+    """Return (API prompt, slot map) for flux (Chroma1-HD) t2i_basic / i2i_basic."""
     system = (PROMPTS / "system_chroma_prose.txt").read_text(encoding="utf-8").strip()
     system_vision = (PROMPTS / "system_vision_caption.txt").read_text(encoding="utf-8").strip()
     d = CHROMA_DEFAULTS
@@ -516,7 +516,7 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
             "positive": ["release", 1], "negative": ["release", 2], "latent_image": ["latent", 0], "denoise": 1.0,
         }),
         "decode": ("VAEDecode", "decode", {"samples": ["sampler", 0], "vae": ["ckpt", 2]}),
-        "save": ("SaveImage", "save", {"images": ["decode", 0], "filename_prefix": "furry_ja/chroma_hd"}),
+        "save": ("SaveImage", "save", {"images": ["decode", 0], "filename_prefix": "furry_ja/chroma"}),
     }
     prompt = {node_id: _node(cls, title, inputs) for node_id, (cls, title, inputs) in nodes.items()}
     slots = {
@@ -529,7 +529,7 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
         slots.update(width="latent.inputs.width", height="latent.inputs.height")
         return prompt, slots
     if template_id != "i2i_basic":
-        raise ValueError(f"chroma_hd has no template {template_id}")
+        raise ValueError(f"flux has no template {template_id}")
     # img2img: the base image is captioned (tags) for the LLM, which rewrites everything as prose.
     prompt.update({
         "llm_backend_vision": _node("LMConnectLMStudioBackend", "LM Studio Backend (vision, no auto-eject)", _backend(False)),

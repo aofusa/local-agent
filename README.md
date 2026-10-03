@@ -7,7 +7,7 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 2. LangGraph のグラフが画像の役割を決め、登録済みのワークフローテンプレートを選んで ComfyUI に投入する
 3. ComfyUI のワークフローが LM Studio の LLM（Huihui Qwen3.8 27B Abliterated）で Danbooru / e621 タグを作る
 4. LLM を LM Studio から unload してから、furry 系 SDXL チェックポイント（yiffInHell）で画像を生成する（参照画像は IP-Adapter / ControlNet、任意で LoRA）。
-   `.env` の `COMFY_MODEL_FAMILY=chroma` にすると、LLM が英語の説明文を作り、Flux 系の Chroma1-HD で生成する（「4. 使い方 › Chroma1-HD」）
+   `.env` の `COMFY_MODEL_FAMILY=flux` にすると、LLM が英語の説明文を作り、Flux 系の Chroma1-HD で生成する（「4. 使い方 › Chroma1-HD」）
 5. 画像を ComfyUI の output とリポジトリの `outputs/` に保存し、同じ画像をチャットに表示する
 
 クラウド API は使いません。すべてローカルで動きます。
@@ -266,7 +266,7 @@ ComfyUI の `models\loras` に無い名前があると投入前にエラーを�
 既定は yiffInHell（SDXL、Danbooru タグ）です。Chroma1-HD（Flux.1-schnell 由来、8.9B、Apache-2.0）は `.env` で切り替えます。
 
 ```
-COMFY_MODEL_FAMILY=chroma            # chroma_hd でも可。空または sdxl なら従来の SDXL
+COMFY_MODEL_FAMILY=flux              # 空または sdxl なら従来の SDXL
 CKPT_NAME=chroma_v10HD.safetensors
 ```
 
@@ -283,7 +283,7 @@ Chroma 経路の違い:
 | 参照画像 | 4 種の役割（上記） | **修正する元画像 1 枚の img2img だけ**（denoise 0.45）。ポーズ・画風・キャラクター・マスクの画像は生成せず理由を返す（Flux 用 ControlNet / IP-Adapter は Chroma で未検証のため） |
 | LoRA | `LORAS` | `CHROMA_LORAS`（SDXL の LoRA は Chroma に合わないため別） |
 
-モデルファイルの既定値（`workflows/maps/chroma_hd.json`）と、`.env` での差し替え:
+モデルファイルの既定値（`workflows/maps/flux.json`）と、`.env` での差し替え:
 
 | 部品 | 既定 | 置き場所 | `.env` |
 |---|---|---|---|
@@ -331,7 +331,7 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | `CKPT_NAME` | `yiffInHell_yihVANTABLACK.safetensors` | 使うチェックポイント（実行時にワークフローの値を上書き） |
 | `COMFYUI_TIMEOUT_S` | `600` | 待ち時間の上限（タグ生成・画像生成それぞれ） |
 | `LORAS` | 空 | 適用する LoRA（「4. 使い方 › LoRA」） |
-| `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `chroma`（= `chroma_hd`、Chroma1-HD、英語の説明文） |
+| `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `flux`（Chroma1-HD、英語の説明文） |
 | `CHROMA_UNET_NAME` / `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | Chroma のモデルファイルと読み込み精度（「4. 使い方 › Chroma1-HD」） |
 | `CHROMA_LORAS` | 空 | Chroma に適用する LoRA（書式は `LORAS` と同じ） |
 | `LMSTUDIO_MODEL` | セットアップが設定 | ワークフローが呼ぶ LM Studio のモデルキー |
@@ -368,8 +368,8 @@ comfyui_nodes/furry_ja/               ComfyUI カスタムノード（split / ck
 src/furry_agent/families.py           モデル系統の名前（COMFY_MODEL_FAMILY）と系統ごとの参照画像の可否
 workflows/sdxl/<テンプレートID>.api.json  役割別のテンプレート 24 本。LangGraph が読む
 workflows/maps/sdxl.json              テンプレートごとのスロット（node.inputs.field）とポーズ前処理の候補
-workflows/chroma_hd/*.api.json        Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
-workflows/maps/chroma_hd.json         Chroma のスロット、モデルファイル、サンプラーの既定値、対応する役割
+workflows/flux/*.api.json             Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
+workflows/maps/flux.json         Chroma のスロット、モデルファイル、サンプラーの既定値、対応する役割
 workflows/reference/                  公式 ComfyUI_Chroma1-HD_T2I-workflow.json（Chroma テンプレートの写し元）
 workflows/furry_ja_api.json           フェーズ 1 の API 形式（t2i_basic / i2i_basic の元。ノード ID は設計書 §4.1）
 workflows/furry_ja.json               UI 形式。ComfyUI で開ける（ノードのタイトル = ノード ID）
@@ -468,7 +468,7 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | 「この環境の ComfyUI に無いノードがあります」 | `setup-comfyui-refs.ps1` を実行して ComfyUI を再起動。`doctor.ps1` の reference nodes を確認 |
 | 「この環境の ComfyUI に無いノードがあります: FurryJaDiffusionLoaderAfterEject」 | Chroma 対応後に ComfyUI を再起動していない。`start-comfyui.ps1` で起動し直す |
 | 「Chroma1-HD のモデルファイルが ComfyUI に見つかりません」 | `setup-comfyui-chroma.ps1` を実行。拡散モデルは手動で `models\diffusion_models` か `models\checkpoints` に置く |
-| 「… は Chroma1-HD のモデルです」 | `CKPT_NAME` だけを Chroma にした。`COMFY_MODEL_FAMILY=chroma` も設定して LangGraph を再起動する |
+| 「… は Chroma1-HD のモデルです」 | `CKPT_NAME` だけを Chroma にした。`COMFY_MODEL_FAMILY=flux` も設定して LangGraph を再起動する |
 | Chroma で「ポーズ ControlNet 未対応」などと返る | Chroma 経路は元画像 1 枚の img2img だけ対応。ポーズ・画風の参照は `COMFY_MODEL_FAMILY=sdxl` で使う |
 | 「LoRA が ComfyUI に見つかりません」 | `.env` の `LORAS` の名前を `models\loras` のファイル名に合わせる |
 | 参照画像を使った 2 回目以降の画像が単色やノイズになる | ComfyUI が `--cache-none` なしで起動している。`doctor.ps1` で確認し、`start-comfyui.ps1` で起動し直す（Comfy Desktop は `setup-comfyui.ps1 -ConfigureComfyDesktop`） |
@@ -495,7 +495,7 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 
 - **動画入力は対象外**: ComfyUI-VideoHelperSuite（VHS）を前提にした経路は未実装です。動画を送るとチャットにその旨を返します（在庫の agent-chat-ui も動画の添付を受け付けません）。
 - InstantID / PuLID（人の顔向けの同一性）は使いません。キャラクター参照は IP-Adapter Plus と Vision タグで行います。
-- 登録済みの系統は `sdxl` と `chroma_hd` だけです（Flux Dev 本家、SD3 などは未登録）。
+- 登録済みの系統は `sdxl` と `flux`（Chroma1-HD）だけです（Flux Dev 本家、SD3 などは未登録）。
 - Chroma1-HD 経路は、ポーズ・画風・キャラクター参照とマスクに未対応です（Flux 用 ControlNet Union Pro / Redux / IP-Adapter の Chroma での動作を確認していないため。作業指示書 §2.4）。GGUF 量子化の読み込みにも未対応です。
 - 役割推定は LLM ではなくルール（日本語のキーワードと序数）です。LangGraph から LM Studio を呼ばない（AGENTS.md）ためです。
 - 認証なし。LAN 内の開発用途のみ。

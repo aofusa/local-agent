@@ -4,7 +4,7 @@ LangGraph never calls LM Studio. The ComfyUI workflow calls the LLM, ejects it, 
 the checkpoint, IP-Adapter and ControlNet (design doc §4). This graph:
 
     ingest    read the message, normalize up to 4 reference images (or the previous output) into references;
-              the model family (sdxl / chroma_hd) comes from COMFY_MODEL_FAMILY
+              the model family (sdxl / flux) comes from COMFY_MODEL_FAMILY
     plan      rule-based roles -> family role check -> template id -> clamped parameters, and a summary (WI §4.6)
     confirm   LangGraph interrupt when the roles are ambiguous (agent-chat-ui HITL card)
     submit    upload (deduplicated by sha256), inject through the node map, validate node types, /prompt
@@ -36,7 +36,7 @@ from PIL import Image
 
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import Settings
-from furry_agent.families import CHROMA_HD, LABELS, FamilyError, check_roles, looks_like_tag_list
+from furry_agent.families import FLUX, LABELS, FamilyError, check_roles, looks_like_tag_list
 from furry_agent.media import IMAGE_ROLES, MAX_IMAGES, Media, MediaError, Request, parse_request
 from furry_agent.planner import (
     GenerationPlan,
@@ -429,7 +429,7 @@ async def _check_models(client: ComfyClient, settings: Settings, family: str, te
     values = {slot: slot_value(template, path) for slot, path in model_slots(entry).items()}
     values.update({k: v for k, v in settings.model_overrides(family).items() if k in values})
     values["ckpt_name"] = settings.ckpt_for(family) or values["ckpt_name"]
-    if family != CHROMA_HD and "chroma" in values["ckpt_name"].lower():
+    if family != FLUX and "chroma" in values["ckpt_name"].lower():
         raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=chroma "
                             "も設定して LangGraph を再起動してください")
     missing = []
@@ -501,7 +501,7 @@ async def submit(state: State, config: RunnableConfig) -> dict:
     log.info("submitted prompt_id=%s family=%s template=%s seed=%d steps=%s cfg=%s refs=%s loras=%s", prompt_id,
              family, plan_["template_id"], plan_["seed"], plan_["steps"], plan_["cfg"], job["refs"], job["loras"])
     vision = "参照画像の役割別タグ付け → " if images else ""
-    making = "英語の説明文" if family == CHROMA_HD else "タグ"
+    making = "英語の説明文" if family == FLUX else "タグ"
     return {
         "job": job,
         "references": references,
@@ -547,7 +547,7 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     }
     log.info("tags prompt_id=%s mode=%s positive=%s", job["prompt_id"], tags["split_mode"], tags["positive"])
     warnings = list(job.get("warnings") or [])
-    chroma = job.get("family") == CHROMA_HD
+    chroma = job.get("family") == FLUX
     if chroma and looks_like_tag_list(tags["positive"]):
         warnings.append("LLM が説明文ではなくタグ列を返しました。Chroma1-HD では品質が落ちることがあります")
     if chroma and tags["split_mode"] == "fallback":

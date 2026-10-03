@@ -368,8 +368,8 @@ async def test_missing_nodes_point_to_setup_script(settings):
 
 async def test_unknown_family(settings):
     fake = FakeComfy()
-    state = await _run("夜", fake, replace(settings, model_family="flux"))
-    assert fake.submitted is None and "flux" in state["messages"][-1].content
+    state = await _run("夜", fake, replace(settings, model_family="chroma"))
+    assert fake.submitted is None and "chroma" in state["messages"][-1].content
 
 
 async def test_missing_unload_verification_fails(settings):
@@ -446,7 +446,7 @@ async def test_image_wait_gets_its_own_deadline(settings):
     assert update["job"]["deadline"] - time.time() > 590
 
 
-# --- chroma_hd family ---------------------------------------------------------------------------------
+# --- flux (Chroma1-HD) family ---------------------------------------------------------------------------------
 
 
 def _types(prompt):
@@ -463,7 +463,7 @@ async def test_default_request_stays_on_sdxl(settings):
 
 @pytest.fixture
 def chroma(settings):
-    return replace(settings, model_family="chroma_hd", ckpt_name="chroma_v10HD.safetensors",
+    return replace(settings, model_family="flux", ckpt_name="chroma_v10HD.safetensors",
                    loras="KemonoStyleAV1.safetensors")
 
 
@@ -483,7 +483,7 @@ async def test_env_family_runs_chroma(chroma):
     assert "Chroma1-HD" in text and "euler beta" in text and "1024×1024" in text
     assert len(_final_images(state)) == 1
     meta = json.loads(next(chroma.outputs_dir.glob("*.json")).read_text(encoding="utf-8"))
-    assert meta["family"] == "chroma_hd" and meta["cfg"] == 3.5 and meta["scheduler"] == "beta"
+    assert meta["family"] == "flux" and meta["cfg"] == 3.5 and meta["scheduler"] == "beta"
     # Every model file of the template was checked against ComfyUI.
     assert {"models:FurryJaDiffusionLoaderAfterEject.unet_name", "models:FurryJaDiffusionLoaderAfterEject.clip_name",
             "models:FurryJaDiffusionLoaderAfterEject.vae_name"} <= set(fake.calls)

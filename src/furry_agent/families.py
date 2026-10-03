@@ -1,11 +1,11 @@
 """Model family names (Chroma HD work instruction §5.2) and the per-family checks LangGraph runs.
 
 Two families are registered: ``sdxl`` (yiffInHell / Illustrious, Danbooru tags, the default) and
-``chroma_hd`` (Chroma1-HD, a Flux.1-schnell derivative that reads English prose through T5).
+``flux`` (Chroma1-HD, a Flux.1-schnell derivative that reads English prose through T5).
 The family decides which ``workflows/<family>/`` templates and ``workflows/maps/<family>.json`` are used;
 the LLM call, eject and checkpoint gate stay inside the ComfyUI workflow for both.
 
-The family is chosen only by ``COMFY_MODEL_FAMILY`` in ``.env`` (``chroma`` / ``chroma_hd`` -> Chroma1-HD,
+The family is chosen only by ``COMFY_MODEL_FAMILY`` in ``.env`` (``flux`` -> Chroma1-HD,
 anything else registered -> that family, empty -> sdxl). Messages never switch it.
 """
 
@@ -14,13 +14,12 @@ from __future__ import annotations
 import re
 
 SDXL = "sdxl"
-CHROMA_HD = "chroma_hd"
+FLUX = "flux"
 ALIASES = {
     "sdxl": SDXL, "illustrious": SDXL, "yiffinhell": SDXL, "yih": SDXL,
-    "chroma_hd": CHROMA_HD, "chroma": CHROMA_HD, "chromahd": CHROMA_HD, "chroma-hd": CHROMA_HD,
-    "chroma1-hd": CHROMA_HD, "chroma1hd": CHROMA_HD, "chroma1_hd": CHROMA_HD, "クロマ": CHROMA_HD,
+    "flux": FLUX,
 }
-LABELS = {SDXL: "SDXL（yiffInHell / Danbooru タグ）", CHROMA_HD: "Chroma1-HD（英語の説明文）"}
+LABELS = {SDXL: "SDXL（yiffInHell / Danbooru タグ）", FLUX: "Chroma1-HD（Flux 系、英語の説明文）"}
 
 _FULLWIDTH = str.maketrans("ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ０１２３４５６７８９／＿－",
                                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_-")

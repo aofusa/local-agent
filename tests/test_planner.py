@@ -245,7 +245,7 @@ CHROMA_DEFAULTS = {"width": 1024, "height": 1024, "steps": 28, "cfg": 3.5, "samp
 
 
 def test_family_defaults_set_size_and_sampler():
-    plan = build_plan("t2i_basic", "chroma_hd", [], {}, classify_intent("港", []), random.Random(1),
+    plan = build_plan("t2i_basic", "flux", [], {}, classify_intent("港", []), random.Random(1),
                       defaults=CHROMA_DEFAULTS)
     assert (plan["width"], plan["height"], plan["steps"], plan["cfg"]) == (1024, 1024, 28, 3.5)
     assert (plan["sampler_name"], plan["scheduler"]) == ("euler", "beta")
@@ -260,7 +260,7 @@ def test_sdxl_plan_keeps_design_constants():
 @pytest.mark.parametrize("text, size", [("縦長の港", (832, 1216)), ("横長の港", (1216, 832)), ("正方形", (1024, 1024)),
                                         ("1536x1536 の港", (1024, 1024)), ("1216x1216", (1024, 1024))])
 def test_chroma_size_stays_within_one_megapixel(text, size):
-    plan = build_plan("t2i_basic", "chroma_hd", [], {}, classify_intent(text, []), random.Random(1),
+    plan = build_plan("t2i_basic", "flux", [], {}, classify_intent(text, []), random.Random(1),
                       defaults=CHROMA_DEFAULTS)
     assert (plan["width"], plan["height"]) == size
     assert plan["width"] % 16 == 0 and plan["height"] % 16 == 0

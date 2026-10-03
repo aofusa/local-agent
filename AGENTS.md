@@ -136,8 +136,8 @@ workflows/furry_ja.json           UI 形式
 workflows/furry_ja_api.json       フェーズ 1 の API 形式。t2i_basic / i2i_basic の元
 workflows/sdxl/*.api.json         役割別テンプレート 24 本。LangGraph が読む（scripts/build_workflows.py が生成）
 workflows/maps/sdxl.json          テンプレートのスロット、ポーズ前処理の候補、IP-Adapter の weight 係数
-workflows/chroma_hd/*.api.json    Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
-workflows/maps/chroma_hd.json     Chroma のスロット、モデルファイル、サンプラー既定値、対応する役割
+workflows/flux/*.api.json         Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
+workflows/maps/flux.json          Chroma のスロット、モデルファイル、サンプラー既定値、対応する役割
 workflows/reference/              公式 Chroma1-HD ワークフロー（写し元）
 prompts/system_furry_tags.txt
 prompts/system_furry_tags_roles.txt
@@ -228,7 +228,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - 参照画像用のノードとモデルは `scripts/setup-comfyui-refs.ps1` が入れる（ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose ONNX、Depth Anything V2 Small）。実行時の自動ダウンロードはしない。
 - タイムアウトはタグ生成と画像生成のそれぞれに `COMFYUI_TIMEOUT_S`（600 秒）。
 - ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1` と Comfy Desktop の起動引数）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
-- モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`chroma` / `chroma_hd` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
+- モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則

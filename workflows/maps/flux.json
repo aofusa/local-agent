@@ -1,5 +1,5 @@
 {
-  "family": "chroma_hd",
+  "family": "flux",
   "label": "Chroma1-HD",
   "models": {
     "unet_name": "chroma_v10HD.safetensors",
@@ -39,7 +39,7 @@
   "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
   "templates": {
     "t2i_basic": {
-      "file": "chroma_hd/t2i_basic.api.json",
+      "file": "flux/t2i_basic.api.json",
       "roles": [],
       "slots": {
         "prompt": "user_prompt.inputs.value",
@@ -57,7 +57,7 @@
       }
     },
     "i2i_basic": {
-      "file": "chroma_hd/i2i_basic.api.json",
+      "file": "flux/i2i_basic.api.json",
       "roles": [
         "base"
       ],

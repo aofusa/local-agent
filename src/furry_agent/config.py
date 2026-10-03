@@ -4,11 +4,11 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from furry_agent.families import CHROMA_HD, SDXL, canonical_family
+from furry_agent.families import FLUX, SDXL, canonical_family
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Chroma1-HD model files: env name -> template slot. Empty = the value stored in workflows/maps/chroma_hd.json.
+# Chroma1-HD model files: env name -> template slot. Empty = the value stored in workflows/maps/flux.json.
 CHROMA_MODEL_ENV = {
     "CHROMA_UNET_NAME": "ckpt_name",
     "CHROMA_TEXT_ENCODER": "clip_name",
@@ -40,7 +40,7 @@ class Settings:
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", REPO_ROOT / "outputs")),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             timeout_s=float(os.environ.get("COMFYUI_TIMEOUT_S", "600")),
-            # sdxl (yiffInHell, Danbooru tags; default) or chroma_hd (Chroma1-HD, prose). Aliases: chroma, illustrious.
+            # sdxl (yiffInHell, Danbooru tags; default) or flux (Chroma1-HD, prose). Alias: illustrious.
             model_family=canonical_family(os.environ.get("COMFY_MODEL_FAMILY")) or SDXL,
             # "name[:model_strength[:clip_strength]]", comma separated. Empty = no LoRA.
             loras=os.environ.get("LORAS", ""),
@@ -53,15 +53,15 @@ class Settings:
         """CKPT_NAME belongs to COMFY_MODEL_FAMILY; CHROMA_UNET_NAME is the Chroma-specific fallback."""
         if family == self.model_family and self.ckpt_name:
             return self.ckpt_name
-        if family == CHROMA_HD:
+        if family == FLUX:
             return self.chroma_models.get("ckpt_name")
         return None
 
     def loras_for(self, family: str) -> str:
-        return self.chroma_loras if family == CHROMA_HD else self.loras
+        return self.chroma_loras if family == FLUX else self.loras
 
     def model_overrides(self, family: str) -> dict[str, str]:
         """Template slot -> value for the text encoder / VAE / weight dtype (Chroma only)."""
-        if family != CHROMA_HD:
+        if family != FLUX:
             return {}
         return {k: v for k, v in self.chroma_models.items() if k != "ckpt_name"}

@@ -2,7 +2,7 @@ import pytest
 
 from furry_agent.config import Settings
 from furry_agent.families import (
-    CHROMA_HD,
+    FLUX,
     SDXL,
     FamilyError,
     canonical_family,
@@ -11,13 +11,14 @@ from furry_agent.families import (
 )
 from furry_agent.templates import load_map
 
-CHROMA_MAP = load_map(CHROMA_HD)
+CHROMA_MAP = load_map(FLUX)
 SDXL_MAP = load_map(SDXL)
 
 
 @pytest.mark.parametrize("name, expected", [
-    ("chroma", CHROMA_HD), ("Chroma_HD", CHROMA_HD), ("chroma-hd", CHROMA_HD), ("Chroma1-HD", CHROMA_HD),
-    ("ｃｈｒｏｍａ", CHROMA_HD), ("illustrious", SDXL), ("SDXL", SDXL), ("yiffinhell", SDXL), ("flux", "flux"),
+    ("flux", FLUX), ("FLUX", FLUX), ("ｆｌｕｘ", FLUX), ("illustrious", SDXL), ("SDXL", SDXL), ("yiffinhell", SDXL),
+    # chroma / chroma_hd are not family names (the setting value is flux); they pass through and fail to load.
+    ("chroma", "chroma"), ("chroma_hd", "chroma_hd"),
     ("", None), (None, None),
 ])
 def test_canonical_family(name, expected):
@@ -69,23 +70,22 @@ def test_looks_like_tag_list(text, expected):
 
 
 def test_settings_family_specific_values(monkeypatch):
-    monkeypatch.setenv("COMFY_MODEL_FAMILY", "chroma")
+    monkeypatch.setenv("COMFY_MODEL_FAMILY", "flux")
     monkeypatch.setenv("CKPT_NAME", "chroma_v10HD.safetensors")
     monkeypatch.setenv("LORAS", "sdxl_style:0.8")
     monkeypatch.setenv("CHROMA_LORAS", "")
     monkeypatch.setenv("CHROMA_VAE", "flux_ae.safetensors")
     monkeypatch.delenv("CHROMA_HD_ENABLED", raising=False)
     settings = Settings.from_env()
-    assert settings.model_family == CHROMA_HD
-    assert settings.ckpt_for(CHROMA_HD) == "chroma_v10HD.safetensors"
+    assert settings.model_family == FLUX
+    assert settings.ckpt_for(FLUX) == "chroma_v10HD.safetensors"
     assert settings.ckpt_for(SDXL) is None
-    assert settings.loras_for(CHROMA_HD) == "" and settings.loras_for(SDXL) == "sdxl_style:0.8"
-    assert settings.model_overrides(CHROMA_HD) == {"vae_name": "flux_ae.safetensors"}
+    assert settings.loras_for(FLUX) == "" and settings.loras_for(SDXL) == "sdxl_style:0.8"
+    assert settings.model_overrides(FLUX) == {"vae_name": "flux_ae.safetensors"}
     assert settings.model_overrides(SDXL) == {}
 
 
-@pytest.mark.parametrize("value, family", [("", SDXL), ("sdxl", SDXL), ("chroma", CHROMA_HD),
-                                           ("chroma_hd", CHROMA_HD), ("CHROMA", CHROMA_HD)])
+@pytest.mark.parametrize("value, family", [("", SDXL), ("sdxl", SDXL), ("flux", FLUX), ("Flux", FLUX)])
 def test_settings_family_comes_from_env_only(monkeypatch, value, family):
     monkeypatch.setenv("COMFY_MODEL_FAMILY", value)
     assert Settings.from_env().model_family == family
