@@ -64,3 +64,11 @@ def test_lm_connect_error_is_raised():
 def test_none_input_falls_back():
     r = split_tags(None, quality_prefix="q")
     assert not r.parsed and r.positive == "q"
+
+
+def test_invalid_escapes_and_newlines_are_tolerated():
+    # Seen from the 27B: backslash-space inside the string and a raw newline.
+    raw = '{ "positive": "wolf, fox,\\ orange fur,\\ leather armor,\nnight", "negative": "low quality" }'
+    r = split_tags(raw, quality_prefix="")
+    assert r.parsed
+    assert r.positive == "wolf, fox, orange fur, leather armor, night"

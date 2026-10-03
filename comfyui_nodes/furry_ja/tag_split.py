@@ -25,6 +25,8 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPEN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 _THINK_CLOSE = re.compile(r"^.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_FENCE = re.compile(r"```[a-zA-Z]*")
+# LLMs sometimes write "\ " or "\_" inside JSON strings; JSON only allows these escapes.
+_INVALID_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 class LLMCallError(RuntimeError):
@@ -80,8 +82,9 @@ def split_tags(
     positive = negative = None
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
+        candidate = _INVALID_ESCAPE.sub("", text[start : end + 1])
         try:
-            data = json.loads(text[start : end + 1])
+            data = json.loads(candidate, strict=False)
         except (ValueError, TypeError):
             data = None
         if isinstance(data, dict) and isinstance(data.get("positive"), str) and data["positive"].strip():
