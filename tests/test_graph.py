@@ -425,3 +425,12 @@ async def test_no_blocking_calls_in_event_loop(settings):
         state = await _run([{"type": "text", "text": "このキャラをこのポーズで"}, _block(_png((1, 1, 1))),
                             _block(_png((2, 2, 2)))], fake, settings)
     assert not state.get("error")
+
+
+async def test_image_wait_gets_its_own_deadline(settings):
+    # The LLM phase can use most of the budget; the image wait restarts it.
+    import time
+
+    state = {"messages": [], "progress_id": "p", "job": {"prompt_id": "pid", "client_id": "c", "deadline": time.time() + 5}}
+    update = await graph_module.await_tags(state, _config(FakeComfy(), settings))
+    assert update["job"]["deadline"] - time.time() > 590

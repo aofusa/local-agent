@@ -497,7 +497,9 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     return {
         "tags": tags,
         # ckpt usually runs before split, so keep its unload check for the image phase.
-        "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}},
+        # Each wait gets the full timeout: the LLM phase (27B load + role Vision calls) alone can take minutes.
+        "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {},
+                "deadline": time.time() + settings.timeout_s},
         "messages": [_progress(state, (
             "タグを生成しました。LM Studio のモデルを unload してから画像を生成しています…\n\n"
             f"**positive**: {tags['positive']}\n\n**negative**: {tags['negative']}"
