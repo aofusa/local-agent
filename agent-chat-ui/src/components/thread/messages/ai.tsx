@@ -15,6 +15,45 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
+import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+
+// local-agent: render base64 image blocks returned by the graph (stock UI renders text only).
+function AIImageBlocks({ content }: { content: Message["content"] }) {
+  if (!Array.isArray(content)) return null;
+  type ImageBlock = { type: string; mimeType: string; data: string; metadata?: { name?: string } };
+  const images = (content as unknown[]).filter(
+    (block): block is ImageBlock =>
+      isBase64ContentBlock(block) &&
+      (block as ImageBlock).type === "image" &&
+      typeof (block as ImageBlock).data === "string",
+  );
+  if (!images.length) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {images.map((image, i) => {
+        const src = `data:${image.mimeType};base64,${image.data}`;
+        const name = image.metadata?.name || `image-${i + 1}.png`;
+        return (
+          <figure key={`${name}-${i}`} className="flex flex-col items-start gap-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt={name}
+              className="max-h-[80vh] max-w-full rounded-md border object-contain"
+            />
+            <a
+              href={src}
+              download={name}
+              className="text-muted-foreground text-xs underline"
+            >
+              {name} を保存
+            </a>
+          </figure>
+        );
+      })}
+    </div>
+  );
+}
 
 function CustomComponent({
   message,
@@ -165,6 +204,8 @@ export function AssistantMessage({
                 <MarkdownText>{contentString}</MarkdownText>
               </div>
             )}
+
+            <AIImageBlocks content={content} />
 
             {!hideToolCalls && (
               <>
