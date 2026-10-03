@@ -4,6 +4,7 @@ import folder_paths
 import nodes as comfy_nodes
 
 from .lmstudio_state import ensure_unloaded
+from .model_files import fp8_sibling
 from .tag_split import DEFAULT_NEGATIVE, QUALITY_PREFIX, split_tags
 
 log = logging.getLogger("furry_ja")
@@ -80,8 +81,6 @@ class FurryJaCheckpointLoaderAfterEject(comfy_nodes.CheckpointLoaderSimple):
 
 
 WEIGHT_DTYPES = ["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"]
-
-
 def _diffusion_model_names():
     """Diffusion-model-only files may sit in diffusion_models (UNETLoader) or checkpoints (Civitai downloads)."""
     names = folder_paths.get_filename_list("diffusion_models") + folder_paths.get_filename_list("checkpoints")
@@ -126,6 +125,14 @@ class FurryJaDiffusionLoaderAfterEject:
         )
         path = (folder_paths.get_full_path("diffusion_models", unet_name)
                 or folder_paths.get_full_path_or_raise("checkpoints", unet_name))
+        # scripts/setup-comfyui-chroma.ps1 writes <name>_fp8_e4m3fn.safetensors next to the models: casting the
+        # 17.8 GB BF16 file at load time needs the whole BF16 state dict in RAM first.
+        if weight_dtype.startswith("fp8_e4m3fn"):
+            converted = fp8_sibling(unet_name)
+            converted_path = folder_paths.get_full_path("diffusion_models", converted)
+            if converted_path:
+                log.info("[furry_ja] using pre-converted %s for %s", converted, unet_name)
+                path = converted_path
         options = {}
         if weight_dtype == "fp8_e4m3fn":
             options["dtype"] = torch.float8_e4m3fn
