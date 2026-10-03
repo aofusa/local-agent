@@ -452,6 +452,133 @@ def node_map(api: dict | None = None) -> tuple[dict, dict[str, dict]]:
     return mapping, prompts
 
 
+# --- Chroma1-HD family (docs/chroma-hd-support-work-instruction.md §5.4) -----------------------------
+#
+# Copied from the official ComfyUI_Chroma1-HD_T2I-workflow.json (workflows/reference/): CLIPLoader type chroma,
+# T5TokenizerOptions, ModelSamplingAuraFlow shift 1.0, euler + beta, Flux VAE, EmptySD3LatentImage. The official
+# SamplerCustomAdvanced chain is replaced by KSampler (WI §2.3) so `sampler` keeps its id, seed slot and denoise.
+# The LLM part is the same as sdxl (prompt_node -> eject -> split -> ckpt); only the system prompt differs.
+
+CHROMA_FAMILY = "chroma_hd"
+CHROMA_UNET = os.environ.get("CHROMA_UNET_NAME") or "chroma_v10HD.safetensors"
+CHROMA_MODELS = {
+    "unet_name": CHROMA_UNET,
+    # The 17.8 GB BF16 file is cast to fp8 at load: ~8.9 GB, which fits next to the T5 on a 24 GB UMA machine.
+    "weight_dtype": "fp8_e4m3fn",
+    "clip_name": "t5xxl_fp8_e4m3fn.safetensors",
+    "clip_type": "chroma",
+    "vae_name": "ae.safetensors",
+}
+CHROMA_DEFAULTS = {
+    "width": 1024, "height": 1024, "steps": 28, "cfg": 3.5, "sampler_name": "euler", "scheduler": "beta",
+    # Sizes are multiples of 64 (also of 16), at most ~1 MP: 1024x1024, 832x1216, 1216x832.
+    "size_min": 512, "size_max": 1216, "max_pixels": 1024 * 1024,
+}
+# Comparison presets (WI §5.4); not used by default.
+CHROMA_PRESETS = {"quality": {"steps": 40, "cfg": 3.0}, "speed": {"steps": 26, "cfg": 3.8}}
+CHROMA_NEGATIVE = "low quality, ugly, unfinished, out of focus, deformed, blurry, smudged, flat colors"
+
+
+def chroma_template(template_id: str) -> tuple[dict, dict]:
+    """Return (API prompt, slot map) for chroma_hd t2i_basic / i2i_basic."""
+    system = (PROMPTS / "system_chroma_prose.txt").read_text(encoding="utf-8").strip()
+    system_vision = (PROMPTS / "system_vision_caption.txt").read_text(encoding="utf-8").strip()
+    d = CHROMA_DEFAULTS
+    nodes = {
+        "llm_backend": ("LMConnectLMStudioBackend", "LM Studio Backend", _backend(True)),
+        "user_prompt": ("PrimitiveStringMultiline", "user_prompt (日本語指示)", {"value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"}),
+        "prompt_node": ("LMConnectPromptWithSystem", "prompt_node", {
+            "system_prompt": system, "prompt": ["user_prompt", 0], "backend": ["llm_backend", 0],
+            "base_url": LMSTUDIO_URL, "model": "", "temperature": 0.3, "max_tokens": 400,
+        }),
+        "eject": ("LMConnectEjectLMStudioModel", "eject", {
+            "passthrough": ["prompt_node", 0], "base_url": LMSTUDIO_URL, "model": "", "debug_logging": True,
+        }),
+        "split": ("FurryJaSplitTags", "split", {
+            "text": ["eject", 0], "quality_prefix": "", "default_negative": CHROMA_NEGATIVE, "prompt_style": "prose",
+        }),
+        "ckpt": ("FurryJaDiffusionLoaderAfterEject", "ckpt", {
+            **CHROMA_MODELS, "after": ["eject", 0], "lmstudio_base_url": LMSTUDIO_URL,
+        }),
+        # Official: "min_padding 1 is the official way".
+        "t5_options": ("T5TokenizerOptions", "t5_options", {"clip": ["ckpt", 1], "min_padding": 1, "min_length": 0}),
+        "positive": ("CLIPTextEncode", "positive", {"text": ["split", 0], "clip": ["t5_options", 0]}),
+        "negative": ("CLIPTextEncode", "negative", {"text": ["split", 1], "clip": ["t5_options", 0]}),
+        "model_sampling": ("ModelSamplingAuraFlow", "model_sampling (shift 1.0)", {"model": ["ckpt", 0], "shift": 1.0}),
+        # Drop the T5 (~5 GB) before the 8.9B model samples.
+        "release": ("FurryJaReleaseEncoders", "release", {
+            "model": ["model_sampling", 0], "positive": ["positive", 0], "negative": ["negative", 0],
+        }),
+        "latent": ("EmptySD3LatentImage", "latent", {"width": d["width"], "height": d["height"], "batch_size": 1}),
+        "sampler": ("KSampler", "sampler", {
+            "model": ["release", 0], "seed": 0, "steps": d["steps"], "cfg": d["cfg"],
+            "sampler_name": d["sampler_name"], "scheduler": d["scheduler"],
+            "positive": ["release", 1], "negative": ["release", 2], "latent_image": ["latent", 0], "denoise": 1.0,
+        }),
+        "decode": ("VAEDecode", "decode", {"samples": ["sampler", 0], "vae": ["ckpt", 2]}),
+        "save": ("SaveImage", "save", {"images": ["decode", 0], "filename_prefix": "furry_ja/chroma_hd"}),
+    }
+    prompt = {node_id: _node(cls, title, inputs) for node_id, (cls, title, inputs) in nodes.items()}
+    slots = {
+        "prompt": "user_prompt.inputs.value", "seed": "sampler.inputs.seed", "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype", "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name", "steps": "sampler.inputs.steps", "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name", "scheduler": "sampler.inputs.scheduler",
+    }
+    if template_id == "t2i_basic":
+        slots.update(width="latent.inputs.width", height="latent.inputs.height")
+        return prompt, slots
+    if template_id != "i2i_basic":
+        raise ValueError(f"chroma_hd has no template {template_id}")
+    # img2img: the base image is captioned (tags) for the LLM, which rewrites everything as prose.
+    prompt.update({
+        "llm_backend_vision": _node("LMConnectLMStudioBackend", "LM Studio Backend (vision, no auto-eject)", _backend(False)),
+        "ref_image": _node("LoadImage", "ref_image", {"image": REF_PLACEHOLDER}),
+        "vision": _node("LMConnectVision", "vision", {
+            "system_prompt": system_vision, "prompt": VISION_USER_PROMPT, "image_1": ["ref_image", 0],
+            "max_image_dimension": 768, "backend": ["llm_backend_vision", 0], "base_url": LMSTUDIO_URL,
+            "model": "", "temperature": 0.2, "max_tokens": 200,
+        }),
+        "prompt_join": _node("StringConcatenate", "prompt_join (指示 + 参照タグ)", {
+            "string_a": ["user_prompt", 0], "string_b": ["vision", 0], "delimiter": REF_JOIN_DELIMITER,
+        }),
+        "ref_scale": _node("ImageScaleToTotalPixels", "ref_scale (img2img)", {
+            "image": ["ref_image", 0], "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 64,
+        }),
+        "latent": _node("VAEEncode", "latent (img2img)", {"pixels": ["ref_scale", 0], "vae": ["ckpt", 2]}),
+    })
+    prompt["prompt_node"]["inputs"]["prompt"] = ["prompt_join", 0]
+    prompt["sampler"]["inputs"]["denoise"] = default_denoise({"base"})
+    slots.update(base_image="ref_image.inputs.image", denoise="sampler.inputs.denoise")
+    return prompt, slots
+
+
+def chroma_map() -> tuple[dict, dict[str, dict]]:
+    templates, prompts = {}, {}
+    for template_id in ("t2i_basic", "i2i_basic"):
+        prompt, slots = chroma_template(template_id)
+        prompts[template_id] = prompt
+        templates[template_id] = {"file": f"{CHROMA_FAMILY}/{template_id}.api.json",
+                                  "roles": sorted(template_roles(template_id)), "slots": slots}
+    mapping = {
+        "family": CHROMA_FAMILY,
+        "label": "Chroma1-HD",
+        # Model files and sampler defaults live here, not in code (WI §4). CHROMA_* env vars override the files.
+        "models": CHROMA_MODELS,
+        "defaults": CHROMA_DEFAULTS,
+        "presets": CHROMA_PRESETS,
+        # Only the base image (img2img) is supported. Flux ControlNet / IP-Adapter are not verified on Chroma (WI §2.4).
+        "supported_roles": ["base"],
+        "pose_enabled": False,
+        "pose_fallback": "refuse",
+        "pose_fallback_denoise": 0.65,
+        "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
+        "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
+        "templates": templates,
+    }
+    return mapping, prompts
+
+
 def _write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -466,6 +593,11 @@ def main() -> None:
         _write_json(WORKFLOWS / mapping["templates"][template_id]["file"], prompt)
     _write_json(WORKFLOWS / "maps" / f"{MODEL_FAMILY}.json", mapping)
     print("wrote furry_ja_api.json, furry_ja.json,", len(prompts), f"templates and maps/{MODEL_FAMILY}.json under", WORKFLOWS)
+    chroma, chroma_prompts = chroma_map()
+    for template_id, prompt in chroma_prompts.items():
+        _write_json(WORKFLOWS / chroma["templates"][template_id]["file"], prompt)
+    _write_json(WORKFLOWS / "maps" / f"{CHROMA_FAMILY}.json", chroma)
+    print("wrote", len(chroma_prompts), f"templates and maps/{CHROMA_FAMILY}.json")
 
 
 if __name__ == "__main__":
