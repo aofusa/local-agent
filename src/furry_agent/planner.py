@@ -373,7 +373,8 @@ def build_plan(
             notes.append(f"{label} の指定値 {value} を範囲内の {clamped} へ調整しました")
         return clamped
 
-    width, height = int(d.get("width", DEFAULT_WIDTH)), int(d.get("height", DEFAULT_HEIGHT))
+    width, height = fit_pixels(int(d.get("width", DEFAULT_WIDTH)), int(d.get("height", DEFAULT_HEIGHT)),
+                               d.get("max_pixels"))
     if intent.width and intent.height:
         low, high = int(d.get("size_min", SIZE_MIN)), int(d.get("size_max", SIZE_MAX))
         width, height = fit_pixels(clamp_size(intent.width, low, high), clamp_size(intent.height, low, high),

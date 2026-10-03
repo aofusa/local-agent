@@ -304,7 +304,7 @@ def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] 
     if template_id:
         load_template(family, template_id, settings.workflows_dir)  # TemplateError when missing
     plan = build_plan(template_id or "?", family, references, resolution.roles, intent,
-                      defaults=family_map.get("defaults"))
+                      defaults=settings.plan_defaults(family, family_map.get("defaults")))
     if denoise is not None and plan["denoise"] is not None and intent.denoise is None:
         plan["denoise"] = denoise
     plan["notes"] += notes

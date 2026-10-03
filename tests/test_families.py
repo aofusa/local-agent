@@ -85,6 +85,15 @@ def test_settings_family_specific_values(monkeypatch):
     assert settings.model_overrides(SDXL) == {}
 
 
+def test_chroma_speed_overrides(monkeypatch):
+    monkeypatch.setenv("CHROMA_MAX_PIXELS", "589824")
+    monkeypatch.setenv("CHROMA_STEPS", "24")
+    settings = Settings.from_env()
+    merged = settings.plan_defaults(FLUX, CHROMA_MAP["defaults"])
+    assert merged["max_pixels"] == 589824 and merged["steps"] == 24 and merged["cfg"] == 3.5
+    assert settings.plan_defaults(SDXL, None) == {}
+
+
 @pytest.mark.parametrize("value, family", [("", SDXL), ("sdxl", SDXL), ("flux", FLUX), ("Flux", FLUX)])
 def test_settings_family_comes_from_env_only(monkeypatch, value, family):
     monkeypatch.setenv("COMFY_MODEL_FAMILY", value)

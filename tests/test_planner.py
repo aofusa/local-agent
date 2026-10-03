@@ -266,6 +266,14 @@ def test_chroma_size_stays_within_one_megapixel(text, size):
     assert plan["width"] % 16 == 0 and plan["height"] % 16 == 0
 
 
+def test_lower_pixel_cap_scales_default_and_requested_sizes():
+    d = {**CHROMA_DEFAULTS, "max_pixels": 768 * 768}
+    plan = build_plan("t2i_basic", "flux", [], {}, classify_intent("港", []), random.Random(1), defaults=d)
+    assert (plan["width"], plan["height"]) == (768, 768)
+    plan = build_plan("t2i_basic", "flux", [], {}, classify_intent("縦長の港", []), random.Random(1), defaults=d)
+    assert plan["width"] * plan["height"] <= 768 * 768 and plan["height"] > plan["width"]
+
+
 def test_portrait_word_matches_sdxl_default():
     plan = build_plan("t2i_basic", "sdxl", [], {}, classify_intent("縦長の港", []), random.Random(1))
     assert (plan["width"], plan["height"]) == (832, 1216) and not plan["notes"]

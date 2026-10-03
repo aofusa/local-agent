@@ -17,6 +17,10 @@ CHROMA_MODEL_ENV = {
 }
 
 
+# Chroma sampler defaults: env name -> key of workflows/maps/flux.json "defaults".
+CHROMA_DEFAULT_ENV = {"CHROMA_MAX_PIXELS": "max_pixels", "CHROMA_STEPS": "steps"}
+
+
 @dataclass(frozen=True)
 class Settings:
     comfyui_url: str
@@ -29,6 +33,7 @@ class Settings:
     loras: str = ""
     chroma_loras: str = ""
     chroma_models: dict[str, str] = field(default_factory=dict)
+    chroma_defaults: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +52,9 @@ class Settings:
             # SDXL LoRAs do not fit Chroma, so Chroma has its own list.
             chroma_loras=os.environ.get("CHROMA_LORAS", ""),
             chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items() if os.environ.get(env)},
+            # Machine-specific speed knobs: 1024x1024 x 28 steps takes ~30 min on a Radeon 890M.
+            chroma_defaults={key: int(os.environ[env]) for env, key in CHROMA_DEFAULT_ENV.items()
+                             if os.environ.get(env, "").strip()},
         )
 
     def ckpt_for(self, family: str) -> str | None:
@@ -59,6 +67,10 @@ class Settings:
 
     def loras_for(self, family: str) -> str:
         return self.chroma_loras if family == FLUX else self.loras
+
+    def plan_defaults(self, family: str, defaults: dict | None) -> dict:
+        """The family map's defaults with the .env overrides (Chroma only)."""
+        return {**(defaults or {}), **(self.chroma_defaults if family == FLUX else {})}
 
     def model_overrides(self, family: str) -> dict[str, str]:
         """Template slot -> value for the text encoder / VAE / weight dtype (Chroma only)."""
