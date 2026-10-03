@@ -7,7 +7,8 @@
   2. Create .env from .env.example.
   3. Python environment for LangGraph (uv sync) and agent-chat-ui dependencies (pnpm via npx).
   4. LM Studio setup (scripts\setup-lmstudio.ps1).
-  5. ComfyUI setup (scripts\setup-comfyui.ps1).
+  5. ComfyUI setup (scripts\setup-comfyui.ps1), then the multi-image reference nodes and models
+     (scripts\setup-comfyui-refs.ps1: IP-Adapter, ControlNet, DWPose / depth; about 6 GB of downloads).
   6. Optionally open the Windows firewall for TCP 2024/3000 on Private networks (-OpenFirewall, asks for admin).
 
 .EXAMPLE
@@ -23,6 +24,7 @@ param(
     [double]$GpuOffload = 0.45,
     [switch]$SkipLMStudio,
     [switch]$SkipComfyUI,
+    [switch]$SkipReferenceModels,      # text-only / plain img2img work without them
     [switch]$OpenFirewall
 )
 $ErrorActionPreference = "Stop"
@@ -70,6 +72,7 @@ if (-not $SkipComfyUI) {
     if ($ComfyPython) { $comfyArgs["ComfyPython"] = $ComfyPython }
     if ($ConfigureComfyDesktop) { $comfyArgs["ConfigureComfyDesktop"] = $true }
     & (Join-Path $PSScriptRoot "setup-comfyui.ps1") @comfyArgs
+    if (-not $SkipReferenceModels) { & (Join-Path $PSScriptRoot "setup-comfyui-refs.ps1") }
 }
 
 if ($OpenFirewall) {
