@@ -27,7 +27,6 @@ class Settings:
     timeout_s: float
     model_family: str = SDXL
     loras: str = ""
-    chroma_enabled: bool = True
     chroma_loras: str = ""
     chroma_models: dict[str, str] = field(default_factory=dict)
 
@@ -41,19 +40,17 @@ class Settings:
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", REPO_ROOT / "outputs")),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             timeout_s=float(os.environ.get("COMFYUI_TIMEOUT_S", "600")),
-            # Default family: sdxl (yiffInHell) or chroma_hd (Chroma1-HD). Aliases: illustrious, chroma.
+            # sdxl (yiffInHell, Danbooru tags; default) or chroma_hd (Chroma1-HD, prose). Aliases: chroma, illustrious.
             model_family=canonical_family(os.environ.get("COMFY_MODEL_FAMILY")) or SDXL,
             # "name[:model_strength[:clip_strength]]", comma separated. Empty = no LoRA.
             loras=os.environ.get("LORAS", ""),
-            # Rollback switch (WI §9): 0 keeps every request on sdxl and refuses /model chroma.
-            chroma_enabled=os.environ.get("CHROMA_HD_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off"),
             # SDXL LoRAs do not fit Chroma, so Chroma has its own list.
             chroma_loras=os.environ.get("CHROMA_LORAS", ""),
             chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items() if os.environ.get(env)},
         )
 
     def ckpt_for(self, family: str) -> str | None:
-        """CKPT_NAME belongs to COMFY_MODEL_FAMILY; another family chosen per message uses its own setting."""
+        """CKPT_NAME belongs to COMFY_MODEL_FAMILY; CHROMA_UNET_NAME is the Chroma-specific fallback."""
         if family == self.model_family and self.ckpt_name:
             return self.ckpt_name
         if family == CHROMA_HD:

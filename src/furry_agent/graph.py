@@ -3,8 +3,8 @@
 LangGraph never calls LM Studio. The ComfyUI workflow calls the LLM, ejects it, and only then loads
 the checkpoint, IP-Adapter and ControlNet (design doc §4). This graph:
 
-    ingest    read the message, pick the model family (sdxl / chroma_hd), normalize up to 4 reference images
-              (or the previous output) into references
+    ingest    read the message, normalize up to 4 reference images (or the previous output) into references;
+              the model family (sdxl / chroma_hd) comes from COMFY_MODEL_FAMILY
     plan      rule-based roles -> family role check -> template id -> clamped parameters, and a summary (WI §4.6)
     confirm   LangGraph interrupt when the roles are ambiguous (agent-chat-ui HITL card)
     submit    upload (deduplicated by sha256), inject through the node map, validate node types, /prompt
@@ -36,7 +36,7 @@ from PIL import Image
 
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import Settings
-from furry_agent.families import CHROMA_HD, LABELS, FamilyError, check_roles, choose_family, looks_like_tag_list
+from furry_agent.families import CHROMA_HD, LABELS, FamilyError, check_roles, looks_like_tag_list
 from furry_agent.media import IMAGE_ROLES, MAX_IMAGES, Media, MediaError, Request, parse_request
 from furry_agent.planner import (
     GenerationPlan,
@@ -209,11 +209,6 @@ async def ingest(state: State, config: RunnableConfig) -> dict:
     try:
         request = _request(state)
         _configurable_roles(config, request.images)
-        requested = ((config or {}).get("configurable", {}) or {}).get("model_family")
-        choice = choose_family(request.text, settings.model_family, requested)
-        if choice.family == CHROMA_HD and not settings.chroma_enabled:
-            raise MediaError("Chroma1-HD 経路は無効になっています（.env の CHROMA_HD_ENABLED=0）")
-        request.text = choice.text
         refetch = _REFETCH.search(request.text)
         if refetch and not request.images:
             prompt_id = refetch.group(1)
@@ -234,12 +229,12 @@ async def ingest(state: State, config: RunnableConfig) -> dict:
             raise MediaError(f"日本語で描きたい内容を入力してください（画像は 0〜{MAX_IMAGES} 枚まで添付できます）。")
     except (MediaError, ValueError) as exc:
         return _fail({**state, "progress_id": progress_id}, exc, "入力")
-    log.info("request family=%s (%s) refs=%s text=%s", choice.family, choice.source,
+    log.info("request family=%s refs=%s text=%s", settings.model_family,
              [(r["image_id"], r["role"], r["sha256"][:12]) for r in references], request.text)
     return {
         **reset,
         "references": references,
-        "job": {"text": request.text or DEFAULT_TEXT_FOR_IMAGES, "family": choice.family},
+        "job": {"text": request.text or DEFAULT_TEXT_FOR_IMAGES, "family": settings.model_family},
         "messages": [AIMessage(id=progress_id, content=f"受け付けました（参照画像 {len(references)} 枚）。役割とテンプレートを決めています…")],
     }
 
@@ -435,8 +430,8 @@ async def _check_models(client: ComfyClient, settings: Settings, family: str, te
     values.update({k: v for k, v in settings.model_overrides(family).items() if k in values})
     values["ckpt_name"] = settings.ckpt_for(family) or values["ckpt_name"]
     if family != CHROMA_HD and "chroma" in values["ckpt_name"].lower():
-        raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=chroma_hd "
-                            "にするか、メッセージの先頭に /model chroma を付けてください")
+        raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=chroma "
+                            "も設定して LangGraph を再起動してください")
     missing = []
     for slot, path in model_slots(entry).items():
         node_id, _, field = path.split(".", 2)

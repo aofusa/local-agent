@@ -51,4 +51,4 @@ $found = @("diffusion_models", "unet", "checkpoints") | ForEach-Object { Join-Pa
 if ($found) { Write-Ok "diffusion model: $(@($found)[0])" }
 else { Write-Warn2 "$unet が models\diffusion_models / checkpoints にありません。Chroma1-HD を置いてください（https://huggingface.co/lodestones/Chroma1-HD）" }
 
-Write-Step "完了。.env の COMFY_MODEL_FAMILY=chroma_hd で既定を Chroma にできます（チャットでは /model chroma）"
+Write-Step "完了。.env の COMFY_MODEL_FAMILY=chroma と CKPT_NAME で Chroma に切り替え、LangGraph を再起動してください"

@@ -7,7 +7,6 @@ from furry_agent.families import (
     FamilyError,
     canonical_family,
     check_roles,
-    choose_family,
     looks_like_tag_list,
 )
 from furry_agent.templates import load_map
@@ -23,30 +22,6 @@ SDXL_MAP = load_map(SDXL)
 ])
 def test_canonical_family(name, expected):
     assert canonical_family(name) == expected
-
-
-@pytest.mark.parametrize("text, family, rest", [
-    ("/model chroma 夕方の港", CHROMA_HD, "夕方の港"),
-    ("/MODEL chroma_hd\n夕方の港", CHROMA_HD, "夕方の港"),
-    ("chroma で夕方の港", CHROMA_HD, "夕方の港"),
-    ("Chroma HD で、夕方の港", CHROMA_HD, "夕方の港"),
-    ("クロマで夕方の港", CHROMA_HD, "夕方の港"),
-    ("/model sdxl 夕方の港", SDXL, "夕方の港"),
-    ("夕方の港", SDXL, "夕方の港"),
-    # Vague wording never switches the family (§5.2 rule 4), and "chroma" mid-sentence is just text.
-    ("リアルにして", SDXL, "リアルにして"),
-    ("chromatic aberration の効いた港", SDXL, "chromatic aberration の効いた港"),
-])
-def test_choose_family_from_message(text, family, rest):
-    choice = choose_family(text, SDXL)
-    assert (choice.family, choice.text) == (family, rest)
-
-
-def test_configurable_beats_message_and_default():
-    choice = choose_family("/model sdxl 港", SDXL, requested="chroma")
-    assert (choice.family, choice.text, choice.source) == (CHROMA_HD, "港", "configurable")
-    assert choose_family("港", "chroma").family == CHROMA_HD
-    assert choose_family("港", CHROMA_HD).source == "default"
 
 
 def test_sdxl_accepts_every_role():
@@ -101,16 +76,16 @@ def test_settings_family_specific_values(monkeypatch):
     monkeypatch.setenv("CHROMA_VAE", "flux_ae.safetensors")
     monkeypatch.delenv("CHROMA_HD_ENABLED", raising=False)
     settings = Settings.from_env()
-    assert settings.model_family == CHROMA_HD and settings.chroma_enabled
+    assert settings.model_family == CHROMA_HD
     assert settings.ckpt_for(CHROMA_HD) == "chroma_v10HD.safetensors"
-    assert settings.ckpt_for(SDXL) is None  # /model sdxl uses the template's yiffInHell
+    assert settings.ckpt_for(SDXL) is None
     assert settings.loras_for(CHROMA_HD) == "" and settings.loras_for(SDXL) == "sdxl_style:0.8"
     assert settings.model_overrides(CHROMA_HD) == {"vae_name": "flux_ae.safetensors"}
     assert settings.model_overrides(SDXL) == {}
 
 
-def test_settings_default_family_and_rollback_switch(monkeypatch):
-    monkeypatch.delenv("COMFY_MODEL_FAMILY", raising=False)
-    monkeypatch.setenv("CHROMA_HD_ENABLED", "0")
-    settings = Settings.from_env()
-    assert settings.model_family == SDXL and not settings.chroma_enabled
+@pytest.mark.parametrize("value, family", [("", SDXL), ("sdxl", SDXL), ("chroma", CHROMA_HD),
+                                           ("chroma_hd", CHROMA_HD), ("CHROMA", CHROMA_HD)])
+def test_settings_family_comes_from_env_only(monkeypatch, value, family):
+    monkeypatch.setenv("COMFY_MODEL_FAMILY", value)
+    assert Settings.from_env().model_family == family

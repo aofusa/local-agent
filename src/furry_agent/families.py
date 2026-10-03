@@ -1,19 +1,17 @@
-"""Model family selection (Chroma HD work instruction §5.2) and the per-family checks LangGraph runs.
+"""Model family names (Chroma HD work instruction §5.2) and the per-family checks LangGraph runs.
 
 Two families are registered: ``sdxl`` (yiffInHell / Illustrious, Danbooru tags, the default) and
 ``chroma_hd`` (Chroma1-HD, a Flux.1-schnell derivative that reads English prose through T5).
 The family decides which ``workflows/<family>/`` templates and ``workflows/maps/<family>.json`` are used;
 the LLM call, eject and checkpoint gate stay inside the ComfyUI workflow for both.
 
-Selection order: ``configurable.model_family`` of the run > a command in the message
-(``/model chroma``, 「chroma で」) > ``COMFY_MODEL_FAMILY``. Vague wording such as 「リアルにして」 never
-switches the family.
+The family is chosen only by ``COMFY_MODEL_FAMILY`` in ``.env`` (``chroma`` / ``chroma_hd`` -> Chroma1-HD,
+anything else registered -> that family, empty -> sdxl). Messages never switch it.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 SDXL = "sdxl"
 CHROMA_HD = "chroma_hd"
@@ -26,15 +24,10 @@ LABELS = {SDXL: "SDXL（yiffInHell / Danbooru タグ）", CHROMA_HD: "Chroma1-HD
 
 _FULLWIDTH = str.maketrans("ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ０１２３４５６７８９／＿－",
                                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_-")
-_COMMAND = re.compile(r"^\s*/model\s+(\S+)\s*", re.IGNORECASE)
-# 「chroma で」「Chroma HD で」「クロマで」「sdxl で」 at the start of the message.
-_PHRASE = re.compile(
-    r"^\s*(chroma[\s_-]*1?[\s_-]*hd|chroma|クロマ|sdxl|illustrious|yiffinhell)\s*(?:で|を使って|モデルで)[、,\s]*",
-    re.IGNORECASE)
 
 
 class FamilyError(ValueError):
-    """The requested family cannot be used (shown to the user)."""
+    """The requested combination cannot be used with this family (shown to the user)."""
 
 
 def canonical_family(name: str | None) -> str | None:
@@ -43,29 +36,6 @@ def canonical_family(name: str | None) -> str | None:
         return None
     key = name.strip().translate(_FULLWIDTH).lower()
     return ALIASES.get(key) or ALIASES.get(re.sub(r"[\s_-]+", "", key)) or key
-
-
-@dataclass(frozen=True)
-class FamilyChoice:
-    family: str
-    text: str          # message with the selection command removed
-    source: str        # "configurable", "message" or "default"
-
-
-def choose_family(text: str, default: str, requested: str | None = None) -> FamilyChoice:
-    """Apply the §5.2 selection order. The command is stripped from the text in every case."""
-    stripped, from_message = text or "", None
-    normalized = stripped.translate(_FULLWIDTH)
-    for pattern in (_COMMAND, _PHRASE):
-        if m := pattern.match(normalized):
-            from_message = canonical_family(m.group(1))
-            stripped = normalized[m.end():].strip()
-            break
-    if requested:
-        return FamilyChoice(canonical_family(requested) or default, stripped, "configurable")
-    if from_message:
-        return FamilyChoice(from_message, stripped, "message")
-    return FamilyChoice(canonical_family(default) or SDXL, stripped, "default")
 
 
 def check_roles(family_map: dict, roles: dict[str, str]) -> tuple[dict[str, str], list[str], float | None]:
@@ -90,13 +60,13 @@ def check_roles(family_map: dict, roles: dict[str, str]) -> tuple[dict[str, str]
                          f"denoise {denoise} で寄せています（ポーズの厳密一致ではありません）")
         else:
             raise FamilyError(f"{label} 経路はポーズ ControlNet 未対応です。ポーズ参照を使うときは "
-                              "/model sdxl を付けて送るか、ポーズ画像を外してください")
+                              ".env の COMFY_MODEL_FAMILY を sdxl に戻すか、ポーズ画像を外してください")
     unsupported = sorted({r for r in result.values() if r not in supported})
     if unsupported:
         names = {"character": "キャラクター参照", "style": "画風参照", "mask": "マスク（部分修正）", "pose": "ポーズ参照"}
         listed = "、".join(names.get(r, r) for r in unsupported)
         raise FamilyError(f"{label} 経路は {listed} の画像に未対応です（使えるのは元画像 1 枚の img2img だけです）。"
-                          "画風は文章で指示するか、/model sdxl を付けて送ってください")
+                          "画風は文章で指示するか、.env の COMFY_MODEL_FAMILY を sdxl に戻してください")
     return result, notes, denoise
 
 

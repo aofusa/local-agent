@@ -6,14 +6,15 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 1. [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui)（LangGraph 公式 UI）が入力を受け取る
 2. LangGraph のグラフが画像の役割を決め、登録済みのワークフローテンプレートを選んで ComfyUI に投入する
 3. ComfyUI のワークフローが LM Studio の LLM（Huihui Qwen3.8 27B Abliterated）で Danbooru / e621 タグを作る
-4. LLM を LM Studio から unload してから、furry 系 SDXL チェックポイント（yiffInHell）で画像を生成する（参照画像は IP-Adapter / ControlNet、任意で LoRA）
+4. LLM を LM Studio から unload してから、furry 系 SDXL チェックポイント（yiffInHell）で画像を生成する（参照画像は IP-Adapter / ControlNet、任意で LoRA）。
+   `.env` の `COMFY_MODEL_FAMILY=chroma` にすると、LLM が英語の説明文を作り、Flux 系の Chroma1-HD で生成する（「4. 使い方 › Chroma1-HD」）
 5. 画像を ComfyUI の output とリポジトリの `outputs/` に保存し、同じ画像をチャットに表示する
 
 クラウド API は使いません。すべてローカルで動きます。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
@@ -80,6 +81,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
    [Civitai](https://civitai.com/models/1570986) 等から入手し、ComfyUI の `models\checkpoints` に置く。
    別のファイル名やモデルを使う場合は、セットアップ後に `.env` の `CKPT_NAME` を変更します。
 3. Comfy Desktop を使う場合、セットアップ中は Comfy Desktop を終了しておく（起動引数を書き換えるため）。
+4. （任意）Chroma1-HD を使う場合は、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) の拡散モデル
+   （BF16 約 17.8GB。Civitai 配布名 `chroma_v10HD.safetensors`）を `models\diffusion_models` か `models\checkpoints` に置き、
+   セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 とVAE を取得。「4. 使い方 › Chroma1-HD」）。
 
 ### 1-4. ネットワーク
 
@@ -257,6 +261,42 @@ LORAS=KemonoStyleAV1.safetensors:0.8, CiviFur-30:0.6:0.5
 `名前[:モデル強度[:CLIP 強度]]` をカンマ区切りで並べます（拡張子と大文字小文字は省略・無視できます。強度の既定は 1.0、範囲 -2〜2）。
 ComfyUI の `models\loras` に無い名前があると投入前にエラーを返します。変更後は LangGraph を再起動してください。トリガーワードが必要な LoRA は指示に含めてください。
 
+### Chroma1-HD（モデルの切り替え）
+
+既定は yiffInHell（SDXL、Danbooru タグ）です。Chroma1-HD（Flux.1-schnell 由来、8.9B、Apache-2.0）は `.env` で切り替えます。
+
+```
+COMFY_MODEL_FAMILY=chroma            # chroma_hd でも可。空または sdxl なら従来の SDXL
+CKPT_NAME=chroma_v10HD.safetensors
+```
+
+変更後は LangGraph を再起動します（`start-langgraph.ps1`）。チャットの文面でモデルが変わることはありません。元に戻すときは `COMFY_MODEL_FAMILY=sdxl`、`CKPT_NAME=yiffInHell_yihVANTABLACK.safetensors` にします。
+
+Chroma 経路の違い:
+
+| 項目 | SDXL（yiffInHell） | Chroma1-HD |
+|---|---|---|
+| LLM の出力 | Danbooru / e621 タグ列（`prompts/system_furry_tags.txt`） | 1〜3 文の英語の説明文（`prompts/system_chroma_prose.txt`）。重み構文・`masterpiece` などは `split` が取り除く |
+| ローダー | `ckpt` = チェックポイント | `ckpt` = 拡散モデル（fp8 で読み込み）+ T5-XXL fp8（CLIPLoader type chroma）+ Flux VAE `ae.safetensors`。どちらも LLM の eject の後 |
+| サンプラー | 832×1216、steps 28、cfg 5.5、euler_ancestral / normal | 1024×1024（`縦長` 832×1216 / `横長` 1216×832、上限約 1MP）、steps 28、cfg 3.5、euler / beta、ModelSamplingAuraFlow shift 1.0 |
+| negative | 品質タグ | 短い英語（空にはしない） |
+| 参照画像 | 4 種の役割（上記） | **修正する元画像 1 枚の img2img だけ**（denoise 0.45）。ポーズ・画風・キャラクター・マスクの画像は生成せず理由を返す（Flux 用 ControlNet / IP-Adapter は Chroma で未検証のため） |
+| LoRA | `LORAS` | `CHROMA_LORAS`（SDXL の LoRA は Chroma に合わないため別） |
+
+モデルファイルの既定値（`workflows/maps/chroma_hd.json`）と、`.env` での差し替え:
+
+| 部品 | 既定 | 置き場所 | `.env` |
+|---|---|---|---|
+| 拡散モデル | `chroma_v10HD.safetensors`（BF16 を fp8 で読む） | `models\diffusion_models` または `models\checkpoints` | `CKPT_NAME` / `CHROMA_UNET_NAME`（`CKPT_NAME` が空のとき） |
+| 読み込み精度 | `fp8_e4m3fn`（約 8.9GB） | — | `CHROMA_WEIGHT_DTYPE`（`default` で BF16 のまま） |
+| テキストエンコーダ | `t5xxl_fp8_e4m3fn.safetensors` | `models\text_encoders` | `CHROMA_TEXT_ENCODER` |
+| VAE | `ae.safetensors`（Flux VAE） | `models\vae` | `CHROMA_VAE` |
+
+GPU メモリ別の目安（作業指示書 §2.2）: 24GB 以上は BF16（`CHROMA_WEIGHT_DTYPE=default`）、16GB / 12GB / UMA は fp8（既定）か GGUF の Q8_0〜Q5_K_M
+（GGUF は ComfyUI-GGUF が必要で、このリポジトリのワークフローは未対応）。8GB 以下は対象外です。
+
+ファイルが無いときは不足しているファイル名を返し、SDXL へ自動で切り替えません。
+
 ### 進捗・中断・保存
 
 - 進捗はチャットの 1 つのメッセージが更新されます（受付 → 実行計画 → 投入 → タグ生成完了（positive / negative を表示）→ 画像）。
@@ -286,7 +326,9 @@ ComfyUI の `models\loras` に無い名前があると投入前にエラーを�
 | `CKPT_NAME` | `yiffInHell_yihVANTABLACK.safetensors` | 使うチェックポイント（実行時にワークフローの値を上書き） |
 | `COMFYUI_TIMEOUT_S` | `600` | 待ち時間の上限（タグ生成・画像生成それぞれ） |
 | `LORAS` | 空 | 適用する LoRA（「4. 使い方 › LoRA」） |
-| `COMFY_MODEL_FAMILY` | `sdxl` | テンプレートの系統（`workflows/<系統>/`。登録済みは sdxl のみ） |
+| `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `chroma`（= `chroma_hd`、Chroma1-HD、英語の説明文） |
+| `CHROMA_UNET_NAME` / `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | Chroma のモデルファイルと読み込み精度（「4. 使い方 › Chroma1-HD」） |
+| `CHROMA_LORAS` | 空 | Chroma に適用する LoRA（書式は `LORAS` と同じ） |
 | `LMSTUDIO_MODEL` | セットアップが設定 | ワークフローが呼ぶ LM Studio のモデルキー |
 | `COMFYUI_MAIN_DIR` ほか `COMFYUI_*` | セットアップが設定 | `start-comfyui.ps1` が使う ComfyUI の場所 |
 | `COMFYUI_EXTRA_ARGS` | 空 | ComfyUI の追加引数（例 `--enable-manager`） |
@@ -317,14 +359,19 @@ src/furry_agent/planner.py            役割推定（ルール）、テンプレ
 src/furry_agent/templates.py          テンプレートの読み込み、ノードマップ経由の注入、LoRA の挿入
 src/furry_agent/comfy_client.py       ComfyUI HTTP / WebSocket クライアント
 src/furry_agent/media.py              添付画像の取り出しと検証（役割・強度は block の metadata）
-comfyui_nodes/furry_ja/               ComfyUI カスタムノード（split / ckpt / image-after）
+comfyui_nodes/furry_ja/               ComfyUI カスタムノード（split / ckpt / Chroma 用 ckpt / image-after / release）
+src/furry_agent/families.py           モデル系統の名前（COMFY_MODEL_FAMILY）と系統ごとの参照画像の可否
 workflows/sdxl/<テンプレートID>.api.json  役割別のテンプレート 24 本。LangGraph が読む
 workflows/maps/sdxl.json              テンプレートごとのスロット（node.inputs.field）とポーズ前処理の候補
+workflows/chroma_hd/*.api.json        Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
+workflows/maps/chroma_hd.json         Chroma のスロット、モデルファイル、サンプラーの既定値、対応する役割
+workflows/reference/                  公式 ComfyUI_Chroma1-HD_T2I-workflow.json（Chroma テンプレートの写し元）
 workflows/furry_ja_api.json           フェーズ 1 の API 形式（t2i_basic / i2i_basic の元。ノード ID は設計書 §4.1）
 workflows/furry_ja.json               UI 形式。ComfyUI で開ける（ノードのタイトル = ノード ID）
 prompts/system_furry_tags.txt         タグ生成の system prompt（テキストのみ / 元画像 1 枚）
 prompts/system_furry_tags_roles.txt   役割付き参照のタグ統合用 system prompt
 prompts/system_vision_*.txt           参照画像タグ付けの system prompt（caption / style / pose / character）
+prompts/system_chroma_prose.txt       Chroma 用。英語の説明文を返させる system prompt
 scripts/setup*.ps1                    セットアップ（scripts/lib/common.ps1 が共通処理）
 scripts/start-*.ps1, doctor.ps1       起動と確認
 scripts/open-firewall.ps1             ファイアウォール（管理者）
@@ -413,6 +460,10 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | 「生成できませんでした: ... Failed to load model」 | メモリ不足。他のアプリを閉じる、`setup-lmstudio.ps1 -GpuOffload 0.4` に下げる、ComfyUI を再起動して常駐メモリを解放 |
 | 10 分でタイムアウト | 同上。参照画像の枚数を減らす。完了していれば `再取得 <prompt_id>` で受け取れる |
 | 「この環境の ComfyUI に無いノードがあります」 | `setup-comfyui-refs.ps1` を実行して ComfyUI を再起動。`doctor.ps1` の reference nodes を確認 |
+| 「この環境の ComfyUI に無いノードがあります: FurryJaDiffusionLoaderAfterEject」 | Chroma 対応後に ComfyUI を再起動していない。`start-comfyui.ps1` で起動し直す |
+| 「Chroma1-HD のモデルファイルが ComfyUI に見つかりません」 | `setup-comfyui-chroma.ps1` を実行。拡散モデルは手動で `models\diffusion_models` か `models\checkpoints` に置く |
+| 「… は Chroma1-HD のモデルです」 | `CKPT_NAME` だけを Chroma にした。`COMFY_MODEL_FAMILY=chroma` も設定して LangGraph を再起動する |
+| Chroma で「ポーズ ControlNet 未対応」などと返る | Chroma 経路は元画像 1 枚の img2img だけ対応。ポーズ・画風の参照は `COMFY_MODEL_FAMILY=sdxl` で使う |
 | 「LoRA が ComfyUI に見つかりません」 | `.env` の `LORAS` の名前を `models\loras` のファイル名に合わせる |
 | 参照画像を使った 2 回目以降の画像が単色やノイズになる | ComfyUI が `--cache-none` なしで起動している。`doctor.ps1` で確認し、`start-comfyui.ps1` で起動し直す（Comfy Desktop は `setup-comfyui.ps1 -ConfigureComfyDesktop`） |
 | キャラクター参照で色が焼ける・ギラつく | キャラクターの強度を下げる（0.6 前後） |
@@ -438,7 +489,8 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 
 - **動画入力は対象外**: ComfyUI-VideoHelperSuite（VHS）を前提にした経路は未実装です。動画を送るとチャットにその旨を返します（在庫の agent-chat-ui も動画の添付を受け付けません）。
 - InstantID / PuLID（人の顔向けの同一性）は使いません。キャラクター参照は IP-Adapter Plus と Vision タグで行います。
-- `COMFY_MODEL_FAMILY=flux` などのテンプレートは未登録です（参照ノードが環境に無いため）。
+- 登録済みの系統は `sdxl` と `chroma_hd` だけです（Flux Dev 本家、SD3 などは未登録）。
+- Chroma1-HD 経路は、ポーズ・画風・キャラクター参照とマスクに未対応です（Flux 用 ControlNet Union Pro / Redux / IP-Adapter の Chroma での動作を確認していないため。作業指示書 §2.4）。GGUF 量子化の読み込みにも未対応です。
 - 役割推定は LLM ではなくルール（日本語のキーワードと序数）です。LangGraph から LM Studio を呼ばない（AGENTS.md）ためです。
 - 認証なし。LAN 内の開発用途のみ。
 
@@ -459,6 +511,9 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | [h94/IP-Adapter](https://huggingface.co/h94/IP-Adapter) | IP-Adapter Plus SDXL、画像エンコーダ（OpenCLIP ViT-H/14） | `setup-comfyui-refs.ps1` | Apache-2.0（画像エンコーダの元の [laion/CLIP-ViT-H-14-laion2B-s32B-b79K](https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K) は MIT） |
 | [yzd-v/DWPose](https://huggingface.co/yzd-v/DWPose) | DWPose のポーズ推定モデル（ONNX） | `setup-comfyui-refs.ps1` | Apache-2.0 |
 | [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) | 深度推定モデル | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [comfyanonymous/flux_text_encoders](https://huggingface.co/comfyanonymous/flux_text_encoders) | T5-XXL fp8（Chroma のテキストエンコーダ） | `setup-comfyui-chroma.ps1` | Apache-2.0（元の google/t5-v1_1-xxl） |
+| [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) | VAE（`ae.safetensors` として保存）、公式ワークフロー（`workflows/reference/` に同梱） | `setup-comfyui-chroma.ps1` | Apache-2.0 |
+| Chroma1-HD 拡散モデル | [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) または Civitai | 事前準備（手動） | Apache-2.0 |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) | `llama-quantize`（LLM の再量子化） | `setup-lmstudio.ps1`（`tools\`） | MIT |
 | LLM（Huihui Qwen3.8 27B Abliterated と mmproj） | LM Studio でダウンロード | 事前準備（手動） | 配布ページで確認 |
 | チェックポイント（yiffInHell など）、LoRA | Civitai などから入手 | 事前準備（手動） | 配布ページで確認（生成物や商用利用に条件があることが多い） |
