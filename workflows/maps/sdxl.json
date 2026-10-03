@@ -44,6 +44,10 @@
       "union_type": "canny/lineart/anime_lineart/mlsd"
     }
   },
+  "ipadapter_weight_scale": {
+    "character": 0.5,
+    "style": 1.0
+  },
   "templates": {
     "t2i_basic": {
       "file": "sdxl/t2i_basic.api.json",

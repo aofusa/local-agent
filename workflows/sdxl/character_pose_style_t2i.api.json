@@ -155,7 +155,7 @@
     "class_type": "KSampler",
     "inputs": {
       "model": [
-        "ipa_style",
+        "release",
         0
       ],
       "seed": 0,
@@ -164,12 +164,12 @@
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
       "positive": [
-        "pose_apply",
-        0
+        "release",
+        1
       ],
       "negative": [
-        "pose_apply",
-        1
+        "release",
+        2
       ],
       "latent_image": [
         "latent",
@@ -385,7 +385,7 @@
         "character_image",
         0
       ],
-      "weight": 0.85,
+      "weight": 0.425,
       "weight_type": "linear",
       "combine_embeds": "concat",
       "start_at": 0.0,
@@ -524,6 +524,26 @@
     },
     "_meta": {
       "title": "pose_preview"
+    }
+  },
+  "release": {
+    "class_type": "FurryJaReleaseEncoders",
+    "inputs": {
+      "model": [
+        "ipa_style",
+        0
+      ],
+      "positive": [
+        "pose_apply",
+        0
+      ],
+      "negative": [
+        "pose_apply",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "release"
     }
   }
 }

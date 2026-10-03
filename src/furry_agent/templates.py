@@ -103,7 +103,8 @@ def load_template(family: str, template_id: str, workflows_dir: Path = REPO_WORK
         raise TemplateError(f"テンプレート {template_id} は {family} に未登録です")
     path = workflows_dir / entry["file"]
     prompt = json.loads(path.read_text(encoding="utf-8"))
-    return prompt, {**entry, "pose_preprocessors": mapping.get("pose_preprocessors", {})}
+    return prompt, {**entry, "pose_preprocessors": mapping.get("pose_preprocessors", {}),
+                    "ipadapter_weight_scale": mapping.get("ipadapter_weight_scale", {})}
 
 
 def _set(prompt: dict, path: str, value) -> None:
@@ -173,9 +174,12 @@ def build_run_prompt(
             continue
         _set(prompt, slots["base_image" if role == "base" else f"{role}_image"], filename)
     strengths = plan.get("strengths") or {}
+    # Role strength -> node value. IP-Adapter weights are scaled per role (map: ipadapter_weight_scale).
+    scale = entry.get("ipadapter_weight_scale", {})
     for role, slot in (("style", "style_weight"), ("character", "character_weight"), ("pose", "pose_strength")):
         if slot in slots and role in strengths:
-            _set(prompt, slots[slot], float(strengths[role]))
+            value = float(strengths[role]) * float(scale.get(role, 1.0))
+            _set(prompt, slots[slot], round(value, 3))
     if "pose" in required:
         key = plan.get("pose_preprocessor") or "openpose"
         variant = entry["pose_preprocessors"].get(key)

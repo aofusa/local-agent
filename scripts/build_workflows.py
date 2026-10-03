@@ -288,6 +288,9 @@ IPADAPTER_PRESET = "PLUS (high strength)"
 # style: IP-Adapter "style transfer" only feeds the style blocks, so the subject is not copied.
 # character: linear; the pose comes from ControlNet / the text, not from this image.
 IPADAPTER_WEIGHT_TYPE = {"character": "linear", "style": "style transfer"}
+# IP-Adapter weight = role strength x scale. Measured on yiffInHell (Illustrious): character at weight 0.85
+# burned colors; 0.4 kept the identity cleanly. Style transfer stayed clean at 0.55-0.8.
+IPADAPTER_WEIGHT_SCALE = {"character": 0.5, "style": 1.0}
 ROLE_SECTION = {
     "base": "\n\n[Base image tags]\n",
     "character": "\n\n[Character reference tags]\n",
@@ -389,7 +392,8 @@ def role_template(template_id: str, api: dict | None = None) -> tuple[dict, dict
                 continue
             prompt[f"ipa_{role}"] = _node("IPAdapterAdvanced", f"ipa_{role}", {
                 "model": model, "ipadapter": ["ipa_loader", 1], "image": [f"{role}_image", 0],
-                "weight": DEFAULT_STRENGTH[role], "weight_type": IPADAPTER_WEIGHT_TYPE[role],
+                "weight": round(DEFAULT_STRENGTH[role] * IPADAPTER_WEIGHT_SCALE[role], 3),
+                "weight_type": IPADAPTER_WEIGHT_TYPE[role],
                 "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0, "embeds_scaling": "V only",
             })
             model = [f"ipa_{role}", 0]
@@ -414,6 +418,14 @@ def role_template(template_id: str, api: dict | None = None) -> tuple[dict, dict
         slots.update(pose_strength="pose_apply.inputs.strength", pose_type="pose_union.inputs.type",
                      pose_preprocessor="pose_preprocess")
 
+    # Free the text encoder / CLIP-Vision before KSampler loads SDXL (+ ControlNet).
+    if {"character", "style", "pose"} & roles:
+        sampler = prompt["sampler"]["inputs"]
+        prompt["release"] = _node("FurryJaReleaseEncoders", "release", {
+            "model": sampler["model"], "positive": sampler["positive"], "negative": sampler["negative"],
+        })
+        sampler.update(model=["release", 0], positive=["release", 1], negative=["release", 2])
+
     # Inpaint: white in the mask image is the area to change.
     if "mask" in roles:
         prompt["mask_image"] = _node("LoadImage", "mask_image", {"image": REF_PLACEHOLDER})
@@ -435,7 +447,8 @@ def node_map(api: dict | None = None) -> tuple[dict, dict[str, dict]]:
             "roles": sorted(template_roles(template_id)),
             "slots": slots,
         }
-    mapping = {"family": MODEL_FAMILY, "pose_preprocessors": POSE_PREPROCESSORS, "templates": templates}
+    mapping = {"family": MODEL_FAMILY, "pose_preprocessors": POSE_PREPROCESSORS,
+               "ipadapter_weight_scale": IPADAPTER_WEIGHT_SCALE, "templates": templates}
     return mapping, prompts
 
 

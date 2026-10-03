@@ -155,7 +155,7 @@
     "class_type": "KSampler",
     "inputs": {
       "model": [
-        "ipa_style",
+        "release",
         0
       ],
       "seed": 0,
@@ -164,12 +164,12 @@
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
       "positive": [
-        "positive",
-        0
+        "release",
+        1
       ],
       "negative": [
-        "negative",
-        0
+        "release",
+        2
       ],
       "latent_image": [
         "latent",
@@ -296,6 +296,26 @@
     },
     "_meta": {
       "title": "ipa_style"
+    }
+  },
+  "release": {
+    "class_type": "FurryJaReleaseEncoders",
+    "inputs": {
+      "model": [
+        "ipa_style",
+        0
+      ],
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "release"
     }
   }
 }

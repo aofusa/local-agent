@@ -95,14 +95,42 @@ class FurryJaImageAfter:
         return (image,)
 
 
+class FurryJaReleaseEncoders:
+    """Unload the text encoder / CLIP-Vision once their outputs exist, right before KSampler.
+
+    Taking the model and both conditionings as inputs makes ComfyUI run this after the prompts and
+    IP-Adapter embeddings are computed. On a ~10 GB UMA budget, keeping the encoders resident next to
+    SDXL + ControlNet forced a full offload of the UNet, which produced corrupt images on ROCm.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"model": ("MODEL",), "positive": ("CONDITIONING",), "negative": ("CONDITIONING",)}}
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("model", "positive", "negative")
+    FUNCTION = "release"
+    CATEGORY = "furry_ja"
+
+    def release(self, model, positive, negative):
+        import comfy.model_management as mm
+
+        mm.unload_all_models()
+        mm.soft_empty_cache()
+        log.info("[furry_ja] encoders released before sampling")
+        return (model, positive, negative)
+
+
 NODE_CLASS_MAPPINGS = {
     "FurryJaSplitTags": FurryJaSplitTags,
     "FurryJaCheckpointLoaderAfterEject": FurryJaCheckpointLoaderAfterEject,
     "FurryJaImageAfter": FurryJaImageAfter,
+    "FurryJaReleaseEncoders": FurryJaReleaseEncoders,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FurryJaSplitTags": "furry_ja: Split Tags JSON",
     "FurryJaCheckpointLoaderAfterEject": "furry_ja: Load Checkpoint (after LLM eject)",
     "FurryJaImageAfter": "furry_ja: Image (after)",
+    "FurryJaReleaseEncoders": "furry_ja: Release encoders before sampling",
 }

@@ -22,7 +22,7 @@ NODE_TYPES = {
     "CLIPTextEncode", "ImageScaleToTotalPixels", "EmptyLatentImage", "VAEEncode", "KSampler", "VAEDecode", "SaveImage",
     "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "FurryJaImageAfter", "DWPreprocessor", "DiffControlNetLoader",
     "SetUnionControlNetType", "ControlNetApplyAdvanced", "PreviewImage", "ImageToMask", "SetLatentNoiseMask",
-    "LoraLoader", "Canny", "DepthAnythingV2Preprocessor",
+    "LoraLoader", "Canny", "DepthAnythingV2Preprocessor", "FurryJaReleaseEncoders",
 }
 
 
@@ -209,7 +209,7 @@ async def test_three_roles_from_metadata(settings):
     state = await _run(content, fake, settings)
     prompt = fake.submitted
     assert state["plan"]["template_id"] == "character_pose_style_t2i"
-    assert prompt["ipa_character"]["inputs"]["weight"] == 0.9
+    assert prompt["ipa_character"]["inputs"]["weight"] == 0.45  # strength 0.9 x scale 0.5
     assert prompt["ipa_style"]["inputs"]["weight"] == 0.3
     assert prompt["pose_apply"]["inputs"]["strength"] == 0.8
     assert len(fake.uploads) == 3

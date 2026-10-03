@@ -27,7 +27,7 @@ KNOWN_TYPES = {
     "CLIPTextEncode", "ImageScaleToTotalPixels", "EmptyLatentImage", "VAEEncode", "KSampler", "VAEDecode", "SaveImage",
     "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "FurryJaImageAfter", "DWPreprocessor", "DiffControlNetLoader",
     "SetUnionControlNetType", "ControlNetApplyAdvanced", "PreviewImage", "ImageToMask", "SetLatentNoiseMask",
-    "LoraLoader", "Canny", "DepthAnythingV2Preprocessor",
+    "LoraLoader", "Canny", "DepthAnythingV2Preprocessor", "FurryJaReleaseEncoders",
 }
 
 
@@ -105,8 +105,10 @@ def test_style_and_character_use_ipadapter_pose_uses_controlnet():
     assert prompt["ipa_style"]["inputs"]["weight_type"] == "style transfer"
     assert prompt["ipa_style"]["inputs"]["image"] == ["style_image", 0]
     assert prompt["ipa_character"]["inputs"]["image"] == ["character_image", 0]
-    assert prompt["sampler"]["inputs"]["model"] == ["ipa_style", 0]
-    assert prompt["sampler"]["inputs"]["positive"] == ["pose_apply", 0]
+    assert prompt["release"]["inputs"] == {"model": ["ipa_style", 0], "positive": ["pose_apply", 0],
+                                           "negative": ["pose_apply", 1]}
+    assert [prompt["sampler"]["inputs"][k] for k in ("model", "positive", "negative")] == [
+        ["release", 0], ["release", 1], ["release", 2]]
     assert prompt["pose_apply"]["inputs"]["image"] == ["pose_preprocess", 0]
     assert prompt["latent"]["class_type"] == "EmptyLatentImage"
     # The pose image's pixels only reach ControlNet (no identity from the pose reference);
@@ -132,8 +134,8 @@ def test_injects_values_into_slots():
     assert prompt["user_prompt"]["inputs"]["value"] == "指示"
     assert prompt["sampler"]["inputs"]["seed"] == 5
     assert (prompt["latent"]["inputs"]["width"], prompt["latent"]["inputs"]["height"]) == (1024, 768)
-    assert prompt["ipa_character"]["inputs"]["weight"] == 0.9
-    assert prompt["ipa_style"]["inputs"]["weight"] == 0.4
+    assert prompt["ipa_character"]["inputs"]["weight"] == 0.45  # 0.9 x character scale 0.5
+    assert prompt["ipa_style"]["inputs"]["weight"] == 0.4      # style scale 1.0
     assert prompt["pose_apply"]["inputs"]["strength"] == 1.1
     assert prompt["pose_image"]["inputs"]["image"] == "furry_ja/pose.png"
     assert prompt["pose_preprocess"]["class_type"] == "DepthAnythingV2Preprocessor"
@@ -205,3 +207,18 @@ def test_generated_files_are_up_to_date():
     for template_id, prompt in prompts.items():
         path = ROOT / "workflows" / mapping["templates"][template_id]["file"]
         assert prompt == json.loads(path.read_text(encoding="utf-8")), template_id
+
+
+@pytest.mark.parametrize("template_id", [t for t in TEMPLATE_IDS if template_roles(t) & {"character", "style", "pose"}])
+def test_encoders_released_after_all_conditioning(template_id):
+    # The release node must run after every text/CLIP-Vision encode, i.e. they are all its ancestors.
+    prompt, _ = load_template("sdxl", template_id)
+    upstream = _ancestors(prompt, "release")
+    encoders = {n for n, node in prompt.items() if node["class_type"] in ("CLIPTextEncode", "IPAdapterAdvanced")}
+    assert encoders <= upstream
+    assert prompt["sampler"]["inputs"]["model"] == ["release", 0]
+
+
+def test_basic_templates_have_no_release_node():
+    for template_id in ("t2i_basic", "i2i_basic", "inpaint_basic"):
+        assert "release" not in load_template("sdxl", template_id)[0]
