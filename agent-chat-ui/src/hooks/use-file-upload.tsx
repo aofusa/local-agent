@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
 import { ContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
+import { MAX_IMAGES } from "@/lib/image-roles";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -23,6 +24,36 @@ export function useFileUpload({
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
+
+  // The graph accepts at most MAX_IMAGES reference images per message.
+  const addBlocks = (newBlocks: ContentBlock.Multimodal.Data[]) => {
+    setContentBlocks((prev) => {
+      const images = prev.filter((b) => b.type === "image").length;
+      const room = Math.max(0, MAX_IMAGES - images);
+      const incoming = newBlocks.filter((b) => b.type === "image");
+      if (incoming.length > room) {
+        toast.error(
+          `画像は 1 メッセージ ${MAX_IMAGES} 枚までです。${incoming.length - room} 枚は追加しませんでした。`,
+        );
+      }
+      let kept = 0;
+      return [
+        ...prev,
+        ...newBlocks.filter((b) => b.type !== "image" || kept++ < room),
+      ];
+    });
+  };
+
+  const updateBlockMetadata = (
+    idx: number,
+    metadata: Record<string, unknown>,
+  ) => {
+    setContentBlocks((prev) =>
+      prev.map((b, i) =>
+        i === idx ? { ...b, metadata: { ...b.metadata, ...metadata } } : b,
+      ),
+    );
+  };
 
   const isDuplicate = (file: File, blocks: ContentBlock.Multimodal.Data[]) => {
     if (file.type === "application/pdf") {
@@ -75,7 +106,7 @@ export function useFileUpload({
     const newBlocks = uniqueFiles.length
       ? await Promise.all(uniqueFiles.map(fileToContentBlock))
       : [];
-    setContentBlocks((prev) => [...prev, ...newBlocks]);
+    addBlocks(newBlocks);
     e.target.value = "";
   };
 
@@ -135,7 +166,7 @@ export function useFileUpload({
       const newBlocks = uniqueFiles.length
         ? await Promise.all(uniqueFiles.map(fileToContentBlock))
         : [];
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      addBlocks(newBlocks);
     };
     const handleWindowDragEnd = (e: DragEvent) => {
       dragCounter.current = 0;
@@ -253,7 +284,7 @@ export function useFileUpload({
     }
     if (uniqueFiles.length > 0) {
       const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      addBlocks(newBlocks);
     }
   };
 
@@ -266,5 +297,6 @@ export function useFileUpload({
     resetBlocks,
     dragOver,
     handlePaste,
+    updateBlockMetadata,
   };
 }

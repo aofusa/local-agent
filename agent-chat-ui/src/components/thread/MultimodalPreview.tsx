@@ -3,6 +3,7 @@ import { File, X as XIcon } from "lucide-react";
 import { ContentBlock } from "@langchain/core/messages";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { roleLabel } from "@/lib/image-roles";
 export interface MultimodalPreviewProps {
   block: ContentBlock.Multimodal.Data;
   removable?: boolean;
@@ -37,6 +38,16 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
           width={size === "sm" ? 16 : size === "md" ? 32 : 48}
           height={size === "sm" ? 16 : size === "md" ? 32 : 48}
         />
+        {!removable &&
+          typeof block.metadata?.role === "string" &&
+          block.metadata.role !== "auto" && (
+            <span className="absolute bottom-0 left-0 rounded-tr-md rounded-bl-md bg-black/60 px-1 text-[10px] text-white">
+              {roleLabel(block.metadata.role) ?? String(block.metadata.role)}
+              {typeof block.metadata.strength === "number"
+                ? ` ${block.metadata.strength}`
+                : ""}
+            </span>
+          )}
         {removable && (
           <button
             type="button"

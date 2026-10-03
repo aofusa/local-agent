@@ -7,7 +7,7 @@
   2. Install eedali/LM_Connect (pinned commit) into custom_nodes. Only its light dependencies are installed
      (requests, Pillow, numpy). llama-cpp-python is NOT installed: no GGUF runs inside ComfyUI.
   3. Link custom_nodes\furry_ja to this repository's comfyui_nodes\furry_ja (directory junction).
-  4. Optionally (-ConfigureComfyDesktop) set Comfy Desktop's launch args to --listen 127.0.0.1 --port 8188.
+  4. Optionally (-ConfigureComfyDesktop) set Comfy Desktop's launch args to --listen 127.0.0.1 --port 8188 --cache-none.
   5. Check that the checkpoint exists.
   Restart ComfyUI afterwards so the nodes are loaded.
 
@@ -102,8 +102,9 @@ if ($ConfigureComfyDesktop) {
         foreach ($inst in $items) {
             if ($inst.id -ne $layout.InstallationId) { continue }
             $current = if ($inst.launchArgs) { $inst.launchArgs } else { "" }
-            $rest = ($current -replace '--listen(\s+\S+)?', '' -replace '--port\s+\d+', '').Trim() -replace '\s+', ' '
-            Set-JsonProperty $inst "launchArgs" ("--listen 127.0.0.1 --port 8188 " + $rest).Trim()
+            $rest = ($current -replace '--listen(\s+\S+)?', '' -replace '--port\s+\d+', '' -replace '--cache-none', '').Trim() -replace '\s+', ' '
+            # --cache-none: see Get-ComfyServerArgs (IP-Adapter breaks with the node cache on ComfyUI 0.38).
+            Set-JsonProperty $inst "launchArgs" ("--listen 127.0.0.1 --port 8188 --cache-none " + $rest).Trim()
             Write-Ok "launchArgs: $($inst.launchArgs)  (backup: installations.json.local-agent.bak)"
         }
         Write-JsonFile $file $items

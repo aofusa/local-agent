@@ -8,6 +8,7 @@ dependencies = [
     "langchain-core>=1.0",
     "httpx>=0.27",
     "websockets>=13",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]

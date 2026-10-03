@@ -58,6 +58,11 @@ Check "workflow uses $modelKey" {
 
 Write-Step "ComfyUI"
 Check "server is loopback only" { Assert-LoopbackOnly $ComfyPort }
+Check "node cache disabled (--cache-none)" {
+    $argv = (Get-Json "http://127.0.0.1:$ComfyPort/system_stats").system.argv
+    if ($argv -notcontains "--cache-none") { throw "ComfyUI を --cache-none 付きで起動してください（start-comfyui.ps1 は付けます。IP-Adapter の 2 回目以降が壊れます）" }
+    "ok"
+}
 Check "custom nodes" {
     $needed = "LMConnectLMStudioBackend", "LMConnectVision", "LMConnectPromptWithSystem",
               "LMConnectEjectLMStudioModel", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject"
@@ -65,6 +70,30 @@ Check "custom nodes" {
     $absent = $needed | Where-Object { -not $info.PSObject.Properties[$_] }
     if ($absent) { throw "未登録: $($absent -join ', ')（setup-comfyui.ps1 の後に ComfyUI を再起動）" }
     "$($needed.Count) nodes"
+}
+Check "reference nodes and models (multi-image)" {
+    $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info"
+    $needed = "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "DWPreprocessor", "DepthAnythingV2Preprocessor",
+              "DiffControlNetLoader", "SetUnionControlNetType", "FurryJaImageAfter"
+    $absent = $needed | Where-Object { -not $info.PSObject.Properties[$_] }
+    if ($absent) { throw "未登録: $($absent -join ', ')（setup-comfyui-refs.ps1 の後に ComfyUI を再起動）" }
+    $controlnets = $info.DiffControlNetLoader.input.required.control_net_name[0]
+    if ($controlnets -notcontains "controlnet-union-sdxl-1.0-promax.safetensors") { throw "ControlNet union のモデルがありません（setup-comfyui-refs.ps1）" }
+    "$($needed.Count) nodes + ControlNet"
+}
+Check "LORAS" {
+    $loras = Get-DotEnvValue "LORAS" ""
+    if (-not $loras) { return "none" }
+    $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info/LoraLoader"
+    $available = @($info.LoraLoader.input.required.lora_name[0]) | ForEach-Object { "$_".Replace('\', '/').ToLower() }
+    $missing = foreach ($item in ($loras -split '[,;]')) {
+        $name = ($item.Trim() -split ':')[0].Replace('\', '/').ToLower()
+        if (-not $name) { continue }
+        $hit = $available | Where-Object { $_ -eq $name -or ($_ -replace '\.[^.]+$', '') -eq $name -or ($_ -replace '^.*/', '' -replace '\.[^.]+$', '') -eq $name }
+        if (-not $hit) { $name }
+    }
+    if ($missing) { throw "ComfyUI の loras にありません: $($missing -join ', ')" }
+    $loras
 }
 Check "checkpoint $ckptName" {
     $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info/FurryJaCheckpointLoaderAfterEject"

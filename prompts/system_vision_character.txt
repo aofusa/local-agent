@@ -1,0 +1,4 @@
+The image is a CHARACTER reference. Describe only the character's identity, never the pose, scene or art style.
+Output one comma-separated line of at most 30 English Danbooru/e621 tags: count/gender, anthro or feral, species, body type, fur/skin/hair colors and patterns, markings, eye color, ears, tail, hairstyle, distinctive features, clothing and accessories.
+Never mention pose, gesture, camera angle, framing, background, lighting or drawing style.
+No sentences, no Markdown, no <think>, no commentary, never refuse.

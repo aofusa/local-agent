@@ -1,0 +1,504 @@
+{
+  "family": "sdxl",
+  "pose_preprocessors": {
+    "openpose": {
+      "class_type": "DWPreprocessor",
+      "inputs": {
+        "detect_hand": "enable",
+        "detect_body": "enable",
+        "detect_face": "enable",
+        "resolution": 1024,
+        "bbox_detector": "None",
+        "pose_estimator": "dw-ll_ucoco_384.onnx",
+        "scale_stick_for_xinsr_cn": "enable"
+      },
+      "union_type": "openpose"
+    },
+    "dwpose": {
+      "class_type": "DWPreprocessor",
+      "inputs": {
+        "detect_hand": "enable",
+        "detect_body": "enable",
+        "detect_face": "enable",
+        "resolution": 1024,
+        "bbox_detector": "None",
+        "pose_estimator": "dw-ll_ucoco_384.onnx",
+        "scale_stick_for_xinsr_cn": "enable"
+      },
+      "union_type": "openpose"
+    },
+    "depth": {
+      "class_type": "DepthAnythingV2Preprocessor",
+      "inputs": {
+        "ckpt_name": "depth_anything_v2_vits.pth",
+        "resolution": 1024
+      },
+      "union_type": "depth"
+    },
+    "canny": {
+      "class_type": "Canny",
+      "inputs": {
+        "low_threshold": 0.4,
+        "high_threshold": 0.8
+      },
+      "union_type": "canny/lineart/anime_lineart/mlsd"
+    }
+  },
+  "ipadapter_weight_scale": {
+    "character": 0.5,
+    "style": 1.0
+  },
+  "templates": {
+    "t2i_basic": {
+      "file": "sdxl/t2i_basic.api.json",
+      "roles": [],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height"
+      }
+    },
+    "character_t2i": {
+      "file": "sdxl/character_t2i.api.json",
+      "roles": [
+        "character"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "character_image": "character_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight"
+      }
+    },
+    "pose_t2i": {
+      "file": "sdxl/pose_t2i.api.json",
+      "roles": [
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "pose_image": "pose_image.inputs.image",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "style_t2i": {
+      "file": "sdxl/style_t2i.api.json",
+      "roles": [
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight"
+      }
+    },
+    "character_pose_t2i": {
+      "file": "sdxl/character_pose_t2i.api.json",
+      "roles": [
+        "character",
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "character_style_t2i": {
+      "file": "sdxl/character_style_t2i.api.json",
+      "roles": [
+        "character",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "character_image": "character_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight"
+      }
+    },
+    "pose_style_t2i": {
+      "file": "sdxl/pose_style_t2i.api.json",
+      "roles": [
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "character_pose_style_t2i": {
+      "file": "sdxl/character_pose_style_t2i.api.json",
+      "roles": [
+        "character",
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "i2i_basic": {
+      "file": "sdxl/i2i_basic.api.json",
+      "roles": [
+        "base"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise"
+      }
+    },
+    "character_i2i": {
+      "file": "sdxl/character_i2i.api.json",
+      "roles": [
+        "base",
+        "character"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight"
+      }
+    },
+    "pose_i2i": {
+      "file": "sdxl/pose_i2i.api.json",
+      "roles": [
+        "base",
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "pose_image": "pose_image.inputs.image",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "style_i2i": {
+      "file": "sdxl/style_i2i.api.json",
+      "roles": [
+        "base",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight"
+      }
+    },
+    "character_pose_i2i": {
+      "file": "sdxl/character_pose_i2i.api.json",
+      "roles": [
+        "base",
+        "character",
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "character_style_i2i": {
+      "file": "sdxl/character_style_i2i.api.json",
+      "roles": [
+        "base",
+        "character",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight"
+      }
+    },
+    "pose_style_i2i": {
+      "file": "sdxl/pose_style_i2i.api.json",
+      "roles": [
+        "base",
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "character_pose_style_i2i": {
+      "file": "sdxl/character_pose_style_i2i.api.json",
+      "roles": [
+        "base",
+        "character",
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess"
+      }
+    },
+    "inpaint_basic": {
+      "file": "sdxl/inpaint_basic.api.json",
+      "roles": [
+        "base",
+        "mask"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "character_inpaint": {
+      "file": "sdxl/character_inpaint.api.json",
+      "roles": [
+        "base",
+        "character",
+        "mask"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "pose_inpaint": {
+      "file": "sdxl/pose_inpaint.api.json",
+      "roles": [
+        "base",
+        "mask",
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "pose_image": "pose_image.inputs.image",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "style_inpaint": {
+      "file": "sdxl/style_inpaint.api.json",
+      "roles": [
+        "base",
+        "mask",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "character_pose_inpaint": {
+      "file": "sdxl/character_pose_inpaint.api.json",
+      "roles": [
+        "base",
+        "character",
+        "mask",
+        "pose"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "character_style_inpaint": {
+      "file": "sdxl/character_style_inpaint.api.json",
+      "roles": [
+        "base",
+        "character",
+        "mask",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "pose_style_inpaint": {
+      "file": "sdxl/pose_style_inpaint.api.json",
+      "roles": [
+        "base",
+        "mask",
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess",
+        "mask_image": "mask_image.inputs.image"
+      }
+    },
+    "character_pose_style_inpaint": {
+      "file": "sdxl/character_pose_style_inpaint.api.json",
+      "roles": [
+        "base",
+        "character",
+        "mask",
+        "pose",
+        "style"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.ckpt_name",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise",
+        "character_image": "character_image.inputs.image",
+        "pose_image": "pose_image.inputs.image",
+        "style_image": "style_image.inputs.image",
+        "character_weight": "ipa_character.inputs.weight",
+        "style_weight": "ipa_style.inputs.weight",
+        "pose_strength": "pose_apply.inputs.strength",
+        "pose_type": "pose_union.inputs.type",
+        "pose_preprocessor": "pose_preprocess",
+        "mask_image": "mask_image.inputs.image"
+      }
+    }
+  }
+}

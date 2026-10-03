@@ -91,6 +91,7 @@ def test_comfy_desktop_layout_and_server_args(shell, tmp_path):
     assert args[:6] == ["-s", "main.py", "--listen", "127.0.0.1", "--port", "8188"]
     assert "--base-directory" in args and str(base) in args
     assert "--output-directory" in args
+    assert "--cache-none" in args  # IP-Adapter needs it on ComfyUI 0.38
 
 
 @pytest.mark.parametrize("shell", SHELLS)

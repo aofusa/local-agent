@@ -20,9 +20,15 @@ Write-Host "agent-chat-ui -> LangGraph $apiUrl (assistant: agent)"
 $pnpm = @("--yes", "pnpm@10.5.1")
 if (-not (Test-Path "node_modules")) { npx @pnpm install --frozen-lockfile }
 
-# Rebuild only when the API URL changed since the last build.
+# Rebuild when the API URL changed or a UI source file is newer than the last build.
 $stamp = ".next\local-agent-api-url.txt"
-if (-not (Test-Path ".next\BUILD_ID") -or -not (Test-Path $stamp) -or ([IO.File]::ReadAllText((Resolve-Path $stamp))).Trim() -ne $apiUrl) {
+$stale = $true
+if ((Test-Path ".next\BUILD_ID") -and (Test-Path $stamp) -and ([IO.File]::ReadAllText((Resolve-Path $stamp))).Trim() -eq $apiUrl) {
+    $built = (Get-Item ".next\BUILD_ID").LastWriteTimeUtc
+    $sources = @(Get-ChildItem -Recurse -File "src") + @(Get-Item "package.json", "next.config.mjs")
+    $stale = [bool]($sources | Where-Object { $_.LastWriteTimeUtc -gt $built } | Select-Object -First 1)
+}
+if ($stale) {
     npx @pnpm build
     if ($LASTEXITCODE -ne 0) { throw "agent-chat-ui build failed" }
     Write-TextFile (Join-Path (Get-Location) $stamp) $apiUrl
