@@ -99,6 +99,15 @@ def _fail(state: State, exc: Exception) -> dict:
     return {"messages": [message], "error": str(exc)}
 
 
+async def _fail_and_free(state: State, exc: Exception, client: ComfyClient) -> dict:
+    """Report the error and release whatever ComfyUI loaded (e.g. the checkpoint) before failing."""
+    try:
+        await client.free()
+    except Exception as free_exc:  # pragma: no cover - best effort
+        log.warning("ComfyUI /free failed: %s", free_exc)
+    return _fail(state, exc)
+
+
 def _route(state: State) -> str:
     return END if state.get("error") else "next"
 
@@ -184,7 +193,7 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
         result = await client.wait(job["prompt_id"], job["client_id"], until_node="split",
                                    deadline=_monotonic_deadline(job))
     except Exception as exc:
-        return _fail(state, exc)
+        return await _fail_and_free(state, exc, client)
     split = result.outputs.get("split") or {}
     tags = {
         "positive": (split.get("positive") or [""])[0],

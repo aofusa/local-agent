@@ -52,6 +52,8 @@ class FakeComfy:
     async def wait(self, prompt_id, client_id, until_node=None, deadline=None, on_event=None):
         if until_node == "split":
             self.calls.append("wait_split")
+            if self.fail_at == "tags":
+                raise ComfyError("FurryJaSplitTags (split): [LM Connect Error] HTTP Error 400")
             return WaitResult(done=False, outputs={"ckpt": {"lmstudio_unloaded": [self.gate_ok]}, "split": {
                 "positive": ["masterpiece, 1girl, anthro, wolf, white fur, kimono, sunset, beach"],
                 "negative": ["worst quality"], "split_mode": ["json"]}})
@@ -196,3 +198,10 @@ async def test_no_blocking_calls_in_event_loop(settings):
     with blockbuster_ctx():
         state = await _run("テスト", fake, settings)
     assert not state.get("error")
+
+
+async def test_failed_run_releases_comfyui_memory(settings):
+    fake = FakeComfy(fail_at="tags")
+    state = await _run("テスト", fake, settings)
+    assert "LM Connect Error" in state["messages"][-1].content
+    assert fake.calls[-1] == "free"
