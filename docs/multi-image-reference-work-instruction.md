@@ -652,7 +652,7 @@ tests/
 
 - キャラクター参照は IP-Adapter Plus（非 FaceID）と Vision タグによる近似で、細部の同一性（模様の位置など）は保証しない。強い画風参照と併用すると配色が画風側へ寄る。
 - 三点参照は GPU 予算（空き約 6.8GB）の上限近くで動いており、所要は 12 分台。
-- ComfyUI_IPAdapter_plus は upstream がアーカイブ済み。ComfyUI 0.38 では `--cache-none` が必須だった。ComfyUI 更新時は再確認が要る。
+- ComfyUI_IPAdapter_plus は 2025-04-14 のコミットを最後に更新が止まっている（固定したのもこのコミット）。ComfyUI 0.38 では `--cache-none` が必須だった。ComfyUI 更新時は再確認が要る。
 - 役割推定はルールベースのため、想定外の言い回しでは確認カードに落ちる（誤って生成するより確認を優先する設計）。
 - ブラウザを閉じると LangGraph の run がキャンセルされる。待ち（await_tags / await_image）中なら ComfyUI の prompt も中断する。投入直前にキャンセルされた場合は ComfyUI 側で 1 件走り切ることがある。
 

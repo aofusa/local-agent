@@ -445,4 +445,24 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 ## ライセンス
 
 このリポジトリのコードは MIT または Apache-2.0（[LICENSE-MIT](LICENSE-MIT)、[LICENSE-APACHE](LICENSE-APACHE)）です。
-`agent-chat-ui/` は upstream の MIT ライセンスです。LM_Connect、llama.cpp、各モデルはセットアップ時や事前準備で各配布元から取得するもので、それぞれのライセンス・規約に従います。
+`agent-chat-ui/` は upstream（[langchain-ai/agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui)）の MIT ライセンスで、変更箇所は「UI の変更点」に記載しています。
+
+次のものはこのリポジトリに含めていません。セットアップスクリプトや事前準備で各配布元から利用者の環境へ取得し、それぞれのライセンス・規約に従います。
+ライセンスは 2026-10-04 時点で各リポジトリ・モデルページの表示を確認したものです。利用前に配布元で最新の表示を確認してください。
+
+| 名称 | 取得するもの | 取得方法 | ライセンス |
+|---|---|---|---|
+| [eedali/LM_Connect](https://github.com/eedali/LM_Connect) | ComfyUI カスタムノード（LM Studio 連携） | `setup-comfyui.ps1` | リポジトリにライセンスの表示なし |
+| [cubiq/ComfyUI_IPAdapter_plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus) | ComfyUI カスタムノード（IP-Adapter） | `setup-comfyui-refs.ps1` | GPL-3.0 |
+| [Fannovel16/comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux) | ComfyUI カスタムノード（DWPose / 深度などの前処理） | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [xinsir/controlnet-union-sdxl-1.0](https://huggingface.co/xinsir/controlnet-union-sdxl-1.0) | ControlNet Union promax | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [h94/IP-Adapter](https://huggingface.co/h94/IP-Adapter) | IP-Adapter Plus SDXL、画像エンコーダ（OpenCLIP ViT-H/14） | `setup-comfyui-refs.ps1` | Apache-2.0（画像エンコーダの元の [laion/CLIP-ViT-H-14-laion2B-s32B-b79K](https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K) は MIT） |
+| [yzd-v/DWPose](https://huggingface.co/yzd-v/DWPose) | DWPose のポーズ推定モデル（ONNX） | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) | 深度推定モデル | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `llama-quantize`（LLM の再量子化） | `setup-lmstudio.ps1`（`tools\`） | MIT |
+| LLM（Huihui Qwen3.8 27B Abliterated と mmproj） | LM Studio でダウンロード | 事前準備（手動） | 配布ページで確認 |
+| チェックポイント（yiffInHell など）、LoRA | Civitai などから入手 | 事前準備（手動） | 配布ページで確認（生成物や商用利用に条件があることが多い） |
+
+- ComfyUI_IPAdapter_plus（GPL-3.0）は ComfyUI のプロセスに読み込まれるノードです。このリポジトリはそのコードを含まず、import もしません（API 形式のワークフロー JSON でノード名を指定するだけです）。
+- LM_Connect はリポジトリにライセンスの表示がありません。このリポジトリは再配布せず、利用者の環境へ clone するだけです。
+- 生成物の扱いは、使用したチェックポイント・LoRA・LLM の規約と、公開先の規約に従ってください。
