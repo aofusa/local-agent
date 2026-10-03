@@ -294,11 +294,12 @@ ROLE_SECTION = {
     "pose": "\n\n[Pose reference tags]\n",
     "style": "\n\n[Style reference tags]\n",
 }
-# bbox_detector None: the whole image is one figure. The YOLOX person detector often misses furry
-# characters and its TorchScript build failed intermittently on ROCm (Windows) in testing.
+# bbox_detector None: the whole image is one figure (the YOLOX person detector often misses furry
+# characters). The ONNX pose estimator runs on the CPU through OpenCV when onnxruntime is absent:
+# the TorchScript models crashed intermittently on the ROCm (Windows) GPU with corrupt tensor shapes.
 DWPOSE_INPUTS = {
     "detect_hand": "enable", "detect_body": "enable", "detect_face": "enable", "resolution": 1024,
-    "bbox_detector": "None", "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+    "bbox_detector": "None", "pose_estimator": "dw-ll_ucoco_384.onnx",
     "scale_stick_for_xinsr_cn": "enable",
 }
 # Preprocessor variants the planner may pick (never free text). union_type is SetUnionControlNetType.type.

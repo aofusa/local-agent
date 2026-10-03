@@ -6,12 +6,12 @@
   Needed for the multi-image role templates (style / pose / character). Text-only and plain img2img work without it.
   1. Clone cubiq/ComfyUI_IPAdapter_plus and Fannovel16/comfyui_controlnet_aux (pinned commits) into custom_nodes.
   2. Install controlnet_aux's light dependencies into ComfyUI's python. torch / numpy are not changed;
-     onnxruntime-gpu (CUDA only) and mediapipe are skipped: DWPose runs as TorchScript on the ComfyUI device.
+     onnxruntime-gpu (CUDA only) and mediapipe are skipped: DWPose runs its ONNX model on the CPU via OpenCV.
   3. Download the models once, so no node downloads anything at run time:
        models\controlnet\controlnet-union-sdxl-1.0-promax.safetensors   (xinsir, openpose/depth/canny)
        models\ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors            (h94)
        models\clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors     (h94 image encoder)
-       custom_nodes\comfyui_controlnet_aux\ckpts\...                      (DWPose TorchScript pose model, Depth Anything V2 Small)
+       custom_nodes\comfyui_controlnet_aux\ckpts\...                      (DWPose ONNX pose model, run on CPU; Depth Anything V2 Small)
   Restart ComfyUI afterwards.
 
 .EXAMPLE
@@ -80,8 +80,8 @@ Get-Model "$hf/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-
 Get-Model "$hf/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors" `
     (Join-Path $ModelsDir "clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
 $ckpts = Join-Path $aux "ckpts"
-Get-Model "$hf/hr16/DWPose-TorchScript-BatchSize5/resolve/main/dw-ll_ucoco_384_bs5.torchscript.pt" `
-    (Join-Path $ckpts "hr16\DWPose-TorchScript-BatchSize5\dw-ll_ucoco_384_bs5.torchscript.pt")
+Get-Model "$hf/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx" `
+    (Join-Path $ckpts "yzd-v\DWPose\dw-ll_ucoco_384.onnx")
 Get-Model "$hf/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth" `
     (Join-Path $ckpts "depth-anything\Depth-Anything-V2-Small\depth_anything_v2_vits.pth")
 
