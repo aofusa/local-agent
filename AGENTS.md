@@ -1,10 +1,10 @@
 # AGENTS.md
 
-このファイルは、このリポジトリで作業する AI エージェントへの指示である。実装に入る前に、このファイルと `docs/lmstudio-comfyui-workflow-design.md` を読む。
+このファイルは、このリポジトリで作業する AI エージェントへの指示である。実装に入る前に、このファイルと `docs/lmstudio-comfyui-workflow-design.md`、複数参照画像を触る場合は `docs/multi-image-reference-work-instruction.md` を読む。
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -13,7 +13,7 @@
 想定する利用者の操作は次だけである。
 
 1. 他ホストのブラウザで、この端末の agent-chat-ui を開く。
-2. 日本語テキストを送る。必要なら画像 0〜2 枚、または動画 1 本を添える。
+2. 日本語テキストを送る。必要なら画像 0〜4 枚（各画像に役割を選べる）、または動画 1 本を添える。
 3. UI 上で進捗のあと、生成された静止画を見る。
 
 ## 必読
@@ -22,6 +22,7 @@
 |---|---|
 | このファイル | 入口、UI、他ホストからの到達、画像を UI へ返す責任、作業規則 |
 | `docs/lmstudio-comfyui-workflow-design.md` | ComfyUI と LM Studio の連携。実装指示であり、ノード、順序、モデル、メモリ、禁止事項を固定する |
+| `docs/multi-image-reference-work-instruction.md` | 複数参照画像の要件と設計。末尾の調査結果に、設計書・このファイルとの差分と吸収方法がある |
 
 ComfyUI と LM Studio の呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
 
@@ -95,10 +96,12 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 
 - 分割に失敗してもリトライしない。生文字列を positive にし、negative は固定の画質タグにして生成まで進む。
 - テキストだけのときは Empty Latent、denoise 1.0。参照画像がある img2img の初期 denoise は 0.45。解像度の初期値は 832×1216。KSampler の初期値は steps 28、cfg 5.5、euler ancestral、normal。batch は 1。
-- 参照画像は 0〜2 枚。同一性を残す経路（VAE Encode）と、キャプションへ落とす経路（Vision）を同時に使える。Vision の長辺は 768。画像が 0 枚の実行では Vision を走らせず、Load Image の欠損で落とさない。
+- 参照画像は 0〜4 枚で、役割（`character` / `pose` / `style` / `base` / `mask`）を持つ。役割の組み合わせから `planner.select_workflow` が `workflows/sdxl/` のテンプレート ID を一意に決める。役割推定は LangGraph 内のルール（日本語キーワードと序数）で行い、LM Studio は呼ばない。決められないときは LangGraph の interrupt で利用者に確認する。
+- `base` は同一性を残す経路（VAE Encode）。`character` / `style` は IP-Adapter Plus、`pose` は DWPose 等の前処理と ControlNet Union。どの役割も役割専用の Vision プロンプトでタグ化し、LLM の入力へ節として渡す。Vision の長辺は 768。画像が 0 枚の実行では Vision を走らせず、Load Image の欠損で落とさない。
+- IP-Adapter、ControlNet、前処理、LoRA のローダーは、すべて `ckpt`（eject の後）に依存させる。依存の無い前処理は `FurryJaImageAfter` で `ckpt` の後に止める。
 - 動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。動画生成モデルはロードしない。VHS が無い間は動画を対象外にし、その旨を README に書く。
-- IP-Adapter はフェーズ 1 の必須にしない。
-- ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）に限る。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
+- IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
+- ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/sdxl.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補）に限る。構造の変更は、マップにある前処理候補の差し替えと、`LORAS` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
 - API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。タイムアウトは 10 分。この呼び出しを行うのは LangGraph である。
 
 ## 画像の保存と UI への返却
@@ -209,6 +212,12 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - ComfyUI と LM Studio のインストールディレクトリは端末ごとに違う。セットアップスクリプトが検出し、`.env` に保存する。
 - チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（`CKPT_NAME`）。
 - agent-chat-ui に返す画像は `{"type": "image", "mimeType": "image/png", "data": <base64>}`。在庫の UI は AI メッセージの画像を描画しないため、`ai.tsx` に最小限の変更を加えた。
+- 参照画像の役割と強度は、画像ブロックの `metadata.role` / `metadata.strength` で送る。UI には添付ごとの役割セレクトと強度欄を加えた。役割の確認は在庫の HITL 表示（承認 / 編集 / 却下）を使う。
+- LoRA は `.env` の `LORAS`（`名前[:モデル強度[:CLIP 強度]]` のカンマ区切り）。空なら使わない。
+- 参照画像用のノードとモデルは `scripts/setup-comfyui-refs.ps1` が入れる（ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose ONNX、Depth Anything V2 Small）。実行時の自動ダウンロードはしない。
+- タイムアウトはタグ生成と画像生成のそれぞれに `COMFYUI_TIMEOUT_S`（600 秒）。
+- ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1` と Comfy Desktop の起動引数）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
+- IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則
 
