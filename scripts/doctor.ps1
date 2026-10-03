@@ -58,6 +58,11 @@ Check "workflow uses $modelKey" {
 
 Write-Step "ComfyUI"
 Check "server is loopback only" { Assert-LoopbackOnly $ComfyPort }
+Check "node cache disabled (--cache-none)" {
+    $argv = (Get-Json "http://127.0.0.1:$ComfyPort/system_stats").system.argv
+    if ($argv -notcontains "--cache-none") { throw "ComfyUI を --cache-none 付きで起動してください（start-comfyui.ps1 は付けます。IP-Adapter の 2 回目以降が壊れます）" }
+    "ok"
+}
 Check "custom nodes" {
     $needed = "LMConnectLMStudioBackend", "LMConnectVision", "LMConnectPromptWithSystem",
               "LMConnectEjectLMStudioModel", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject"

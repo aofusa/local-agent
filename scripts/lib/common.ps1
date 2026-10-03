@@ -237,7 +237,9 @@ function Save-ComfyLayout($Layout) {
 
 function Get-ComfyServerArgs($Layout, [int]$Port = 8188) {
     # ComfyUI stays on loopback (AGENTS.md); only LangGraph and the UI face the LAN.
-    $arguments = @("-s", "main.py", "--listen", "127.0.0.1", "--port", "$Port")
+    # --cache-none: with ComfyUI 0.38 a cached IP-Adapter loader output produced corrupt images on every
+    # run after the first one; re-executing each node per run fixed it.
+    $arguments = @("-s", "main.py", "--listen", "127.0.0.1", "--port", "$Port", "--cache-none")
     if ($Layout.BaseDir) {
         $arguments += @("--base-directory", $Layout.BaseDir, "--user-directory", (Join-Path $Layout.BaseDir "user"),
                         "--database-url", ("sqlite:///" + (Join-Path $Layout.BaseDir "user\comfyui.db")))
