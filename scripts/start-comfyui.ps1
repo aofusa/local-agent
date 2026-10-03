@@ -1,21 +1,20 @@
-# Start the existing Comfy Desktop installation's ComfyUI server headless on 127.0.0.1:8188.
-# Same Python, code, models, input/output and user directories as Comfy Desktop uses.
-# Alternative: open Comfy Desktop and start the "ComfyUI" instance (its launch args are set to the same).
+﻿# Start the existing ComfyUI installation headless on 127.0.0.1:8188 (loopback only).
+# Paths come from .env (written by scripts\setup-comfyui.ps1) or are detected from Comfy Desktop.
+# Alternative: start the instance from Comfy Desktop after `setup-comfyui.ps1 -ConfigureComfyDesktop`.
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\Comfy-Desktop\ComfyUI-Installs\ComfyUI",
-    [string]$BaseDir = "$env:USERPROFILE\Documents\ComfyUI",
-    [string]$ModelPathsConfig = "$env:APPDATA\Comfy Desktop\instance-model-paths\<instance-id>.yaml"
+    [int]$Port = 8188
 )
 $ErrorActionPreference = "Stop"
-if (Get-NetTCPConnection -State Listen -LocalPort 8188 -ErrorAction SilentlyContinue) {
-    Write-Host "ComfyUI is already listening on 8188"; return
+. (Join-Path $PSScriptRoot "lib\common.ps1")
+
+if (Test-Listening $Port) { Write-Host "ComfyUI is already listening on $Port"; return }
+$layout = Get-ComfyLayout
+if (-not $layout -or -not $layout.Python) {
+    throw "ComfyUI の場所が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。"
 }
-Set-Location $InstallDir
-& "$BaseDir\.venv\Scripts\python.exe" -s ComfyUI\main.py `
-    --listen 127.0.0.1 --port 8188 --enable-manager --enable-assets `
-    --base-directory $BaseDir `
-    --user-directory "$BaseDir\user" `
-    --database-url "sqlite:///$BaseDir\user\comfyui.db" `
-    --extra-model-paths-config $ModelPathsConfig `
-    --input-directory "$BaseDir\input" `
-    --output-directory "$BaseDir\output"
+$arguments = Get-ComfyServerArgs $layout $Port
+$extra = Get-DotEnvValue "COMFYUI_EXTRA_ARGS" ""
+if ($extra) { $arguments += ($extra -split "\s+" | Where-Object { $_ }) }
+Write-Host "ComfyUI: $($layout.Python) $($arguments -join ' ')"
+Set-Location $layout.MainDir
+& $layout.Python @arguments
