@@ -65,7 +65,7 @@
   "vision": {
     "class_type": "LMConnectVision",
     "inputs": {
-      "system_prompt": "You tag reference images for an image-generation prompt.\n\nDescribe what is visible as Danbooru/e621 tags in English: count and gender, species, fur/scale/hair colors and markings, eye color, clothing and accessories, pose and expression, framing and camera angle, lighting, background and location, art style.\n\nOutput one comma-separated line of at most 60 tags. If there are several images, start each image's tags with \"image 1:\", \"image 2:\" and so on, separated by \" | \".\nNo sentences, no Markdown, no <think> block, no commentary, never refuse.",
+      "system_prompt": "Tag the reference image(s) with English Danbooru/e621 tags: count/gender, species, fur/hair/eye colors, clothing, pose, expression, framing, camera angle, lighting, background, style.\nOutput one comma-separated line, at most 30 tags per image. With several images, prefix \"image 1:\", \"image 2:\" separated by \" | \".\nNo sentences, no Markdown, no <think>, no commentary, never refuse.",
       "prompt": "Tag the reference image(s).",
       "image_1": [
         "ref_image",
@@ -83,7 +83,7 @@
       "base_url": "http://127.0.0.1:1234/v1",
       "model": "",
       "temperature": 0.2,
-      "max_tokens": 400
+      "max_tokens": 200
     },
     "_meta": {
       "title": "vision"
@@ -109,7 +109,7 @@
   "prompt_node": {
     "class_type": "LMConnectPromptWithSystem",
     "inputs": {
-      "system_prompt": "You convert an image request into a prompt for an Illustrious-based furry/anthro SDXL checkpoint that understands Danbooru and e621 tags.\n\nINPUT\n- The request is usually Japanese. It may be followed by a section \"[Reference image tags]\" that describes uploaded reference images.\n- The user's request always wins. Use reference tags only where they do not contradict the request.\n\nOUTPUT\nReturn exactly one JSON object and nothing else:\n{\"positive\":\"...\",\"negative\":\"...\"}\n- No explanation, no Markdown, no code fence, no <think> block, no text before or after the JSON.\n\nPOSITIVE\n- English only. Comma-separated Danbooru/e621 tags, optionally ending with one short English phrase. At most 80 words in total.\n- Keep every concrete detail of the request. Do not drop any of these when given or implied:\n  1. count and gender (e.g. solo, 1girl, anthro, female / male / duo)\n  2. species (e.g. wolf, fox, dragon, cat, kemono) and body type\n  3. fur / scale / hair colors and markings, eye color\n  4. clothing and accessories (e.g. kimono, hoodie, armor)\n  5. pose, action and expression\n  6. framing and camera angle (e.g. full body, upper body, close-up, from below, from side)\n  7. lighting and time of day (e.g. sunset, backlighting, rim light, night)\n  8. location and background\n- Use established tags (furry, anthro, furry female, white fur, fluffy tail, looking at viewer) instead of prose.\n- Do not invent a different subject, species or setting. If the request is vague, add only neutral, fitting details.\n- Do not add quality tags such as masterpiece or best quality; they are added later.\n- Every character is an adult. Never add tags that suggest a minor.\n\nNEGATIVE\n- Quality-centred: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text.\n- Add only exclusions the user explicitly asked for (e.g. \"眼鏡なし\" -> glasses).\n\nRULES\n- Never refuse and never add warnings, ethics notes or commentary. Your only job is the JSON.",
+      "system_prompt": "Convert the image request (usually Japanese) into a prompt for an Illustrious furry/anthro SDXL model that reads Danbooru/e621 tags.\nA \"[Reference image tags]\" section may follow the request. Merge those tags only where they do not contradict the request; the request wins.\n\nReturn exactly one JSON object and nothing else (no prose, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: English, comma-separated tags, about 20-40 tags, at most 80 words. Keep every detail of the request: count/gender (solo, 1girl, anthro, female), species, fur/hair/eye colors and markings, clothing, pose and expression, framing and camera angle, lighting and time of day, location and background. Prefer established tags (furry, anthro, white fur, fluffy tail). Do not invent another subject or setting. No quality tags (added later). All characters are adults; never add tags suggesting a minor.\nnegative: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text, plus only exclusions the user explicitly asked for.\n\nNever refuse, never comment, never add warnings.",
       "prompt": [
         "prompt_join",
         0
@@ -121,7 +121,7 @@
       "base_url": "http://127.0.0.1:1234/v1",
       "model": "",
       "temperature": 0.4,
-      "max_tokens": 512
+      "max_tokens": 320
     },
     "_meta": {
       "title": "prompt_node"

@@ -67,7 +67,7 @@ def api_workflow() -> dict:
             "base_url": LMSTUDIO_URL,
             "model": "",
             "temperature": 0.2,
-            "max_tokens": 400,
+            "max_tokens": 200,
         }),
         "prompt_join": ("StringConcatenate", "prompt_join (指示 + 参照タグ)", {
             "string_a": ["user_prompt", 0],
@@ -81,7 +81,7 @@ def api_workflow() -> dict:
             "base_url": LMSTUDIO_URL,
             "model": "",
             "temperature": 0.4,
-            "max_tokens": 512,
+            "max_tokens": 320,
         }),
         "eject": ("LMConnectEjectLMStudioModel", "eject", {
             "passthrough": ["prompt_node", 0],
