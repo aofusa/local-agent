@@ -1,0 +1,25 @@
+artifacts/
+outputs/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.langgraph_api/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+.pnpm-store/
+
+# Model weights (never commit)
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.bin
