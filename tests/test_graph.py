@@ -26,6 +26,14 @@ NODE_TYPES = {
 }
 
 
+MODEL_FILES = {
+    "ckpt_name": ["yiffInHell_yihVANTABLACK.safetensors"],
+    "unet_name": ["chroma_v10HD.safetensors", "yiffInHell_yihVANTABLACK.safetensors"],
+    "clip_name": ["t5xxl_fp8_e4m3fn.safetensors"],
+    "vae_name": ["ae.safetensors"],
+}
+
+
 def _png(color=(200, 80, 40)) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (8, 8), color).save(buf, format="PNG")
@@ -54,8 +62,9 @@ class FakeComfy:
     async def free(self):
         self.calls.append("free")
 
-    async def checkpoints(self):
-        return ["yiffInHell_yihVANTABLACK.safetensors"]
+    async def checkpoints(self, node_class="FurryJaCheckpointLoaderAfterEject", field="ckpt_name"):
+        self.calls.append(f"models:{node_class}.{field}")
+        return MODEL_FILES.get(field, [])
 
     async def loras(self):
         return ["KemonoStyleAV1.safetensors", "CiviFur-30.safetensors"]

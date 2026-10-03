@@ -236,3 +236,36 @@ def test_previous_output_words():
     assert wants_previous_output("これを和服にして", has_attachments=False)
     assert not wants_previous_output("この画像の画風で", has_attachments=True)
     assert not wants_previous_output("夜の港", has_attachments=False)
+
+
+# --- family defaults (Chroma HD WI §5.4) ---------------------------------------------------------------
+
+CHROMA_DEFAULTS = {"width": 1024, "height": 1024, "steps": 28, "cfg": 3.5, "sampler_name": "euler",
+                   "scheduler": "beta", "size_min": 512, "size_max": 1216, "max_pixels": 1024 * 1024}
+
+
+def test_family_defaults_set_size_and_sampler():
+    plan = build_plan("t2i_basic", "chroma_hd", [], {}, classify_intent("港", []), random.Random(1),
+                      defaults=CHROMA_DEFAULTS)
+    assert (plan["width"], plan["height"], plan["steps"], plan["cfg"]) == (1024, 1024, 28, 3.5)
+    assert (plan["sampler_name"], plan["scheduler"]) == ("euler", "beta")
+
+
+def test_sdxl_plan_keeps_design_constants():
+    plan = build_plan("t2i_basic", "sdxl", [], {}, classify_intent("港", []), random.Random(1))
+    assert (plan["width"], plan["height"], plan["steps"], plan["cfg"]) == (832, 1216, 28, 5.5)
+    assert plan["sampler_name"] is None and plan["scheduler"] is None
+
+
+@pytest.mark.parametrize("text, size", [("縦長の港", (832, 1216)), ("横長の港", (1216, 832)), ("正方形", (1024, 1024)),
+                                        ("1536x1536 の港", (1024, 1024)), ("1216x1216", (1024, 1024))])
+def test_chroma_size_stays_within_one_megapixel(text, size):
+    plan = build_plan("t2i_basic", "chroma_hd", [], {}, classify_intent(text, []), random.Random(1),
+                      defaults=CHROMA_DEFAULTS)
+    assert (plan["width"], plan["height"]) == size
+    assert plan["width"] % 16 == 0 and plan["height"] % 16 == 0
+
+
+def test_portrait_word_matches_sdxl_default():
+    plan = build_plan("t2i_basic", "sdxl", [], {}, classify_intent("縦長の港", []), random.Random(1))
+    assert (plan["width"], plan["height"]) == (832, 1216) and not plan["notes"]

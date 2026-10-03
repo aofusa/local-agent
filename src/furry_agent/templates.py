@@ -104,7 +104,18 @@ def load_template(family: str, template_id: str, workflows_dir: Path = REPO_WORK
     path = workflows_dir / entry["file"]
     prompt = json.loads(path.read_text(encoding="utf-8"))
     return prompt, {**entry, "pose_preprocessors": mapping.get("pose_preprocessors", {}),
-                    "ipadapter_weight_scale": mapping.get("ipadapter_weight_scale", {})}
+                    "ipadapter_weight_scale": mapping.get("ipadapter_weight_scale", {}),
+                    "models": mapping.get("models", {})}
+
+
+def model_slots(entry: dict) -> dict[str, str]:
+    """Model-file slots of a template (checkpoint / diffusion model, text encoder, VAE) -> slot path."""
+    return {k: entry["slots"][k] for k in ("ckpt_name", "clip_name", "vae_name") if k in entry["slots"]}
+
+
+def slot_value(prompt: dict, path: str):
+    node_id, _, field = path.split(".", 2)
+    return prompt[node_id]["inputs"][field]
 
 
 def _set(prompt: dict, path: str, value) -> None:
@@ -150,8 +161,12 @@ def build_run_prompt(
     ckpt_name: str | None = None,
     loras: list[LoraSpec] | None = None,
     workflows_dir: Path = REPO_WORKFLOWS,
+    models: dict[str, str] | None = None,
 ) -> dict:
-    """Fill a template for one run. ``images`` maps role -> ComfyUI input filename."""
+    """Fill a template for one run. ``images`` maps role -> ComfyUI input filename.
+
+    ``models`` overrides model-file slots other than the checkpoint (chroma_hd: clip_name, vae_name, weight_dtype).
+    """
     template_id = plan["template_id"]
     prompt, entry = load_template(family, template_id, workflows_dir)
     slots = entry["slots"]
@@ -167,6 +182,13 @@ def build_run_prompt(
     if "width" in slots:
         _set(prompt, slots["width"], int(plan["width"]))
         _set(prompt, slots["height"], int(plan["height"]))
+    for slot, value in (models or {}).items():
+        if slot in slots and value:
+            _set(prompt, slots[slot], value)
+    # Sampler settings are slots only in families that keep them in the map (chroma_hd); sdxl keeps the template.
+    for slot, cast in (("steps", int), ("cfg", float), ("sampler_name", str), ("scheduler", str)):
+        if slot in slots and plan.get(slot) is not None:
+            _set(prompt, slots[slot], cast(plan[slot]))
     if "denoise" in slots and plan.get("denoise") is not None:
         _set(prompt, slots["denoise"], float(plan["denoise"]))
     for role, filename in images.items():
