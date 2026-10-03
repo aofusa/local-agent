@@ -1,0 +1,1098 @@
+{
+  "last_node_id": 20,
+  "last_link_id": 24,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LMConnectLMStudioBackend",
+      "title": "LM Studio Backend",
+      "pos": [
+        40,
+        1360
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "backend",
+          "type": "LMC_BACKEND",
+          "links": [
+            6
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMConnectLMStudioBackend",
+        "furry_ja_id": "llm_backend"
+      },
+      "widgets_values": [
+        "http://127.0.0.1:1234/v1",
+        "huihui-qwen3.8-27b-abliterated-nomtp",
+        10,
+        600,
+        true,
+        0,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "LMConnectLMStudioBackend",
+      "title": "LM Studio Backend (vision, no auto-eject)",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "backend",
+          "type": "LMC_BACKEND",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMConnectLMStudioBackend",
+        "furry_ja_id": "llm_backend_vision"
+      },
+      "widgets_values": [
+        "http://127.0.0.1:1234/v1",
+        "huihui-qwen3.8-27b-abliterated-nomtp",
+        10,
+        600,
+        true,
+        0,
+        true,
+        false,
+        true,
+        true
+      ]
+    },
+    {
+      "id": 3,
+      "type": "PrimitiveStringMultiline",
+      "title": "user_prompt (日本語指示)",
+      "pos": [
+        40,
+        1030
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            4,
+            7
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PrimitiveStringMultiline",
+        "furry_ja_id": "user_prompt"
+      },
+      "widgets_values": [
+        "夕焼けの海辺に立つ、白い毛並みの狼獣人の女性、和服"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "LoadImage",
+      "title": "ref_image",
+      "pos": [
+        40,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1,
+            15
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "furry_ja_id": "ref_image"
+      },
+      "widgets_values": [
+        "furry_ja_ref.png",
+        "image"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "LoadImage",
+      "title": "ref_image_2",
+      "pos": [
+        40,
+        700
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "furry_ja_id": "ref_image_2"
+      },
+      "widgets_values": [
+        "furry_ja_ref.png",
+        "image"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "LMConnectVision",
+      "title": "vision",
+      "pos": [
+        460,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "image_1",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "image_2",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "image_3",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "backend",
+          "type": "LMC_BACKEND",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "response",
+          "type": "STRING",
+          "links": [
+            5
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMConnectVision",
+        "furry_ja_id": "vision"
+      },
+      "widgets_values": [
+        "You tag reference images for an image-generation prompt.\n\nDescribe what is visible as Danbooru/e621 tags in English: count and gender, species, fur/scale/hair colors and markings, eye color, clothing and accessories, pose and expression, framing and camera angle, lighting, background and location, art style.\n\nOutput one comma-separated line of at most 60 tags. If there are several images, start each image's tags with \"image 1:\", \"image 2:\" and so on, separated by \" | \".\nNo sentences, no Markdown, no <think> block, no commentary, never refuse.",
+        "Tag the reference image(s).",
+        768,
+        "http://127.0.0.1:1234/v1",
+        "",
+        0.2,
+        400
+      ]
+    },
+    {
+      "id": 7,
+      "type": "StringConcatenate",
+      "title": "prompt_join (指示 + 参照タグ)",
+      "pos": [
+        460,
+        1030
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "string_a",
+          "type": "STRING",
+          "widget": {
+            "name": "string_a"
+          },
+          "link": 4
+        },
+        {
+          "name": "string_b",
+          "type": "STRING",
+          "widget": {
+            "name": "string_b"
+          },
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "StringConcatenate",
+        "furry_ja_id": "prompt_join"
+      },
+      "widgets_values": [
+        "",
+        "",
+        "\n\n[Reference image tags]\n"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "LMConnectPromptWithSystem",
+      "title": "prompt_node",
+      "pos": [
+        880,
+        1030
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "backend",
+          "type": "LMC_BACKEND",
+          "link": 6
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "response",
+          "type": "STRING",
+          "links": [
+            8
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMConnectPromptWithSystem",
+        "furry_ja_id": "prompt_node"
+      },
+      "widgets_values": [
+        "You convert an image request into a prompt for an Illustrious-based furry/anthro SDXL checkpoint that understands Danbooru and e621 tags.\n\nINPUT\n- The request is usually Japanese. It may be followed by a section \"[Reference image tags]\" that describes uploaded reference images.\n- The user's request always wins. Use reference tags only where they do not contradict the request.\n\nOUTPUT\nReturn exactly one JSON object and nothing else:\n{\"positive\":\"...\",\"negative\":\"...\"}\n- No explanation, no Markdown, no code fence, no <think> block, no text before or after the JSON.\n\nPOSITIVE\n- English only. Comma-separated Danbooru/e621 tags, optionally ending with one short English phrase. At most 80 words in total.\n- Keep every concrete detail of the request. Do not drop any of these when given or implied:\n  1. count and gender (e.g. solo, 1girl, anthro, female / male / duo)\n  2. species (e.g. wolf, fox, dragon, cat, kemono) and body type\n  3. fur / scale / hair colors and markings, eye color\n  4. clothing and accessories (e.g. kimono, hoodie, armor)\n  5. pose, action and expression\n  6. framing and camera angle (e.g. full body, upper body, close-up, from below, from side)\n  7. lighting and time of day (e.g. sunset, backlighting, rim light, night)\n  8. location and background\n- Use established tags (furry, anthro, furry female, white fur, fluffy tail, looking at viewer) instead of prose.\n- Do not invent a different subject, species or setting. If the request is vague, add only neutral, fitting details.\n- Do not add quality tags such as masterpiece or best quality; they are added later.\n- Every character is an adult. Never add tags that suggest a minor.\n\nNEGATIVE\n- Quality-centred: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text.\n- Add only exclusions the user explicitly asked for (e.g. \"眼鏡なし\" -> glasses).\n\nRULES\n- Never refuse and never add warnings, ethics notes or commentary. Your only job is the JSON.",
+        "",
+        "http://127.0.0.1:1234/v1",
+        "",
+        0.4,
+        512
+      ]
+    },
+    {
+      "id": 9,
+      "type": "LMConnectEjectLMStudioModel",
+      "title": "eject",
+      "pos": [
+        1300,
+        1030
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "passthrough",
+          "type": "*",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            9,
+            10
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMConnectEjectLMStudioModel",
+        "furry_ja_id": "eject"
+      },
+      "widgets_values": [
+        "http://127.0.0.1:1234/v1",
+        "",
+        true
+      ]
+    },
+    {
+      "id": 10,
+      "type": "FurryJaSplitTags",
+      "title": "split",
+      "pos": [
+        1720,
+        1030
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "*",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "STRING",
+          "links": [
+            12
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "negative",
+          "type": "STRING",
+          "links": [
+            14
+          ],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FurryJaSplitTags",
+        "furry_ja_id": "split"
+      },
+      "widgets_values": [
+        "masterpiece, best quality, amazing quality, absurdres",
+        "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, missing fingers, deformed, watermark, signature, text, logo"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "FurryJaCheckpointLoaderAfterEject",
+      "title": "ckpt",
+      "pos": [
+        1300,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "after",
+          "type": "*",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            16
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            11,
+            13
+          ],
+          "slot_index": 1
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            21,
+            24
+          ],
+          "slot_index": 2
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FurryJaCheckpointLoaderAfterEject",
+        "furry_ja_id": "ckpt"
+      },
+      "widgets_values": [
+        "yiffInHell_yihVANTABLACK.safetensors",
+        "http://127.0.0.1:1234/v1"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "CLIPTextEncode",
+      "title": "positive",
+      "pos": [
+        1720,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 11
+        },
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            17
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "furry_ja_id": "positive"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 13,
+      "type": "CLIPTextEncode",
+      "title": "negative",
+      "pos": [
+        1720,
+        700
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 13
+        },
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            18
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "furry_ja_id": "negative"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 14,
+      "type": "ImageScaleToTotalPixels",
+      "title": "ref_scale (img2img)",
+      "pos": [
+        460,
+        700
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            23
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageScaleToTotalPixels",
+        "furry_ja_id": "ref_scale"
+      },
+      "widgets_values": [
+        "lanczos",
+        1.01,
+        64
+      ]
+    },
+    {
+      "id": 15,
+      "type": "EmptyLatentImage",
+      "title": "latent",
+      "pos": [
+        880,
+        700
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            19
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage",
+        "furry_ja_id": "latent"
+      },
+      "widgets_values": [
+        832,
+        1216,
+        1
+      ]
+    },
+    {
+      "id": 16,
+      "type": "KSampler",
+      "title": "sampler",
+      "pos": [
+        2140,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 16
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 17
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 18
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            20
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KSampler",
+        "furry_ja_id": "sampler"
+      },
+      "widgets_values": [
+        0,
+        "randomize",
+        28,
+        5.5,
+        "euler_ancestral",
+        "normal",
+        1.0
+      ]
+    },
+    {
+      "id": 17,
+      "type": "VAEDecode",
+      "title": "decode",
+      "pos": [
+        2560,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 20
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            22
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode",
+        "furry_ja_id": "decode"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 18,
+      "type": "SaveImage",
+      "title": "save",
+      "pos": [
+        2560,
+        700
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 22
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage",
+        "furry_ja_id": "save"
+      },
+      "widgets_values": [
+        "furry_ja/furry_ja"
+      ]
+    },
+    {
+      "id": 19,
+      "type": "VAEEncode",
+      "title": "latent (img2img: VAE Encode)",
+      "pos": [
+        880,
+        370
+      ],
+      "size": [
+        380,
+        280
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 23
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 24
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncode",
+        "furry_ja_id": "latent_img2img"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "Note",
+      "title": "README",
+      "pos": [
+        2140,
+        1030
+      ],
+      "size": [
+        420,
+        220
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "furry_ja (design doc §4.1). Node titles are the API node IDs.\nDefault wiring = text only (Empty Latent, denoise 1.0). Muted nodes are the reference-image path.\nimg2img: unmute ref_image / vision / prompt_join / ref_scale / latent_img2img, connect\nprompt_join -> prompt_node.prompt, latent_img2img -> sampler.latent_image, set denoise 0.45.\nLangGraph does this automatically from workflows/furry_ja_api.json."
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      4,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      5,
+      0,
+      6,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      2,
+      0,
+      6,
+      3,
+      "LMC_BACKEND"
+    ],
+    [
+      4,
+      3,
+      0,
+      7,
+      0,
+      "STRING"
+    ],
+    [
+      5,
+      6,
+      0,
+      7,
+      1,
+      "STRING"
+    ],
+    [
+      6,
+      1,
+      0,
+      8,
+      0,
+      "LMC_BACKEND"
+    ],
+    [
+      7,
+      3,
+      0,
+      8,
+      1,
+      "STRING"
+    ],
+    [
+      8,
+      8,
+      0,
+      9,
+      0,
+      "STRING"
+    ],
+    [
+      9,
+      9,
+      0,
+      10,
+      0,
+      "*"
+    ],
+    [
+      10,
+      9,
+      0,
+      11,
+      0,
+      "*"
+    ],
+    [
+      11,
+      11,
+      1,
+      12,
+      0,
+      "CLIP"
+    ],
+    [
+      12,
+      10,
+      0,
+      12,
+      1,
+      "STRING"
+    ],
+    [
+      13,
+      11,
+      1,
+      13,
+      0,
+      "CLIP"
+    ],
+    [
+      14,
+      10,
+      1,
+      13,
+      1,
+      "STRING"
+    ],
+    [
+      15,
+      4,
+      0,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      16,
+      11,
+      0,
+      16,
+      0,
+      "MODEL"
+    ],
+    [
+      17,
+      12,
+      0,
+      16,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      18,
+      13,
+      0,
+      16,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      19,
+      15,
+      0,
+      16,
+      3,
+      "LATENT"
+    ],
+    [
+      20,
+      16,
+      0,
+      17,
+      0,
+      "LATENT"
+    ],
+    [
+      21,
+      11,
+      2,
+      17,
+      1,
+      "VAE"
+    ],
+    [
+      22,
+      17,
+      0,
+      18,
+      0,
+      "IMAGE"
+    ],
+    [
+      23,
+      14,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ],
+    [
+      24,
+      11,
+      2,
+      19,
+      1,
+      "VAE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "furry_ja": "generated by scripts/build_workflows.py"
+  },
+  "version": 0.4
+}

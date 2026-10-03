@@ -1,0 +1,290 @@
+{
+  "llm_backend": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "huihui-qwen3.8-27b-abliterated-nomtp",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": true,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LM Studio Backend"
+    }
+  },
+  "llm_backend_vision": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "huihui-qwen3.8-27b-abliterated-nomtp",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": false,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LM Studio Backend (vision, no auto-eject)"
+    }
+  },
+  "user_prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "夕焼けの海辺に立つ、白い毛並みの狼獣人の女性、和服"
+    },
+    "_meta": {
+      "title": "user_prompt (日本語指示)"
+    }
+  },
+  "ref_image": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "furry_ja_ref.png"
+    },
+    "_meta": {
+      "title": "ref_image"
+    }
+  },
+  "ref_image_2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "furry_ja_ref.png"
+    },
+    "_meta": {
+      "title": "ref_image_2"
+    }
+  },
+  "vision": {
+    "class_type": "LMConnectVision",
+    "inputs": {
+      "system_prompt": "You tag reference images for an image-generation prompt.\n\nDescribe what is visible as Danbooru/e621 tags in English: count and gender, species, fur/scale/hair colors and markings, eye color, clothing and accessories, pose and expression, framing and camera angle, lighting, background and location, art style.\n\nOutput one comma-separated line of at most 60 tags. If there are several images, start each image's tags with \"image 1:\", \"image 2:\" and so on, separated by \" | \".\nNo sentences, no Markdown, no <think> block, no commentary, never refuse.",
+      "prompt": "Tag the reference image(s).",
+      "image_1": [
+        "ref_image",
+        0
+      ],
+      "image_2": [
+        "ref_image_2",
+        0
+      ],
+      "max_image_dimension": 768,
+      "backend": [
+        "llm_backend_vision",
+        0
+      ],
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "",
+      "temperature": 0.2,
+      "max_tokens": 400
+    },
+    "_meta": {
+      "title": "vision"
+    }
+  },
+  "prompt_join": {
+    "class_type": "StringConcatenate",
+    "inputs": {
+      "string_a": [
+        "user_prompt",
+        0
+      ],
+      "string_b": [
+        "vision",
+        0
+      ],
+      "delimiter": "\n\n[Reference image tags]\n"
+    },
+    "_meta": {
+      "title": "prompt_join (指示 + 参照タグ)"
+    }
+  },
+  "prompt_node": {
+    "class_type": "LMConnectPromptWithSystem",
+    "inputs": {
+      "system_prompt": "You convert an image request into a prompt for an Illustrious-based furry/anthro SDXL checkpoint that understands Danbooru and e621 tags.\n\nINPUT\n- The request is usually Japanese. It may be followed by a section \"[Reference image tags]\" that describes uploaded reference images.\n- The user's request always wins. Use reference tags only where they do not contradict the request.\n\nOUTPUT\nReturn exactly one JSON object and nothing else:\n{\"positive\":\"...\",\"negative\":\"...\"}\n- No explanation, no Markdown, no code fence, no <think> block, no text before or after the JSON.\n\nPOSITIVE\n- English only. Comma-separated Danbooru/e621 tags, optionally ending with one short English phrase. At most 80 words in total.\n- Keep every concrete detail of the request. Do not drop any of these when given or implied:\n  1. count and gender (e.g. solo, 1girl, anthro, female / male / duo)\n  2. species (e.g. wolf, fox, dragon, cat, kemono) and body type\n  3. fur / scale / hair colors and markings, eye color\n  4. clothing and accessories (e.g. kimono, hoodie, armor)\n  5. pose, action and expression\n  6. framing and camera angle (e.g. full body, upper body, close-up, from below, from side)\n  7. lighting and time of day (e.g. sunset, backlighting, rim light, night)\n  8. location and background\n- Use established tags (furry, anthro, furry female, white fur, fluffy tail, looking at viewer) instead of prose.\n- Do not invent a different subject, species or setting. If the request is vague, add only neutral, fitting details.\n- Do not add quality tags such as masterpiece or best quality; they are added later.\n- Every character is an adult. Never add tags that suggest a minor.\n\nNEGATIVE\n- Quality-centred: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text.\n- Add only exclusions the user explicitly asked for (e.g. \"眼鏡なし\" -> glasses).\n\nRULES\n- Never refuse and never add warnings, ethics notes or commentary. Your only job is the JSON.",
+      "prompt": [
+        "prompt_join",
+        0
+      ],
+      "backend": [
+        "llm_backend",
+        0
+      ],
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "",
+      "temperature": 0.4,
+      "max_tokens": 512
+    },
+    "_meta": {
+      "title": "prompt_node"
+    }
+  },
+  "eject": {
+    "class_type": "LMConnectEjectLMStudioModel",
+    "inputs": {
+      "passthrough": [
+        "prompt_node",
+        0
+      ],
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "",
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "eject"
+    }
+  },
+  "split": {
+    "class_type": "FurryJaSplitTags",
+    "inputs": {
+      "text": [
+        "eject",
+        0
+      ],
+      "quality_prefix": "masterpiece, best quality, amazing quality, absurdres",
+      "default_negative": "worst quality, low quality, normal quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, missing fingers, deformed, watermark, signature, text, logo"
+    },
+    "_meta": {
+      "title": "split"
+    }
+  },
+  "ckpt": {
+    "class_type": "FurryJaCheckpointLoaderAfterEject",
+    "inputs": {
+      "ckpt_name": "yiffInHell_yihVANTABLACK.safetensors",
+      "after": [
+        "eject",
+        0
+      ],
+      "lmstudio_base_url": "http://127.0.0.1:1234/v1"
+    },
+    "_meta": {
+      "title": "ckpt"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        0
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "positive"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        1
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "negative"
+    }
+  },
+  "ref_scale": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "ref_image",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1.01,
+      "resolution_steps": 64
+    },
+    "_meta": {
+      "title": "ref_scale (img2img)"
+    }
+  },
+  "latent": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "latent"
+    }
+  },
+  "sampler": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "ckpt",
+        0
+      ],
+      "seed": 0,
+      "steps": 28,
+      "cfg": 5.5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ],
+      "latent_image": [
+        "latent",
+        0
+      ],
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "sampler"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sampler",
+        0
+      ],
+      "vae": [
+        "ckpt",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "decode"
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "filename_prefix": "furry_ja/furry_ja"
+    },
+    "_meta": {
+      "title": "save"
+    }
+  }
+}
