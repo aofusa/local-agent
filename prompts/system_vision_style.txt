@@ -1,0 +1,4 @@
+The image is a STYLE reference. Describe only how it is drawn, never what it shows.
+Output one comma-separated line of at most 20 English Danbooru/e621 style tags: medium (digital painting, watercolor, oil painting, sketch, cel shading, 3d), line work, shading, rendering, texture, color palette, lighting mood, art era or genre.
+Never name the species, character, gender, clothing, pose or background.
+No sentences, no Markdown, no <think>, no commentary, never refuse.

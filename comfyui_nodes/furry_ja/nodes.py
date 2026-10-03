@@ -76,12 +76,33 @@ class FurryJaCheckpointLoaderAfterEject(comfy_nodes.CheckpointLoaderSimple):
         }
 
 
+class FurryJaImageAfter:
+    """Pass an image through only after ``after`` has run.
+
+    Preprocessors (DWPose, depth) have no model input, so ComfyUI could run them while the
+    27B is still loaded. Linking ``after`` to the checkpoint output keeps them behind the eject.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("IMAGE",), "after": ("*",)}}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "passthrough"
+    CATEGORY = "furry_ja"
+
+    def passthrough(self, image, after):
+        return (image,)
+
+
 NODE_CLASS_MAPPINGS = {
     "FurryJaSplitTags": FurryJaSplitTags,
     "FurryJaCheckpointLoaderAfterEject": FurryJaCheckpointLoaderAfterEject,
+    "FurryJaImageAfter": FurryJaImageAfter,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FurryJaSplitTags": "furry_ja: Split Tags JSON",
     "FurryJaCheckpointLoaderAfterEject": "furry_ja: Load Checkpoint (after LLM eject)",
+    "FurryJaImageAfter": "furry_ja: Image (after)",
 }
