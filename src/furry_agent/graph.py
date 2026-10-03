@@ -194,7 +194,8 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     log.info("tags prompt_id=%s mode=%s positive=%s", job["prompt_id"], tags["split_mode"], tags["positive"])
     return {
         "tags": tags,
-        "job": {**job, "done": result.done},
+        # ckpt usually runs before split, so keep its unload check for the image phase.
+        "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}},
         "messages": [_progress(state, (
             "タグを生成しました。LM Studio のモデルを unload してから、yiffInHell で画像を生成しています…\n\n"
             f"**positive**: {tags['positive']}\n\n**negative**: {tags['negative']}"
@@ -216,7 +217,7 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
     settings = _settings(config)
     client = _client(config, settings)
     job = state["job"]
-    gate: dict = {}
+    gate: dict = dict(job.get("gate") or {})
 
     def on_event(kind: str, data: dict) -> None:
         if kind == "executed" and data.get("node") == "ckpt":

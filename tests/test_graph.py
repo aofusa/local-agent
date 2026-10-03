@@ -52,15 +52,13 @@ class FakeComfy:
     async def wait(self, prompt_id, client_id, until_node=None, deadline=None, on_event=None):
         if until_node == "split":
             self.calls.append("wait_split")
-            return WaitResult(done=False, outputs={"split": {
+            return WaitResult(done=False, outputs={"ckpt": {"lmstudio_unloaded": [self.gate_ok]}, "split": {
                 "positive": ["masterpiece, 1girl, anthro, wolf, white fur, kimono, sunset, beach"],
                 "negative": ["worst quality"], "split_mode": ["json"]}})
         self.calls.append("wait_done")
         if on_event:
-            on_event("executed", {"node": "ckpt", "output": {"lmstudio_unloaded": [self.gate_ok]}})
             on_event("executing", {"node": "sampler"})
         return WaitResult(done=True, outputs={
-            "ckpt": {"lmstudio_unloaded": [self.gate_ok], "forced_unload": []},
             "save": {"images": [{"filename": "furry_ja_00001_.png", "subfolder": "furry_ja", "type": "output"}]},
         })
 
@@ -118,8 +116,14 @@ async def test_text_only_returns_image_and_saves(settings):
     assert len(saved) == 1 and saved[0].read_bytes() == fake.image
     meta = json.loads(saved[0].with_suffix(".json").read_text(encoding="utf-8"))
     assert meta["prompt_id"] == "prompt-123" and meta["split_mode"] == "json"
-    log_text = (settings.logs_dir / "furry_agent.log")
-    assert log_text.exists()
+    assert (settings.logs_dir / "furry_agent.log").exists()
+
+
+async def test_ksampler_log_reports_gate_seen_before_split(settings, caplog):
+    # In ComfyUI the ckpt gate runs before split, i.e. during the tags phase.
+    caplog.set_level("INFO", logger="furry_agent")
+    await _run("テスト", FakeComfy(), settings)
+    assert "LM Studio unloaded at checkpoint load=[True]" in caplog.text
 
 
 async def test_reference_image_is_uploaded_and_img2img(settings):
