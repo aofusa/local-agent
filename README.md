@@ -14,12 +14,13 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 チャットタブでは LM Studio の 27B と会話でき、「/search …」「…を調べて」と送ると Tor 経由で Web を検索して、出典付きで答えます。
 検索は Grok のマルチエージェント検索を小さくしたもので、計画 → 並列検索 → reader によるページ読み → 批評 → 統合の順に進みます。
 検索のモデル（Bonsai / Qwen heretic）は、PrismML の llama.cpp fork で検索のあいだだけ起動します（「4. 使い方 › チャットタブ」）。
+チャットタブでは小説や文章（`/write`）とプログラム（`/code`）も書けます。入力欄の「自動 / 速い / 思考」で、すばやい回答と、深い検索（下位問いを埋めるまで追加検索）・アウトラインと推敲・承認後の Docker 実行・思考トークンを切り替えます。「自動」は内容から自動で選びます。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
@@ -33,9 +34,10 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
                          ▼
                    LM Studio       http://127.0.0.1:1234/v1（ループバックのみ）
 
-                   チャットタブ: LangGraph ──> LM Studio（会話、検索の計画。検索中は unload）
+                   チャットタブ: LangGraph ──> LM Studio（会話、文章、コード、検索の計画。検索中は unload）
                                           ──> PrismML llama-server 127.0.0.1:18181〜（検索中だけ）
                                           ──> Tor SOCKS 127.0.0.1:9050 ──> 検索エンジンと結果のページ
+                                          ──> Docker（思考モードで承認したコードだけ。ネットワークなし、待受なし）
 ```
 
 ## 動作環境
@@ -444,7 +446,7 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
 - 回答の下の「Tor 経由の検索」を開くと、検索語、ヒットしたページ（● は reader が開いたページ）、役割ごとのモデルが見られます。reader 同士の下書きは返しません。
 - モデルは `config/search_models.json` の順と、`probe-bonsai.ps1` の検証結果（`tools/bonsai/rank.json`）、空きメモリから自動で選びます。ファイルが無いモデルや検証に落ちたモデルは使いません。
   この端末（ROG Xbox Ally X）では、27B（IQ3_M）のロード中に空きが 1GB を切るため、計画のあと 27B を unload し、批評と統合は Bonsai 2 27B abliterated が代理で行います。
-- 1 回の検索に 6〜9 分かかります（27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
+- 速いモードの検索は意図 1 本・1 ラウンドで数分、思考モードは 3 ラウンドで約 16 分でした（実測。27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
 - 画像タブとチャットタブは同時に動きません。片方の実行中にもう片方へ送ると、実行中のタブ名を示して断ります。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは待ちます。
 - 結果が 0 件のとき（Tor の出口が拒否されたときなど）は、統合モデルを起動せずにその旨を返します。
 - `doctor.ps1` は、検索について次を確認します。いずれも WARN 扱いで、無くても画像タブは使えます。
@@ -638,7 +640,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 
 ```powershell
 uv sync
-uv run pytest                                  # Python と PowerShell スクリプトのテスト
+uv run pytest                                  # Python と PowerShell スクリプトのテスト（Docker 実機のテストは Docker 起動中だけ）
 uv run python scripts\build_workflows.py       # prompts\ を変えたら workflows\ を再生成
 ```
 
@@ -654,6 +656,11 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | 「〜に使えるモデルがありません（メモリ不足…）」 | 他のアプリを閉じる。`BONSAI_RESERVE_MB` を下げる。`SEARCH_FANOUT_WIDTH` を 1〜2 にする |
 | 「検索結果がありません。Tor 出口が拒否された…」 | しばらく置いて送り直す（出口が変わる）。`logs\furry_agent.log` の `search provider=` を確認 |
 | 「チャットタブ（画像タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す |
+| チャットタブのコードで「Docker Desktop が起動していません」/「Docker がインストールされていません」 | Docker Desktop を入れて `.\scripts\setup-sandbox.ps1`（イメージ取得と動作確認）。普段は止めたままでよく、承認後に自動で起動・停止する |
+| 「コンテナイメージ python:3.12-slim がありません」 | `.\scripts\setup-sandbox.ps1`（Rust は `-Rust`）。実行時はイメージを取得しない（`--pull never`） |
+| 思考モードなのに「思考」の折りたたみが出ない | 答えに要る量と 20 分の時間枠（約 1000 トークン）に思考の余地が無いと、思考なしで答える（`logs\furry_agent.log` の `thinking=False`）。代理リーダーが統合した検索の回答にも思考は無い |
+| 思考モードの文章・コードがとても遅い | この端末の 27B は約 0.9 トークン/秒。長い文章は章立てにするか「速い」で送る |
+| 「LM Studio に接続できないか、時間切れです（HTTP 400: Model is unloaded.）」 | LM Studio の自動 unload と要求が重なった。1 回は自動で送り直すので、続くときは送り直す |
 | `doctor.ps1` で「no orphan llama-server」が WARN | 検索中でなければ `Stop-Process -Name llama-server` |
 | ブラウザに Deployment URL の入力画面が出る / 接続できない | `start-ui.ps1` を再実行（LAN IP が変わると再ビルド）。`open-firewall.ps1` を管理者で実行。ネットワークがプライベートか確認 |
 | 「生成できませんでした: ... Failed to load model」 | メモリ不足。他のアプリを閉じる、`setup-lmstudio.ps1 -GpuOffload 0.4` に下げる、ComfyUI を再起動して常駐メモリを解放 |

@@ -10,6 +10,9 @@
 - 思考モードでは LM Studio の 27B の思考トークン（`reasoning_effort`）を有効にし、回答とは別の折りたたみ（既定は閉じる）に出す。
 - タイムアウト: チャットタブのモデル呼び出し 1 回を 180 秒から 20 分（`CHAT_TIMEOUT_S=1200`）に、思考モードの検索全体を 20 分（`SEARCH_WALL_CLOCK_S=1200`）にした。長い呼び出しのあいだも共有ロックを延長する。
 - `scripts/setup-sandbox.ps1`（Docker Desktop の起動とイメージの取得、動作確認）を追加し、`doctor.ps1` に Docker の確認を足した。
+- この端末（ROG Ally X）に合わせた調整: LM Studio の 27B は context 4096・約 0.9 トークン/秒のため、1 回の呼び出しの量（回答 + 思考）を context と 20 分で出せる量に収める（`LMSTUDIO_CONTEXT`、`LMSTUDIO_TOKENS_PER_S`、速さは応答ごとに測り直す）。思考が予算を使い切ったら思考なしで答え直す。Docker Desktop は承認した実行のときだけ起動して止める。LM Studio の自動 unload と要求が重なった "Model is unloaded." は 1 回だけ送り直す。
+- 検索モデルの probe をルータ（`kind`）と批評（下位問いの採点）の新しい形式に合わせ、やり直した。8 モデルすべて合格し、Qwen3-0.6B-heretic がルータの 3 番手に入った。
+- 確認: pytest、この端末での実行（会話・検索・文章・コード、SDXL と Chroma1-HD の画像生成の退行確認）、他ホストのブラウザからの操作。
 - 画像タブ（graph `agent`）、ComfyUI のワークフローとノード ID、eject の順は変えていない。
 - 実装記録: `docs/chat-deep-search-creative-sandbox.md` の末尾。
 

@@ -779,7 +779,7 @@ llama-server 側は出力の `<think>` を本文から分離する。分離し�
 | 自動モードの検索 | 「ROG Xbox Ally X と Steam Deck OLED の違いは？」→ ルータ（Qwen3-1.7B、新しい `kind`）が SEARCH、自動が「違い」で思考を選択。3 ラウンド、12 ページで `budget` 停止、食い違い（両方の出典番号）と未解決の下位問いを回答に付けた。約 16 分 |
 | 画像タブ SDXL（退行確認） | `t2i_basic`、タグ生成 → LM Studio の unload を確認 → KSampler、`outputs/` と ComfyUI の両方に保存、約 4.3 分 |
 | 画像タブ Chroma1-HD（退行確認） | `COMFY_MODEL_FAMILY=flux`、768×768（`CHROMA_MAX_PIXELS=589824`）、英語の説明文 → 生成・保存、約 15 分 |
-| UI（LAN アドレス `http://<LAN IP>:3000`、headless Edge） | チャットタブに「自動 / 速い / 思考」、送信の `config.configurable.mode` が選択どおり、回答下のモード表示、思考の折りたたみ。画像タブはモード切替なし・添付ありで変化なし |
+| UI（この端末から LAN アドレス `http://<LAN IP>:3000` へ headless Edge、のちに利用者が他ホストの実機ブラウザで確認） | チャットタブに「自動 / 速い / 思考」、送信の `config.configurable.mode` が選択どおり、回答下のモード表示、思考の折りたたみ。画像タブはモード切替なし・添付ありで変化なし |
 | 27B の生成速度 | 約 0.9 トークン/秒（Docker 停止、ComfyUI `/free` 後も同じ） |
 | メモリ | 27B ロード中の空き約 0.4GB、Docker Desktop の VM 約 1.5GB |
 
@@ -787,7 +787,7 @@ llama-server 側は出力の `<think>` を本文から分離する。分離し�
 
 ### 13.5 残る制約
 
-- 他ホストの実機ブラウザからは確認していない（この端末から LAN アドレスに headless Edge で接続して確認した）。
+- 他ホストの実機ブラウザからの動作は、利用者が確認した（問題なし）。
 - `probe-bonsai.ps1` のやり直し（13.6）で、8 モデルすべてが担当タスクに合格した。
 
 ### 13.6 検索モデルの再検証と、1 回目が中断した理由（2026-10-05）

@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -76,6 +76,7 @@ LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の�
 | agent-chat-ui | 他ホストから到達できるアドレス。開発時の既定ポートは `3000` | 利用者のブラウザ |
 | Tor | `127.0.0.1:9050`（SOCKS） | この端末の LangGraph（チャットタブの検索）だけ |
 | PrismML llama-server | `127.0.0.1:18181〜18190` | この端末の LangGraph だけ。検索中だけ起動する |
+| Docker サンドボックス | 待受なし（`--network none`、ポートを公開しない） | この端末の LangGraph が承認後に起動する。Docker Desktop は実行のときだけ起動して止める |
 
 ComfyUI は `--listen 127.0.0.1 --port 8188` のままにする。LM Studio、Tor、llama-server もループバックのままにする。他ホストへ開くのは LangGraph と agent-chat-ui だけである。検索の外向き通信は Tor の出口だけを通る（`socks5h://`）。
 
@@ -161,7 +162,10 @@ docs/chroma-hd-support-work-instruction.md       Chroma1-HD 系統の要件、�
 README.md                         事前準備、セットアップ、起動順、待受、UMA の注記、既知の対象外
 CHANGELOG.md                      版ごとの変更
 langgraph.json                    graphs.agent がグラフを指す
-src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント
+src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント。
+                                  チャットタブは chat_graph（ルーティングと検索）、write_nodes / code_nodes、chat_common、
+                                  modes（速い / 思考 / 自動）、sandbox（Docker）
+docs/chat-deep-search-creative-sandbox.md       チャットタブの深い検索、文章、コード、モードの設計と実装記録
 comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
 workflows/furry_ja.json           UI 形式
 workflows/furry_ja_api.json       フェーズ 1 の API 形式。t2i_basic / i2i_basic の元
@@ -181,7 +185,7 @@ prompts/system_write_*.txt        チャットタブの文章（アウトライ�
 prompts/system_code_plan.txt      チャットタブのコード生成
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
-scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai
+scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai、コード実行用は setup-sandbox
 tests/                            pytest
 agent-chat-ui/                    公式 UI。設定で接続する
 .env                              端末固有の設定。.env.example から作る。git に含めない
@@ -246,6 +250,8 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - クラウド API へのフォールバック。LangSmith クラウドへのデプロイを、このローカル連携の代替にすること。
 - 動画生成ワークフロー。Wan、LTX などを含む。
 - チャットタブの検索で、クラウド検索 API、CAPTCHA の突破、指紋偽装、`.onion` の巡回を行うこと。Tor を通らない検索の通信。
+- チャットタブのコードを、承認（HITL）なしで、または `sandbox.py` 以外（ホストのシェル、LangGraph プロセス内の subprocess）で実行すること。コンテナに docker.sock、ホームフォルダ、リポジトリ、`.env` を渡すこと。速いモードで実行すること。
+- 思考トークンを回答本文に混ぜること。文章生成に検索モデルや画像用プロンプトを使うこと。
 - 設計書 §5 の薄い `frontend/`。
 - ComfyUI または LM Studio をループバック以外へ開くこと。
 - ノード ID、JSON 契約、unload 順の変更。
@@ -270,6 +276,8 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
 - 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。取得物（Tor、fork の zip、モデル）は SHA-256 を照合する（値は `config/search_models.json` と Tor の配布元）。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
 - チャットタブのタイムアウトは、モデル呼び出し 1 回が `CHAT_TIMEOUT_S`（1200 秒）、思考モードの検索全体が `SEARCH_WALL_CLOCK_S`（1200 秒）。コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
+- この端末の LM Studio の 27B は context 4096（`LMSTUDIO_CONTEXT`）で約 0.9 トークン/秒。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「`CHAT_TIMEOUT_S` で出せる量」（`LMSTUDIO_TOKENS_PER_S` から始め、応答ごとに測り直す）の小さい方に収める。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
+- Docker Desktop は普段は止めておき、承認したコードの実行のときだけ起動して、終わったら止める（VM が約 1.5GB を使い、27B や ComfyUI と取り合うため）。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則
