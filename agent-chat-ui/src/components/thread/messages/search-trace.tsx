@@ -701,22 +701,24 @@ export function DocTraceView({ trace }: { trace: DocTrace }) {
       </button>
       {open && (
         <div className="flex flex-col gap-3 border-t px-3 py-3">
-          {[...byWave.entries()].map(([wave, locators]) => (
-            <div
-              key={wave}
-              className="flex flex-col gap-0.5 text-xs"
-            >
-              <p className="text-muted-foreground font-medium">波 {wave}</p>
-              {locators.map((l) => (
-                <code
-                  key={l}
-                  className="break-all"
-                >
-                  {l}
-                </code>
-              ))}
-            </div>
-          ))}
+          {[...byWave.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([wave, locators]) => (
+              <div
+                key={wave}
+                className="flex flex-col gap-0.5 text-xs"
+              >
+                <p className="text-muted-foreground font-medium">波 {wave}</p>
+                {locators.map((l) => (
+                  <code
+                    key={l}
+                    className="break-all"
+                  >
+                    {l}
+                  </code>
+                ))}
+              </div>
+            ))}
           {files.length > 0 && (
             <Section title={`対象ファイル ${files.length} 件`}>
               <ul className="flex flex-col gap-0.5 text-xs">
