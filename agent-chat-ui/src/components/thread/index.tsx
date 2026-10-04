@@ -39,7 +39,13 @@ import {
 } from "../ui/tooltip";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import { CHAT_GRAPH, ModeTabs, useActiveTab } from "./mode-tabs";
+import {
+  CHAT_GRAPH,
+  ChatModeSwitch,
+  ModeTabs,
+  useActiveTab,
+  useChatMode,
+} from "./mode-tabs";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -165,6 +171,11 @@ export function Thread() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   // local-agent: the chat tab takes text only (attachments belong to the image tab).
   const isChatTab = useActiveTab() === CHAT_GRAPH;
+  // local-agent: 自動 / 速い / 思考, sent with every chat-tab run as configurable.mode.
+  const [chatMode, setChatMode] = useChatMode();
+  const runConfig = isChatTab
+    ? { config: { configurable: { mode: chatMode } } }
+    : {};
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -248,6 +259,7 @@ export function Thread() {
         streamMode: ["values"],
         streamSubgraphs: true,
         streamResumable: true,
+        ...runConfig,
         optimisticValues: (prev) => ({
           ...prev,
           context,
@@ -275,6 +287,7 @@ export function Thread() {
       streamMode: ["values"],
       streamSubgraphs: true,
       streamResumable: true,
+      ...runConfig,
     });
   };
 
@@ -514,7 +527,7 @@ export function Thread() {
                         }}
                         placeholder={
                           isChatTab
-                            ? "メッセージ（「/search」や「調べて」で Tor 経由の検索）"
+                            ? "メッセージ（/search で検索、/write で文章、/code でプログラム）"
                             : "描きたい内容を日本語で（画像は 4 枚まで添付できます）"
                         }
                         className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
@@ -536,6 +549,12 @@ export function Thread() {
                             </Label>
                           </div>
                         </div>
+                        {isChatTab && (
+                          <ChatModeSwitch
+                            mode={chatMode}
+                            onChange={setChatMode}
+                          />
+                        )}
                         <Label
                           htmlFor="file-input"
                           className={cn(

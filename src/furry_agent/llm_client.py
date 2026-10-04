@@ -28,6 +28,23 @@ class LLMError(RuntimeError):
     pass
 
 
+def split_thinking(text: str) -> tuple[str, str]:
+    """(answer, thinking): <think> blocks are taken out of the answer and returned separately."""
+    text = text or ""
+    thoughts = [m.group(0)[7:-8] for m in _THINK_BLOCK.finditer(text)]
+    rest = _THINK_BLOCK.sub("", text)
+    if "</think>" in rest.lower():  # the opening tag was in the chat template, only the close came back
+        head = _THINK_CLOSE.match(rest)
+        if head:
+            thoughts.append(head.group(0)[:-8])
+        rest = _THINK_CLOSE.sub("", rest)
+    tail = _THINK_OPEN.search(rest)
+    if tail:  # cut off while still thinking
+        thoughts.append(tail.group(0)[7:])
+        rest = rest[:tail.start()]
+    return rest.strip(), "\n".join(t.strip() for t in thoughts if t.strip())
+
+
 def strip_thinking(text: str) -> str:
     text = _THINK_BLOCK.sub("", text or "")
     if "</think>" in text.lower():
@@ -80,6 +97,8 @@ class ChatReply:
     tool_calls: list[ToolCall] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
     seconds: float = 0.0
+    # Thinking tokens, never part of ``content`` (design doc §6.2): reasoning_content / reasoning / <think>.
+    reasoning: str = ""
 
     @property
     def tokens_per_s(self) -> float | None:
@@ -107,14 +126,17 @@ class OpenAICompatClient:
     async def chat(self, messages: list[dict], *, max_tokens: int = 1024, temperature: float = 0.4,
                    tools: list[dict] | None = None, tool_choice: str | None = None,
                    json_mode: bool = False, json_schema: dict | None = None,
-                   timeout_s: float | None = None) -> ChatReply:
+                   timeout_s: float | None = None, thinking: bool | None = None) -> ChatReply:
+        """``thinking``: True = thinking tokens on (the chat tab's think mode), False = off, None = the client's
+        default (off unless the client was made with thinking_off=False)."""
         body: dict = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": False}
         if self.model:
             body["model"] = self.model
-        if self.thinking_off:
-            # llama-server reads chat_template_kwargs; LM Studio applies the per-model "thinking off" default
-            # written by scripts/setup-lmstudio.ps1 and ignores unknown keys.
-            body["chat_template_kwargs"] = {"enable_thinking": False}
+        think = (not self.thinking_off) if thinking is None else thinking
+        # llama-server reads chat_template_kwargs; LM Studio applies the per-model "thinking off" default written
+        # by scripts/setup-lmstudio.ps1 and ignores unknown keys (thinking_body switches it on there).
+        body["chat_template_kwargs"] = {"enable_thinking": think}
+        body.update(self.thinking_body(think))
         if tools:
             body["tools"] = tools
             if tool_choice:
@@ -126,13 +148,20 @@ class OpenAICompatClient:
         elif json_mode:
             body["response_format"] = {"type": "json_object"}
         started = time.monotonic()
-        try:
-            async with self._http(timeout_s) as http:
-                response = await http.post(f"{self.base_url}/chat/completions", json=body)
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"時間切れです（{timeout_s or self.timeout_s:.0f} 秒）") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
+        for attempt in (1, 2):
+            try:
+                async with self._http(timeout_s) as http:
+                    response = await http.post(f"{self.base_url}/chat/completions", json=body)
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"時間切れです（{timeout_s or self.timeout_s:.0f} 秒）") from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
+            # LM Studio's idle TTL can unload the model just as a request arrives ("Model is unloaded."):
+            # the same request once more makes it load again (JIT).
+            if attempt == 1 and response.status_code == 400 and "Model is unloaded" in response.text:
+                log.info("LM Studio unloaded the model while the request arrived; sending it again")
+                continue
+            break
         if response.status_code >= 400:
             raise LLMError(f"HTTP {response.status_code}: {response.text[:300]}")
         data = response.json()
@@ -144,11 +173,23 @@ class OpenAICompatClient:
             if isinstance(args, str):
                 args = parse_json_object(args) or {}
             calls.append(ToolCall(fn.get("name") or "", args or {}, call.get("id") or ""))
-        return ChatReply(strip_thinking(message.get("content") or ""), calls, data, time.monotonic() - started)
+        content, inline = split_thinking(message.get("content") or "")
+        reasoning = "\n".join(t for t in (str(message.get("reasoning_content") or message.get("reasoning") or "").strip(),
+                                          inline) if t)
+        return ChatReply(content, calls, data, time.monotonic() - started, reasoning)
+
+    def thinking_body(self, think: bool) -> dict:
+        """Extra request fields that switch thinking on (server specific)."""
+        return {}
 
 
 class LMStudio(OpenAICompatClient):
     """LM Studio's OpenAI-compatible endpoint plus its native REST API for the loaded-model state."""
+
+    def thinking_body(self, think: bool) -> dict:
+        # Measured with LM Studio 0.4 and the Qwen3.8 27B: chat_template_kwargs is ignored; reasoning_effort turns
+        # thinking on and the thoughts come back in message.reasoning (never in content).
+        return {"reasoning_effort": "medium"} if think else {}
 
     def native(self) -> str:
         parsed = urlparse(self.base_url)

@@ -56,7 +56,7 @@ async def _route(client: OpenAICompatClient) -> bool:
                             sa.RouteDecision, max_tokens=80, temperature=0.0)
     no = await sa.ask_json(client, [system, {"role": "user", "content": "こんにちは、元気？"}],
                            sa.RouteDecision, max_tokens=80, temperature=0.0)
-    return bool(yes and yes.search and yes.query and no and not no.search)
+    return bool(yes and yes.kind == "SEARCH" and yes.query and no and no.kind != "SEARCH")
 
 
 async def _plan(client: OpenAICompatClient) -> bool:
@@ -97,17 +97,24 @@ async def _worker(client: OpenAICompatClient) -> tuple[bool, bool]:
     return tool_ok, cards_ok
 
 
-CARDS = [{"url": HITS[2]["url"], "claims": [{"claim": "メモリは 24GB LPDDR5X", "quote_ok": True},
+CARDS = [{"id": "0.1", "url": HITS[2]["url"], "claims": [{"claim": "メモリは 24GB LPDDR5X", "quote_ok": True},
                                             {"claim": "2025 年 10 月 16 日発売", "quote_ok": True}]}]
 REFS = [{"n": 1, "url": HITS[2]["url"], "title": HITS[2]["title"]}]
 
 
 async def _critique(client: OpenAICompatClient) -> bool:
+    """Think mode's critic: the spec is answered by card 0.1, the price is not (no card), so it stays open
+    and gets a next intent."""
+    search = {"goal": QUESTION + " 価格も知りたい。", "intents": [{"tool": "web", "q": "handheld spec", "round": 0}],
+              "subquestions": [{"id": "q1", "question": "仕様（メモリ）と発売日は？", "status": "open"},
+                               {"id": "q2", "question": "価格はいくらか？", "status": "open"}]}
     result = await sa.ask_json(client, [{"role": "system", "content": _prompt("system_search_critique.txt")},
-                                        {"role": "user", "content": sa.critique_input(
-                                            QUESTION + " 価格も知りたい。", [{"tool": "web", "q": "handheld spec"}],
-                                            CARDS, REFS)}], sa.Critique, max_tokens=200)
-    return result is not None and len(result.gaps) <= 3
+                                        {"role": "user", "content": sa.reflect_input(search, CARDS, REFS)}],
+                               sa.Reflect, max_tokens=500)
+    if result is None:
+        return False
+    out = sa.apply_reflect(search, result, CARDS, 1, 3)
+    return "q2" in out["open"] and len(result.next_intents) <= 3
 
 
 async def _synthesize(client: OpenAICompatClient) -> bool:

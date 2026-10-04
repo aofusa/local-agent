@@ -1,7 +1,7 @@
 // local-agent: 画像 / チャット tabs (Grok-style split). A tab selects the LangGraph graph:
 // 画像 = graph "agent" (the image generation graph), チャット = graph "chat" (conversation and Tor web search).
 // Threads stay separate because the history list is filtered by graph_id.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useQueryState } from "nuqs";
 import { Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -93,6 +93,111 @@ export function ModeTabs({ className }: { className?: string }) {
           )}
         >
           <Icon className="size-4" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// local-agent: 自動 / 速い / 思考 for the chat tab (sent as config.configurable.mode; the image tab ignores it).
+// 速い = one search round, one-shot writing, code is not run, no thinking tokens. 思考 = deeper search rounds,
+// outline -> draft -> revise, code runs in Docker after approval, thinking tokens shown apart from the answer.
+// 自動 = the graph picks one per message (like Grok's auto). The choice is a per-browser convenience.
+export type ChatMode = "auto" | "fast" | "think";
+
+const CHAT_MODES: { id: ChatMode; label: string; title: string }[] = [
+  {
+    id: "auto",
+    label: "自動",
+    title: "内容に応じて速い / 思考を自動で選びます",
+  },
+  {
+    id: "fast",
+    label: "速い",
+    title: "すばやく答えます（検索 1 回、実行なし）",
+  },
+  {
+    id: "think",
+    label: "思考",
+    title: "深く考えます（追加検索、推敲、承認後のコード実行）",
+  },
+];
+const MODE_KEY = "local-agent:chat-mode";
+const modeListeners = new Set<() => void>();
+let memoryMode: ChatMode = "auto"; // used when the browser refuses storage
+
+function readMode(): ChatMode {
+  try {
+    const value = window.localStorage.getItem(MODE_KEY);
+    return value === "fast" || value === "think" || value === "auto"
+      ? value
+      : memoryMode;
+  } catch {
+    return memoryMode;
+  }
+}
+
+function subscribeMode(listener: () => void) {
+  modeListeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    modeListeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
+export function useChatMode(): [ChatMode, (mode: ChatMode) => void] {
+  const mode = useSyncExternalStore(
+    subscribeMode,
+    readMode,
+    () => "auto" as ChatMode,
+  );
+  const update = (next: ChatMode) => {
+    memoryMode = next;
+    try {
+      window.localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // storage unavailable: the choice lasts for this page only
+    }
+    modeListeners.forEach((listener) => listener());
+  };
+  return [mode, update];
+}
+
+export function ChatModeSwitch({
+  mode,
+  onChange,
+  className,
+}: {
+  mode: ChatMode;
+  onChange: (mode: ChatMode) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="応答モード"
+      className={cn(
+        "bg-background inline-flex items-center gap-0.5 rounded-full border p-0.5",
+        className,
+      )}
+    >
+      {CHAT_MODES.map(({ id, label, title }) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={mode === id}
+          title={title}
+          onClick={() => onChange(id)}
+          className={cn(
+            "cursor-pointer rounded-full px-3 py-1 text-xs transition-colors",
+            mode === id
+              ? "bg-foreground text-background font-semibold"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
           {label}
         </button>
       ))}

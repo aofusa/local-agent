@@ -14,12 +14,13 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 チャットタブでは LM Studio の 27B と会話でき、「/search …」「…を調べて」と送ると Tor 経由で Web を検索して、出典付きで答えます。
 検索は Grok のマルチエージェント検索を小さくしたもので、計画 → 並列検索 → reader によるページ読み → 批評 → 統合の順に進みます。
 検索のモデル（Bonsai / Qwen heretic）は、PrismML の llama.cpp fork で検索のあいだだけ起動します（「4. 使い方 › チャットタブ」）。
+チャットタブでは小説や文章（`/write`）とプログラム（`/code`）も書けます。入力欄の「自動 / 速い / 思考」で、すばやい回答と、深い検索（下位問いを埋めるまで追加検索）・アウトラインと推敲・承認後の Docker 実行・思考トークンを切り替えます。「自動」は内容から自動で選びます。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
@@ -33,9 +34,10 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
                          ▼
                    LM Studio       http://127.0.0.1:1234/v1（ループバックのみ）
 
-                   チャットタブ: LangGraph ──> LM Studio（会話、検索の計画。検索中は unload）
+                   チャットタブ: LangGraph ──> LM Studio（会話、文章、コード、検索の計画。検索中は unload）
                                           ──> PrismML llama-server 127.0.0.1:18181〜（検索中だけ）
                                           ──> Tor SOCKS 127.0.0.1:9050 ──> 検索エンジンと結果のページ
+                                          ──> Docker（思考モードで承認したコードだけ。ネットワークなし、待受なし）
 ```
 
 ## 動作環境
@@ -135,6 +137,14 @@ cd local-agent
 .\scripts\setup-llamacpp.ps1        # PrismML llama.cpp fork の Vulkan 版を tools\llama-prism へ（SHA-256 照合。-FromSource でビルド）
 .\scripts\setup-search-models.ps1   # 検索モデル 8 つ（約 20GB、再開可、SHA-256 照合）を tools\models へ（-Verify で取得済みも再照合）
 .\scripts\probe-bonsai.ps1          # 各モデルを 1 回ずつ起動して検証し、tools\bonsai\rank.json に順位を書く
+```
+
+チャットタブのコード実行（思考モード）を使う場合は、Docker Desktop を入れてから次を実行します。
+Docker Desktop が止まっていれば起動し、`python:3.12-slim` を取得して、ネットワークなし・読み取り専用・非 root でコンテナが動くことを確かめます。
+Docker が無くても、チャットタブはコードを書いてファイルに残し、実行しなかった理由を返します。
+
+```powershell
+.\scripts\setup-sandbox.ps1         # -Rust で rust:1.88-slim も取得
 ```
 
 各スクリプトの詳細は `Get-Help .\scripts\setup-lmstudio.ps1 -Detailed` で表示できます。
@@ -364,13 +374,63 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | キャラクター + ポーズ、元画像 + 画風 | 約 8〜9 分 |
 | キャラクター + ポーズ + 画風 | 約 12.5 分 |
 
-### チャットタブ（会話と Tor 経由の検索）
+### チャットタブ（会話、Tor 経由の検索、文章、コード）
 
-画面上部の「チャット」タブに切り替えて送ります。スレッドの履歴はタブごとに分かれます。画像の添付は受け付けず、絵を描く依頼（「〜を描いて」）は画像タブへ誘導します。
+画面上部の「チャット」タブに切り替えて送ります。スレッドの履歴はタブごとに分かれます。画像の添付は受け付けず、絵を描く依頼（「〜を描いて」「この場面を画像にして」）は画像タブへ誘導します（書いた文章があれば、最後の場面の描写を貼り付け用に添えます）。
 
 - **会話**: LM Studio の Qwen3.8 27B が答えます（直近 12 往復を文脈にします）。
 - **検索**: 行頭の `/search`、または「検索」「調べて」「ググ」「最新」「ニュース」を含む文、URL を含む文（その URL を読みます）で検索します。
-  検索語の無い質問文（「〜はいつ？」など）は、Qwen3-1.7B が検索するかどうかを判断します。
+- **文章**: 行頭の `/write`、または「小説」「物語」「設定を作って」「推敲」「続きを書いて」「記事の下書き」などを含む文。書くのは LM Studio の 27B です。
+- **コード**: 行頭の `/code`、または「コードを書いて」「実装して」「実行して」「テストして」「スクリプトを作って」などを含む文。
+- どれとも決まらない文（「〜はいつ？」「〜をまとめて」など）は、Qwen3-1.7B が会話 / 検索 / 文章 / コードのどれかを選びます。失敗したら会話にします（画像タブへは誘導しません）。
+
+#### 応答モード（自動 / 速い / 思考）
+
+入力欄の下の「自動 / 速い / 思考」で切り替えます（既定は「自動」。ブラウザごとに覚えます）。モデルは替えず、予算と思考トークンを替えます。
+
+| | 速い | 思考 |
+|---|---|---|
+| 検索 | 検索意図 1 本、1 ラウンド、批評なし | 目的と下位問い（2〜5）を立て、未回答の下位問いを埋めるまで最大 4 ラウンド |
+| 文章 | 27B が一度で書く | アウトライン → 本文 → 推敲（差分だけ直す）。章立ての依頼は章ごとに続けるか確認 |
+| コード | ファイルを書くだけ（実行しない） | 承認後に Docker コンテナで実行し、失敗したら 1 回だけ直して再実行（承認し直し） |
+| 思考トークン | なし | あり。回答とは別の折りたたみ（「思考」、既定は閉じる）に出す |
+
+- **自動**は Grok の自動モードと同じく、送った内容から選びます。比較・分析・理由・複数の条件を含む調査、章立てや構成が要る文章、実行やテストを頼んだコード、計算や推論の要る相談は「思考」、単一の事実確認、短い文章、コードの生成だけ、雑談は「速い」です。「じっくり」「詳しく」/「手短に」「ざっくり」と書けばそれに従います。判断に迷う文はルータ（Qwen3-1.7B）の判定も使います。回答の下に「自動 → 思考（『違い』を含む調査）」のように、選んだモードと理由が出ます。
+- モードを付けずに API から送った実行は「速い」です。画像タブはモードを使いません。
+- 思考トークンは LM Studio の 27B だけが出します（`reasoning_effort`。LM Studio は `chat_template_kwargs` を無視するため）。JSON を返す段（計画・批評・推敲・アウトライン）は思考なしで呼びます。
+- タイムアウト: 1 回のモデル呼び出しは 20 分（`CHAT_TIMEOUT_S=1200`）、思考モードの検索全体も 20 分（`SEARCH_WALL_CLOCK_S=1200`）。長い呼び出しのあいだも共有ロックは延長されます。
+- この端末での速さ（実測）: LM Studio の 27B（IQ3_M、context 4096）の生成は約 0.9 トークン/秒です（Docker の停止や ComfyUI の `/free` では変わりませんでした）。そのため 1 回の呼び出しで出せるのは 20 分で約 1000 トークンまでで、チャットタブは回答と思考の量を、context（4096）と実測の速さの両方に収まるように決めます（`LMSTUDIO_CONTEXT`、`LMSTUDIO_TOKENS_PER_S`。速さは応答のたびに測り直します）。答えの分が残らないときは思考を使いません。思考が予算を使い切って答えが空なら、思考なしでもう一度だけ答えさせます。
+  - 目安: 速いモードの会話は 27B のロード込みで約 3 分、思考モードのコード（短いスクリプト）は生成に約 12 分、文章は 1 回で 1000〜1500 字程度です。長い文章は「章立て」で分けてください。
+- Docker Desktop は普段は止めておけます。止まっていると、確認カードに「Docker Desktop: 停止中」と出て、承認後に起動し（30 秒〜数分）、実行が終わったら止めます。Docker の VM は約 1.5GB を使い、この端末では 27B（ロード中の空き 0.4GB）や ComfyUI と取り合うためです。
+
+#### 深い検索（思考モード）
+
+1. 27B が「目的」（時期・地域・比較対象・その会話で示された条件、何が分かれば判断が変わるか）と下位問い 2〜5 個、最初の検索意図を作ります。
+2. 検索 → フィルタ → reader（下と同じ）。前のラウンドで見つけた URL は読み直しません。
+3. 批評役（代理リーダー、または 27B が載っていれば 27B）が下位問いごとに「回答済み / 一部 / 未回答」を判定します。回答済みには根拠カードの番号が要ります。カード同士の食い違いも挙げ、未回答と一部の下位問いだけを次の検索にします（新しい話題は広げません。食い違いには一次情報を探すクエリ）。
+4. 未回答が残り、前のラウンドで新しいカードが増え、ラウンド（4）・ページ（12）・時間（20 分）が残っていれば次のラウンドへ。そうでなければ統合へ進みます。
+5. 回答には [n] 付きの本文に加えて、未解決の下位問い（推測で埋めません）、食い違い（両方のカード番号）、停止理由（十分に答えられた / 新しい根拠が増えなくなった / 予算の上限 / 検索結果なし）が付きます。
+6. 「Tor 経由の深い検索」を開くと、ラウンドごとの検索、下位問いと状態、採用したカード（引用確認済み）、使わなかったもの（関連が低い、既に読んだ、引用を本文で確認できない）、読んだページ数と経過秒が見られます。
+
+reader を同時に増やすのではなく、ラウンドを増やします（この端末のメモリでは幅を増やせません）。27B と reader は今までどおり同時に載せません。
+
+#### 文章（`/write`）
+
+- 書いた本文はスレッドの `artifact` に残ります。「続きを書いて」は会話履歴ではなく、この本文の末尾（約 2000 字）から続けます。
+- 思考モードでは、まずブリーフ（ジャンル・視点・長さ・入れる / 入れない要素・言語）とアウトラインを作って表示し、本文を書き、推敲します。推敲は「本文中の文字列 → 直した文字列」の置換だけで、全文を書き直しません。回答の下の「執筆の手順」にブリーフ、アウトライン、推敲メモ、事実が分からない点が出ます。
+- 「長編」「章立て」「連載」「全 N 章」の依頼は、章ごとに本文を出して「続けるか」を確認します（画像タブの役割確認と同じカード）。承認で次の章、編集（instruction に指示）で指示付きで次の章、却下でそこで止めます。止めても「続きを書いて」で次の章から再開できます。確認待ちのあいだは共有ロックを放すので、画像タブを使えます。
+- 実在の事件・史実・資料に基づく創作（「調べてから小説にして」など）は、思考モードなら先に検索し、その結果を参考資料として書きます。速いモードでは検索せずに書き、その旨を添えます。事実が要る箇所は創作で埋めません。
+- 文章を書くのは常に LM Studio の 27B です。検索用の小さいモデルや、画像用のプロンプト（タグ生成）は使いません。
+
+#### コード（`/code`）と Docker サンドボックス
+
+- 27B がファイルとコマンドを書き、`artifacts\code\<run_id>\` に保存します（git 管理外）。速いモードはここまでで、ファイルと意図を返します。
+- 思考モードでは、実行の前に必ず確認カードを出します（ファイルとバイト数、コマンド、イメージ、ネットワークの有無、時間とメモリの上限）。承認するまで実行しません。編集でコマンド・ファイル・ネットワークを変えると、もう一度カードが出ます。却下するとファイルだけ残します。
+- コンテナの制約（変えられません）: `python:3.12-slim`（Debian slim。Rust と書いた依頼だけ `rust:1.88-slim`）、`--network none`、`--read-only`（書けるのは `/work` と 64MB の `/tmp` だけ）、`--memory 2g --cpus 2 --pids-limit 256`、`--cap-drop ALL`、`no-new-privileges`、非 root（`10001:10001`）、マウントはその実行の `artifacts\code\<run_id>` → `/work` だけ、60 秒で `docker kill`、出力は stdout / stderr とも末尾 8KB、`--pull never`。docker.sock、ホームフォルダ、リポジトリ、`.env`、SSH 鍵は渡しません。コマンドは argv の配列だけで、シェル（`sh -c`、`;`、`&&`、`|`、リダイレクト）は使えません。
+- 依存（pip / cargo）は、その依頼で「pip install して」「依存を入れて」などと明示したときだけ、承認カードに「network: setup」と出ます。承認すると、依存の取得（`requirements.txt` / `Cargo.toml`）だけをネットワーク付きの別コンテナで行い、プログラム本体はネットワークなしで実行します。
+- 失敗したら 27B が直し、承認し直してもう一度だけ実行します（合計 2 回まで）。
+- コンテナは共有ロック（画像とチャット）を握りません。別のロックで 1 つずつ実行し、画像タブの生成中は終わるまで待ちます。
+- Docker Desktop が無い、または止まっているときは、ファイルを書いたうえで理由を返します。`scripts\setup-sandbox.ps1` が Docker Desktop を起動し、イメージを取得します（`-Rust` で Rust 用も）。
 
 検索の流れ（Grok のマルチエージェント検索の縮小版）:
 
@@ -380,13 +440,13 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | 検索 | Python（モデルなし） | 意図ごとに並列で DuckDuckGo を Tor 経由で検索する |
 | フィルタ | Bonsai-4B | タイトルと抜粋から、関係の無い結果を落とす |
 | 読む | Ternary-Bonsai-8B × 最大 3 体 | 結果から開くページを選び（ツール呼び出し）、質問に関係する事実・数値・日付・反証だけを URL ごとのカードにする |
-| 批評 | Ternary-Bonsai-2-27B abliterated（代理） | 足りない観点があれば、1 回だけ追加で検索させる |
+| 批評（思考モードのみ） | Ternary-Bonsai-2-27B abliterated（代理） | 下位問いごとに充足を判定し、未回答のものだけを次のラウンドで検索させる（上の「深い検索」） |
 | 統合 | 同上 | カードだけを根拠に、[n] 付きの日本語の回答を書く。参照 URL の一覧はシステムが付ける |
 
 - 回答の下の「Tor 経由の検索」を開くと、検索語、ヒットしたページ（● は reader が開いたページ）、役割ごとのモデルが見られます。reader 同士の下書きは返しません。
 - モデルは `config/search_models.json` の順と、`probe-bonsai.ps1` の検証結果（`tools/bonsai/rank.json`）、空きメモリから自動で選びます。ファイルが無いモデルや検証に落ちたモデルは使いません。
   この端末（ROG Xbox Ally X）では、27B（IQ3_M）のロード中に空きが 1GB を切るため、計画のあと 27B を unload し、批評と統合は Bonsai 2 27B abliterated が代理で行います。
-- 1 回の検索に 6〜9 分かかります（27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
+- 速いモードの検索は意図 1 本・1 ラウンドで数分、思考モードは 3 ラウンドで約 16 分でした（実測。27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
 - 画像タブとチャットタブは同時に動きません。片方の実行中にもう片方へ送ると、実行中のタブ名を示して断ります。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは待ちます。
 - 結果が 0 件のとき（Tor の出口が拒否されたときなど）は、統合モデルを起動せずにその旨を返します。
 - `doctor.ps1` は、検索について次を確認します。いずれも WARN 扱いで、無くても画像タブは使えます。
@@ -408,7 +468,7 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | Qwen3.5-4B-heretic（Q4_K_M） | 予備 | reader・ルータ・批評・統合の 2〜3 番手 | 全タスクに合格したが、3.6GB と重く 19.8 tok/s と遅い |
 | Ternary-Bonsai-2-27B（通常版、PTQ1_0） | 予備 | 批評・統合の 2 番手 | 全タスクに合格（6.6GB、8.0 tok/s）。abliterated 版の方が拒否されにくいため 2 番手。abliterated 版の起動に失敗すると自動でこちらを使う |
 | Bonsai-8B（1-bit） | 予備（原則不採用） | reader の 3 番手 | reader の検証に合格し、速度は Ternary 8B と同じで 1.9GB と軽い。「同じ帯域なら Ternary 8B が上」という方針で順位を下げた（品質差はこの端末では比べていない） |
-| Qwen3-0.6B-heretic（Q8_0） | 不採用（フィルタの最後の予備だけ） | — | ルータの判定に不合格（分類の精度が足りない）。フィルタは合格したので、Bonsai-4B と 1.7B が使えないときだけ使う |
+| Qwen3-0.6B-heretic（Q8_0） | 予備（フィルタとルータの最後） | — | 旧形式のルータの判定には不合格（分類の精度が足りない）だった。v0.5.0 のルータ（会話 / 検索 / 文章 / コードを返す形式）の検証には合格したので、ルータの 3 番手。フィルタも合格。Bonsai-4B と 1.7B が使えないときだけ使う |
 
 検証（`scripts\probe-bonsai.ps1`）は、タスクごとに固定の短いテスト 1 本で合否を見ただけです。長い作業での安定性や、回答の質の細かい差は測っていません。
 順位は `config\search_models.json` を書き換えるか、probe をやり直すと変わります。reader だけは `.env` の `BONSAI_MODEL` で固定できます。
@@ -440,7 +500,13 @@ LM Studio 側の値を変えるときは、`.\scripts\setup-lmstudio.ps1 -GpuOff
 | `SEARCH_FANOUT_WIDTH` / `SEARCH_MAX_RESULTS` | `3` / `5` | 検索意図と reader の数の上限（1〜3）、1 検索の結果数 |
 | `SEARCH_TIMEOUT_S` / `SEARCH_TOTAL_TIMEOUT_S` | `30` / `150` | 1 リクエストの上限、reader 1 体の上限 |
 | `SEARCH_PLANNER` | `lmstudio` | `local` にすると、計画も代理 27B が行う（LM Studio を検索で使わない） |
-| `SEARCH_FILTER` / `SEARCH_CRITIQUE` / `SEARCH_AUTO_ROUTE` | `1` | フィルタ / 批評と追加検索 / 質問文の検索判定 |
+| `SEARCH_FILTER` / `SEARCH_CRITIQUE` / `SEARCH_AUTO_ROUTE` | `1` | フィルタ / 思考モードの批評と追加ラウンド / 決まらない文のルータ判定 |
+| `CHAT_TIMEOUT_S` | `1200` | 会話・文章・コード・統合のモデル呼び出し 1 回の上限（20 分） |
+| `SEARCH_MAX_ROUNDS` / `SEARCH_MAX_PAGES` / `SEARCH_WALL_CLOCK_S` | `4` / `12` / `1200` | 思考モードの検索のラウンド、読むページ、全体の時間（20 分）の上限 |
+| `SEARCH_HITS_PER_INTENT` | `4` | 1 つの検索意図から reader に渡す結果数 |
+| `CHAT_THINK_TOKENS` | `3072` | 思考モードで回答に足す思考トークンの上限（context と速さの範囲内で使う） |
+| `LMSTUDIO_CONTEXT` / `LMSTUDIO_TOKENS_PER_S` | `4096` / `1.0` | 27B の context と、測る前の生成速度。1 回の呼び出しの量をこの範囲に収める |
+| `SANDBOX_DOCKER` / `SANDBOX_USER` / `SANDBOX_WAIT_S` | `docker` / `10001:10001` / `600` | コード実行の docker、コンテナ内の uid:gid（root は不可）、画像タブの生成が終わるのを待つ上限 |
 | `BONSAI_LLAMA_SERVER` / `BONSAI_MODELS_DIR` | セットアップが設定 | PrismML fork の llama-server.exe と、モデルの置き場 |
 | `BONSAI_MODEL` | 空（自動） | reader のモデルを固定する（`ternary-8b` など）。入らなければ断る |
 | `BONSAI_RESERVE_MB` | `3072` | モデルを何体載せるか決めるときに残す空きメモリ |
@@ -559,6 +625,9 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 - タブ: 画面上部の「画像」「チャット」で、接続するグラフ（`agent` / `chat`）を切り替えます（`components/thread/mode-tabs.tsx`、配置は `thread/index.tsx`）。
   履歴はグラフごとに分かれ、タブごとに最後のスレッドを覚えます。チャットタブでは添付ボタンを隠します。
 - 検索痕跡: チャットタブの応答の `additional_kwargs.search_trace` を、折りたたみの一覧として描画します（`messages/search-trace.tsx`、`ai.tsx`）。
+  思考モードではラウンド、下位問いと状態、採用 / 不採用のカードと理由、停止理由、読んだページ数と経過秒も出します。
+- 応答モード: チャットタブの入力欄に「自動 / 速い / 思考」を置き、送信ごとに `config.configurable.mode`（`auto` / `fast` / `think`）として送ります（`mode-tabs.tsx` の `ChatModeSwitch`、配置は `thread/index.tsx`）。選択はブラウザの localStorage に覚えます。
+- 思考と手順: `additional_kwargs.thinking`（思考トークン、既定で閉じた折りたたみ）、`task_trace`（執筆とコードの手順）、`chat_mode`（選ばれたモードと自動の理由）を描画します（`search-trace.tsx`、`ai.tsx`）。思考は回答本文に混ぜません。
 
 ## 8. ログ
 
@@ -571,7 +640,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 
 ```powershell
 uv sync
-uv run pytest                                  # Python と PowerShell スクリプトのテスト
+uv run pytest                                  # Python と PowerShell スクリプトのテスト（Docker 実機のテストは Docker 起動中だけ）
 uv run python scripts\build_workflows.py       # prompts\ を変えたら workflows\ を再生成
 ```
 
@@ -587,6 +656,11 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | 「〜に使えるモデルがありません（メモリ不足…）」 | 他のアプリを閉じる。`BONSAI_RESERVE_MB` を下げる。`SEARCH_FANOUT_WIDTH` を 1〜2 にする |
 | 「検索結果がありません。Tor 出口が拒否された…」 | しばらく置いて送り直す（出口が変わる）。`logs\furry_agent.log` の `search provider=` を確認 |
 | 「チャットタブ（画像タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す |
+| チャットタブのコードで「Docker Desktop が起動していません」/「Docker がインストールされていません」 | Docker Desktop を入れて `.\scripts\setup-sandbox.ps1`（イメージ取得と動作確認）。普段は止めたままでよく、承認後に自動で起動・停止する |
+| 「コンテナイメージ python:3.12-slim がありません」 | `.\scripts\setup-sandbox.ps1`（Rust は `-Rust`）。実行時はイメージを取得しない（`--pull never`） |
+| 思考モードなのに「思考」の折りたたみが出ない | 答えに要る量と 20 分の時間枠（約 1000 トークン）に思考の余地が無いと、思考なしで答える（`logs\furry_agent.log` の `thinking=False`）。代理リーダーが統合した検索の回答にも思考は無い |
+| 思考モードの文章・コードがとても遅い | この端末の 27B は約 0.9 トークン/秒。長い文章は章立てにするか「速い」で送る |
+| 「LM Studio に接続できないか、時間切れです（HTTP 400: Model is unloaded.）」 | LM Studio の自動 unload と要求が重なった。1 回は自動で送り直すので、続くときは送り直す |
 | `doctor.ps1` で「no orphan llama-server」が WARN | 検索中でなければ `Stop-Process -Name llama-server` |
 | ブラウザに Deployment URL の入力画面が出る / 接続できない | `start-ui.ps1` を再実行（LAN IP が変わると再ビルド）。`open-firewall.ps1` を管理者で実行。ネットワークがプライベートか確認 |
 | 「生成できませんでした: ... Failed to load model」 | メモリ不足。他のアプリを閉じる、`setup-lmstudio.ps1 -GpuOffload 0.4` に下げる、ComfyUI を再起動して常駐メモリを解放 |
@@ -626,6 +700,8 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 - 役割推定は LLM ではなくルール（日本語のキーワードと序数）です。LangGraph から LM Studio を呼ばない（AGENTS.md）ためです。
 - 認証なし。LAN 内の開発用途のみ。チャットタブの検索も LAN から誰でも使えます（画像タブと同じリスク）。
 - チャットタブの検索は DuckDuckGo（Lite、空なら HTML 版）だけです。Tor の出口によっては空の結果になります。CAPTCHA の突破や指紋偽装、`.onion` の巡回はしません。
+- コードの実行は Docker Desktop（Linux エンジン）だけです。Windows コンテナ、WSL 直接、ホストでの実行はしません。コンテナ内からネットワークは使えず（依存の取得だけ例外）、1 回 60 秒・2GB までです。GUI、サーバの常駐、標準入力を使うプログラムは動きません。
+- 思考トークンは LM Studio の 27B だけです。代理リーダー（Ternary-Bonsai-2-27B）は `--reasoning off` のまま動かすので、代理で統合した回答には思考の折りたたみが出ません。
 - 検索モデルは PrismML の llama.cpp fork の Vulkan 版だけで動かします（Q1_0 / PQ2_0 / PTQ1_0 は素の llama.cpp や LM Studio では動かないため）。ROCm 版は使いません。
 
 ## ライセンス
@@ -645,6 +721,7 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | [h94/IP-Adapter](https://huggingface.co/h94/IP-Adapter) | IP-Adapter Plus SDXL、画像エンコーダ（OpenCLIP ViT-H/14） | `setup-comfyui-refs.ps1` | Apache-2.0（画像エンコーダの元の [laion/CLIP-ViT-H-14-laion2B-s32B-b79K](https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K) は MIT） |
 | [yzd-v/DWPose](https://huggingface.co/yzd-v/DWPose) | DWPose のポーズ推定モデル（ONNX） | `setup-comfyui-refs.ps1` | Apache-2.0 |
 | [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) | 深度推定モデル | `setup-comfyui-refs.ps1` | Apache-2.0 |
+| [python:3.12-slim](https://hub.docker.com/_/python) / [rust:1.88-slim](https://hub.docker.com/_/rust) | コード実行用のコンテナイメージ（Debian slim） | `setup-sandbox.ps1` | Python は PSF License、Rust は MIT / Apache-2.0、Debian の各パッケージはそれぞれのライセンス |
 | [comfyanonymous/flux_text_encoders](https://huggingface.co/comfyanonymous/flux_text_encoders) | T5-XXL fp8（Chroma のテキストエンコーダ） | `setup-comfyui-chroma.ps1` | Apache-2.0（元の google/t5-v1_1-xxl） |
 | [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) | VAE（`ae.safetensors` として保存） | `setup-comfyui-chroma.ps1` | Apache-2.0 |
 | Chroma1-HD 拡散モデル | [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) または Civitai | 事前準備（手動） | Apache-2.0 |

@@ -106,7 +106,13 @@ class ChatSettings:
 
     lmstudio_url: str = "http://127.0.0.1:1234/v1"
     lmstudio_model: str = ""
-    chat_timeout_s: float = 180.0
+    # Context window of the LM Studio 27B (scripts/setup-lmstudio.ps1 loads it with 4096: more does not fit).
+    lmstudio_ctx: int = 4096
+    # Generation speed of the LM Studio 27B before one is measured (tokens/s). Measured on the Ally X: ~0.9.
+    lmstudio_tokens_per_s: float = 1.0
+    # One model call of the chat tab (conversation, writing, code, synthesis). 20 minutes: the 27B on this machine
+    # needs minutes for a long draft or for thinking tokens.
+    chat_timeout_s: float = 1200.0
     history_turns: int = 12
     tor_socks_url: str = "socks5h://127.0.0.1:9050"
     tor_required: bool = True
@@ -117,6 +123,19 @@ class ChatSettings:
     search_timeout_s: float = 30.0
     search_total_timeout_s: float = 150.0
     fanout_width: int = 3
+    # Deep search (think mode; docs/chat-deep-search-creative-sandbox.md §3.4). Width stays, rounds grow.
+    search_max_rounds: int = 4
+    search_max_pages: int = 12
+    search_wall_clock_s: float = 1200.0
+    hits_per_intent: int = 4
+    # Thinking tokens added to max_tokens in think mode.
+    think_tokens: int = 3072
+    # Code sandbox (§5): docker CLI, the uid:gid inside the container, where runs are kept, how long a run waits
+    # for the image tab to finish.
+    docker_exe: str = "docker"
+    sandbox_user: str = "10001:10001"
+    code_dir: Path = REPO_ROOT / "artifacts" / "code"
+    sandbox_wait_s: float = 600.0
     search_planner: str = "lmstudio"
     search_filter: bool = True
     search_critique: bool = True
@@ -144,7 +163,9 @@ class ChatSettings:
         return cls(
             lmstudio_url=os.environ.get("LMSTUDIO_URL", "").strip() or "http://127.0.0.1:1234/v1",
             lmstudio_model=os.environ.get("LMSTUDIO_MODEL", "").strip(),
-            chat_timeout_s=_float("CHAT_TIMEOUT_S", 180.0),
+            lmstudio_ctx=_int("LMSTUDIO_CONTEXT", 4096, 1024, 262144),
+            lmstudio_tokens_per_s=_float("LMSTUDIO_TOKENS_PER_S", 1.0),
+            chat_timeout_s=_float("CHAT_TIMEOUT_S", 1200.0),
             history_turns=_int("CHAT_HISTORY_TURNS", 12, 1, 100),
             tor_socks_url=socks,
             tor_required=os.environ.get("TOR_REQUIRED", "1").strip() != "0",
@@ -155,6 +176,15 @@ class ChatSettings:
             search_timeout_s=_float("SEARCH_TIMEOUT_S", 30.0),
             search_total_timeout_s=_float("SEARCH_TOTAL_TIMEOUT_S", 150.0),
             fanout_width=_int("SEARCH_FANOUT_WIDTH", 3, 1, 3),
+            search_max_rounds=_int("SEARCH_MAX_ROUNDS", 4, 1, 4),
+            search_max_pages=_int("SEARCH_MAX_PAGES", 12, 1, 12),
+            search_wall_clock_s=_float("SEARCH_WALL_CLOCK_S", 1200.0),
+            hits_per_intent=_int("SEARCH_HITS_PER_INTENT", 4, 1, 8),
+            think_tokens=_int("CHAT_THINK_TOKENS", 3072, 0, 16384),
+            docker_exe=os.environ.get("SANDBOX_DOCKER", "").strip() or "docker",
+            sandbox_user=os.environ.get("SANDBOX_USER", "").strip() or "10001:10001",
+            code_dir=_path("SANDBOX_CODE_DIR", REPO_ROOT / "artifacts" / "code"),
+            sandbox_wait_s=_float("SANDBOX_WAIT_S", 600.0),
             # lmstudio = the Qwen3.8 27B plans first and is unloaded when the readers do not fit next to it;
             # local = the Ternary-Bonsai-2-27B proxy plans too (LM Studio is not loaded for a search at all).
             search_planner=(os.environ.get("SEARCH_PLANNER", "").strip().lower() or "lmstudio"),
