@@ -23,6 +23,15 @@ NODE_TYPES = {
     "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "FurryJaImageAfter", "DWPreprocessor", "DiffControlNetLoader",
     "SetUnionControlNetType", "ControlNetApplyAdvanced", "PreviewImage", "ImageToMask", "SetLatentNoiseMask",
     "LoraLoader", "Canny", "DepthAnythingV2Preprocessor", "FurryJaReleaseEncoders",
+    "FurryJaDiffusionLoaderAfterEject", "T5TokenizerOptions", "ModelSamplingAuraFlow", "EmptySD3LatentImage",
+}
+
+
+MODEL_FILES = {
+    "ckpt_name": ["yiffInHell_yihVANTABLACK.safetensors"],
+    "unet_name": ["chroma_v10HD.safetensors", "yiffInHell_yihVANTABLACK.safetensors"],
+    "clip_name": ["t5xxl_fp8_e4m3fn.safetensors"],
+    "vae_name": ["ae.safetensors"],
 }
 
 
@@ -54,8 +63,9 @@ class FakeComfy:
     async def free(self):
         self.calls.append("free")
 
-    async def checkpoints(self):
-        return ["yiffInHell_yihVANTABLACK.safetensors"]
+    async def checkpoints(self, node_class="FurryJaCheckpointLoaderAfterEject", field="ckpt_name"):
+        self.calls.append(f"models:{node_class}.{field}")
+        return MODEL_FILES.get(field, [])
 
     async def loras(self):
         return ["KemonoStyleAV1.safetensors", "CiviFur-30.safetensors"]
@@ -358,8 +368,8 @@ async def test_missing_nodes_point_to_setup_script(settings):
 
 async def test_unknown_family(settings):
     fake = FakeComfy()
-    state = await _run("夜", fake, replace(settings, model_family="flux"))
-    assert fake.submitted is None and "flux" in state["messages"][-1].content
+    state = await _run("夜", fake, replace(settings, model_family="chroma"))
+    assert fake.submitted is None and "chroma" in state["messages"][-1].content
 
 
 async def test_missing_unload_verification_fails(settings):
@@ -434,3 +444,115 @@ async def test_image_wait_gets_its_own_deadline(settings):
     state = {"messages": [], "progress_id": "p", "job": {"prompt_id": "pid", "client_id": "c", "deadline": time.time() + 5}}
     update = await graph_module.await_tags(state, _config(FakeComfy(), settings))
     assert update["job"]["deadline"] - time.time() > 590
+
+
+# --- flux (Chroma1-HD) family ---------------------------------------------------------------------------------
+
+
+def _types(prompt):
+    return {node["class_type"] for node in prompt.values()}
+
+
+async def test_default_request_stays_on_sdxl(settings):
+    fake = FakeComfy()
+    state = await _run("夕方の港", fake, settings)
+    assert fake.submitted["ckpt"]["class_type"] == "FurryJaCheckpointLoaderAfterEject"
+    assert fake.submitted["ckpt"]["inputs"]["ckpt_name"] == "yiffInHell_yihVANTABLACK.safetensors"
+    assert "Chroma" not in state["messages"][-1].content[0]["text"]
+
+
+@pytest.fixture
+def chroma(settings):
+    return replace(settings, model_family="flux", ckpt_name="chroma_v10HD.safetensors",
+                   loras="KemonoStyleAV1.safetensors")
+
+
+async def test_env_family_runs_chroma(chroma):
+    fake = FakeComfy()
+    state = await _run("夕方の神戸港で振り返る青い鱗のケモノ", fake, chroma)
+    prompt = fake.submitted
+    ckpt = prompt["ckpt"]["inputs"]
+    assert prompt["ckpt"]["class_type"] == "FurryJaDiffusionLoaderAfterEject"
+    assert (ckpt["unet_name"], ckpt["clip_name"], ckpt["vae_name"]) == (
+        "chroma_v10HD.safetensors", "t5xxl_fp8_e4m3fn.safetensors", "ae.safetensors")
+    assert prompt["user_prompt"]["inputs"]["value"] == "夕方の神戸港で振り返る青い鱗のケモノ"
+    assert 3.0 <= prompt["sampler"]["inputs"]["cfg"] <= 4.0
+    assert prompt["split"]["inputs"]["default_negative"]
+    assert "lora_1" not in prompt  # LORAS are SDXL LoRAs; Chroma uses CHROMA_LORAS
+    text = state["messages"][-1].content[0]["text"]
+    assert "Chroma1-HD" in text and "euler beta" in text and "1024×1024" in text
+    assert len(_final_images(state)) == 1
+    meta = json.loads(next(chroma.outputs_dir.glob("*.json")).read_text(encoding="utf-8"))
+    assert meta["family"] == "flux" and meta["cfg"] == 3.5 and meta["scheduler"] == "beta"
+    # Every model file of the template was checked against ComfyUI.
+    assert {"models:FurryJaDiffusionLoaderAfterEject.unet_name", "models:FurryJaDiffusionLoaderAfterEject.clip_name",
+            "models:FurryJaDiffusionLoaderAfterEject.vae_name"} <= set(fake.calls)
+
+
+async def test_message_commands_do_not_switch_family(settings, chroma):
+    fake = FakeComfy()
+    await _run("/model chroma 夕方の港", fake, settings)
+    assert fake.submitted["ckpt"]["class_type"] == "FurryJaCheckpointLoaderAfterEject"
+    assert fake.submitted["user_prompt"]["inputs"]["value"] == "/model chroma 夕方の港"
+    fake = FakeComfy()
+    await _run("sdxl で夕方の港", fake, chroma)
+    assert fake.submitted["ckpt"]["class_type"] == "FurryJaDiffusionLoaderAfterEject"
+
+
+async def test_chroma_ckpt_under_sdxl_family_is_explained(settings):
+    fake = FakeComfy()
+    state = await _run("港", fake, replace(settings, ckpt_name="chroma_v10HD.safetensors"))
+    assert "COMFY_MODEL_FAMILY=chroma" in state["messages"][-1].content
+    assert fake.submitted is None
+
+
+async def test_missing_chroma_file_is_named_without_fallback(chroma):
+    fake = FakeComfy()
+    state = await _run("港", fake, replace(chroma, chroma_models={"vae_name": "renamed_ae.safetensors"}))
+    text = state["messages"][-1].content
+    assert "renamed_ae.safetensors" in text and "setup-comfyui-chroma.ps1" in text
+    assert fake.submitted is None and "free" in fake.calls
+
+
+async def test_missing_chroma_node_asks_for_restart(chroma):
+    fake = FakeComfy(node_types=NODE_TYPES - {"FurryJaDiffusionLoaderAfterEject"})
+    state = await _run("港", fake, chroma)
+    assert "FurryJaDiffusionLoaderAfterEject" in state["messages"][-1].content
+    assert fake.submitted is None
+
+
+async def test_chroma_pose_reference_is_refused(chroma):
+    fake = FakeComfy()
+    state = await _run([{"type": "text", "text": "このポーズのまま、別の背景"}, _block(_png(), role="pose")], fake, chroma)
+    text = state["messages"][-1].content
+    assert "ポーズ ControlNet 未対応" in text
+    assert fake.submitted is None and not fake.uploads  # no silent text-to-image
+
+
+async def test_chroma_ambiguous_images_refused_before_asking(chroma):
+    fake = FakeComfy()
+    state = await _run([{"type": "text", "text": "いい感じに混ぜて"}, _block(_png()), _block(_png((1, 2, 3)))],
+                       fake, chroma)
+    assert "未対応" in state["messages"][-1].content
+    assert fake.submitted is None
+
+
+async def test_chroma_base_image_is_img2img(chroma):
+    fake = FakeComfy()
+    state = await _run([{"type": "text", "text": "背景を夜に直して"}, _block(_png())], fake, chroma)
+    prompt = fake.submitted
+    assert prompt["ckpt"]["class_type"] == "FurryJaDiffusionLoaderAfterEject"
+    assert prompt["latent"]["class_type"] == "VAEEncode"
+    assert prompt["sampler"]["inputs"]["denoise"] == 0.45
+    assert prompt["ref_image"]["inputs"]["image"].startswith("furry_ja/ref_")
+    assert len(_final_images(state)) == 1
+
+
+async def test_chroma_tag_list_output_is_warned(settings, chroma):
+    # FakeComfy returns a tag list as the positive: Chroma runs still finish but say so.
+    fake = FakeComfy()
+    state = await _run("港", fake, chroma)
+    assert "タグ列を返しました" in state["messages"][-1].content[0]["text"]
+    fake = FakeComfy()
+    state = await _run("港", fake, settings)
+    assert "タグ列" not in state["messages"][-1].content[0]["text"]

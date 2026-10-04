@@ -4,6 +4,7 @@ import folder_paths
 import nodes as comfy_nodes
 
 from .lmstudio_state import ensure_unloaded
+from .model_files import fp8_sibling
 from .tag_split import DEFAULT_NEGATIVE, QUALITY_PREFIX, split_tags
 
 log = logging.getLogger("furry_ja")
@@ -19,7 +20,9 @@ class FurryJaSplitTags:
                 "text": ("*",),
                 "quality_prefix": ("STRING", {"default": QUALITY_PREFIX}),
                 "default_negative": ("STRING", {"multiline": True, "default": DEFAULT_NEGATIVE}),
-            }
+            },
+            # "prose" for Chroma1-HD: keep English sentences, drop weight syntax and quality buzzwords.
+            "optional": {"prompt_style": (["tags", "prose"], {"default": "tags"})},
         }
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -27,8 +30,9 @@ class FurryJaSplitTags:
     FUNCTION = "split"
     CATEGORY = "furry_ja"
 
-    def split(self, text, quality_prefix=QUALITY_PREFIX, default_negative=DEFAULT_NEGATIVE):
-        result = split_tags(text, quality_prefix=quality_prefix, default_negative=default_negative)
+    def split(self, text, quality_prefix=QUALITY_PREFIX, default_negative=DEFAULT_NEGATIVE, prompt_style="tags"):
+        result = split_tags(text, quality_prefix=quality_prefix, default_negative=default_negative,
+                            prompt_style=prompt_style)
         mode = "json" if result.parsed else "fallback"
         log.info("[furry_ja] split mode=%s positive=%s", mode, result.positive)
         log.info("[furry_ja] split negative=%s", result.negative)
@@ -71,6 +75,81 @@ class FurryJaCheckpointLoaderAfterEject(comfy_nodes.CheckpointLoaderSimple):
                 "lmstudio_unloaded": [True],
                 "forced_unload": list(report["forced_unload"]),
                 "ckpt_name": [ckpt_name],
+            },
+            "result": (model, clip, vae),
+        }
+
+
+WEIGHT_DTYPES = ["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"]
+def _diffusion_model_names():
+    """Diffusion-model-only files may sit in diffusion_models (UNETLoader) or checkpoints (Civitai downloads)."""
+    names = folder_paths.get_filename_list("diffusion_models") + folder_paths.get_filename_list("checkpoints")
+    return list(dict.fromkeys(names))
+
+
+class FurryJaDiffusionLoaderAfterEject:
+    """`ckpt` for the Chroma1-HD family: diffusion model + text encoder + VAE, loaded after the LLM eject.
+
+    Same gate as FurryJaCheckpointLoaderAfterEject (MODEL, CLIP, VAE outputs, `after` link, LM Studio check),
+    so the node ids, the LoRA insertion and the unload verification stay the same as the SDXL templates.
+    The parts are the ones UNETLoader, CLIPLoader and VAELoader would load.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "unet_name": (_diffusion_model_names(),),
+                "weight_dtype": (WEIGHT_DTYPES, {"default": "default"}),
+                "clip_name": (folder_paths.get_filename_list("text_encoders"),),
+                "clip_type": ("STRING", {"default": "chroma"}),
+                "vae_name": (folder_paths.get_filename_list("vae"),),
+                "after": ("*",),
+                "lmstudio_base_url": ("STRING", {"default": "http://127.0.0.1:1234/v1"}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    FUNCTION = "load_after_eject"
+    CATEGORY = "furry_ja"
+
+    def load_after_eject(self, unet_name, weight_dtype, clip_name, clip_type, vae_name, after,
+                         lmstudio_base_url="http://127.0.0.1:1234/v1"):
+        import comfy.sd
+        import torch
+
+        report = ensure_unloaded(lmstudio_base_url)
+        log.info(
+            "[furry_ja] LM Studio verified unloaded before diffusion model/KSampler: forced_unload=%s",
+            report["forced_unload"],
+        )
+        path = (folder_paths.get_full_path("diffusion_models", unet_name)
+                or folder_paths.get_full_path_or_raise("checkpoints", unet_name))
+        # scripts/setup-comfyui-chroma.ps1 writes <name>_fp8_e4m3fn.safetensors next to the models: casting the
+        # 17.8 GB BF16 file at load time needs the whole BF16 state dict in RAM first.
+        if weight_dtype.startswith("fp8_e4m3fn"):
+            converted = fp8_sibling(unet_name)
+            converted_path = folder_paths.get_full_path("diffusion_models", converted)
+            if converted_path:
+                log.info("[furry_ja] using pre-converted %s for %s", converted, unet_name)
+                path = converted_path
+        options = {}
+        if weight_dtype == "fp8_e4m3fn":
+            options["dtype"] = torch.float8_e4m3fn
+        elif weight_dtype == "fp8_e4m3fn_fast":
+            options["dtype"] = torch.float8_e4m3fn
+            options["fp8_optimizations"] = True
+        elif weight_dtype == "fp8_e5m2":
+            options["dtype"] = torch.float8_e5m2
+        model = comfy.sd.load_diffusion_model(path, model_options=options)
+        (clip,) = comfy_nodes.CLIPLoader().load_clip(clip_name, type=clip_type)
+        (vae,) = comfy_nodes.VAELoader().load_vae(vae_name)
+        log.info("[furry_ja] loaded %s (%s) + %s (%s) + %s", unet_name, weight_dtype, clip_name, clip_type, vae_name)
+        return {
+            "ui": {
+                "lmstudio_unloaded": [True],
+                "forced_unload": list(report["forced_unload"]),
+                "ckpt_name": [unet_name],
             },
             "result": (model, clip, vae),
         }
@@ -124,6 +203,7 @@ class FurryJaReleaseEncoders:
 NODE_CLASS_MAPPINGS = {
     "FurryJaSplitTags": FurryJaSplitTags,
     "FurryJaCheckpointLoaderAfterEject": FurryJaCheckpointLoaderAfterEject,
+    "FurryJaDiffusionLoaderAfterEject": FurryJaDiffusionLoaderAfterEject,
     "FurryJaImageAfter": FurryJaImageAfter,
     "FurryJaReleaseEncoders": FurryJaReleaseEncoders,
 }
@@ -131,6 +211,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FurryJaSplitTags": "furry_ja: Split Tags JSON",
     "FurryJaCheckpointLoaderAfterEject": "furry_ja: Load Checkpoint (after LLM eject)",
+    "FurryJaDiffusionLoaderAfterEject": "furry_ja: Load Diffusion Model + T5 + VAE (after LLM eject)",
     "FurryJaImageAfter": "furry_ja: Image (after)",
     "FurryJaReleaseEncoders": "furry_ja: Release encoders before sampling",
 }

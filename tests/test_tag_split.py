@@ -72,3 +72,36 @@ def test_invalid_escapes_and_newlines_are_tolerated():
     r = split_tags(raw, quality_prefix="")
     assert r.parsed
     assert r.positive == "wolf, fox, orange fur, leather armor, night"
+
+
+# --- prose mode (Chroma1-HD) -------------------------------------------------------------------------
+
+
+def test_prose_keeps_sentences_and_drops_sdxl_syntax():
+    raw = ('{"positive":"Masterpiece, best quality, an anthropomorphic (wolf:1.3) woman stands on a beach at '
+           'sunset. {Soft} light, 8k, ultra detailed. BREAK Clean illustrated style.","negative":"blurry, ugly"}')
+    r = split_tags(raw, quality_prefix="", default_negative="low quality", prompt_style="prose")
+    assert r.parsed
+    assert r.positive == ("an anthropomorphic wolf woman stands on a beach at sunset. Soft light. "
+                          "Clean illustrated style.")
+    assert r.negative == "blurry, ugly"
+
+
+def test_prose_does_not_add_quality_prefix_and_keeps_parentheses():
+    raw = '{"positive":"A fox (seen from behind) walks home.","negative":""}'
+    r = split_tags(raw, quality_prefix=PREFIX, default_negative="low quality", prompt_style="prose")
+    assert r.positive == "A fox (seen from behind) walks home."
+    assert r.negative == "low quality"  # never empty
+
+
+def test_prose_fallback_is_cleaned_raw_text():
+    r = split_tags("A fox, masterpiece, walks home.", quality_prefix="", default_negative="low quality",
+                   prompt_style="prose")
+    assert not r.parsed
+    assert r.positive == "A fox, walks home."
+    assert r.negative == "low quality"
+
+
+def test_tags_mode_is_unchanged_by_default():
+    raw = '{"positive":"fox,  anthro","negative":"blurry"}'
+    assert split_tags(raw, quality_prefix=PREFIX) == split_tags(raw, quality_prefix=PREFIX, prompt_style="tags")

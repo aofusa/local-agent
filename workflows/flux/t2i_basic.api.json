@@ -1,0 +1,247 @@
+{
+  "llm_backend": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "huihui-qwen3.8-27b-abliterated@iq3_m",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": true,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LM Studio Backend"
+    }
+  },
+  "user_prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"
+    },
+    "_meta": {
+      "title": "user_prompt (日本語指示)"
+    }
+  },
+  "prompt_node": {
+    "class_type": "LMConnectPromptWithSystem",
+    "inputs": {
+      "system_prompt": "Convert the image request (usually Japanese) into a prompt for Chroma1-HD, a Flux-based model that reads plain English sentences through a T5 text encoder. It does not understand Danbooru tags or weight syntax.\nA \"[Reference image tags]\" section may follow the request. Use those details only where they do not contradict the request; the request wins.\n\nReturn exactly one JSON object and nothing else (no prose outside it, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: 1 to 3 natural English sentences, at most 90 words. Never a comma-separated tag list.\n- Put the main subject first, then in this order: action and pose, spatial relations, clothing and materials, background and place, light source and time of day, style or medium.\n- Keep every detail of the request: number of characters and gender, species, fur/hair/eye colors and markings, clothing, pose and expression, framing and camera angle, lighting, location.\n- Anthro / kemono / 獣人 / ケモノ requests: write \"an anthropomorphic <species> <man/woman> with <traits>\", not the tag \"anthro\".\n- Never write (word:1.2), {word}, BREAK, masterpiece, best quality, 8k, ultra detailed or similar quality buzzwords. To stress something write \"with emphasis on ...\".\n- If no style is requested, end with exactly one of \"Clean illustrated style.\" (illustration, anime, furry art) or \"Natural photograph.\" (photo, realistic). Never both.\n- Do not invent another subject or setting. All characters are adults; never suggest a minor.\nnegative: one short English line under 40 words. Start from \"low quality, ugly, unfinished, out of focus, deformed, blurry, smudged, flat colors\" and add only what the user explicitly asked to avoid. Never leave it empty.\n\nExample request: 青い鱗のケモノのお兄さんが、夕方の神戸港で振り返る。清潔なイラスト\nExample output: {\"positive\":\"An anthropomorphic dragon man with blue scales looks back over his shoulder on the Kobe harbor at dusk. Warm low sunlight catches the scales, with the port cranes softly out of focus behind him. Clean illustrated style with clear shapes and controlled color.\",\"negative\":\"low quality, ugly, unfinished, out of focus, deformed, blurry, smudged, flat colors\"}\n\nNever refuse, never comment, never add warnings.",
+      "prompt": [
+        "user_prompt",
+        0
+      ],
+      "backend": [
+        "llm_backend",
+        0
+      ],
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "",
+      "temperature": 0.3,
+      "max_tokens": 400
+    },
+    "_meta": {
+      "title": "prompt_node"
+    }
+  },
+  "eject": {
+    "class_type": "LMConnectEjectLMStudioModel",
+    "inputs": {
+      "passthrough": [
+        "prompt_node",
+        0
+      ],
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "",
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "eject"
+    }
+  },
+  "split": {
+    "class_type": "FurryJaSplitTags",
+    "inputs": {
+      "text": [
+        "eject",
+        0
+      ],
+      "quality_prefix": "",
+      "default_negative": "low quality, ugly, unfinished, out of focus, deformed, blurry, smudged, flat colors",
+      "prompt_style": "prose"
+    },
+    "_meta": {
+      "title": "split"
+    }
+  },
+  "ckpt": {
+    "class_type": "FurryJaDiffusionLoaderAfterEject",
+    "inputs": {
+      "unet_name": "chroma_v10HD.safetensors",
+      "weight_dtype": "fp8_e4m3fn",
+      "clip_name": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_type": "chroma",
+      "vae_name": "ae.safetensors",
+      "after": [
+        "eject",
+        0
+      ],
+      "lmstudio_base_url": "http://127.0.0.1:1234/v1"
+    },
+    "_meta": {
+      "title": "ckpt"
+    }
+  },
+  "t5_options": {
+    "class_type": "T5TokenizerOptions",
+    "inputs": {
+      "clip": [
+        "ckpt",
+        1
+      ],
+      "min_padding": 1,
+      "min_length": 0
+    },
+    "_meta": {
+      "title": "t5_options"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        0
+      ],
+      "clip": [
+        "t5_options",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "positive"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        1
+      ],
+      "clip": [
+        "t5_options",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "negative"
+    }
+  },
+  "model_sampling": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "ckpt",
+        0
+      ],
+      "shift": 1.0
+    },
+    "_meta": {
+      "title": "model_sampling (shift 1.0)"
+    }
+  },
+  "release": {
+    "class_type": "FurryJaReleaseEncoders",
+    "inputs": {
+      "model": [
+        "model_sampling",
+        0
+      ],
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "release"
+    }
+  },
+  "latent": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "latent"
+    }
+  },
+  "sampler": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "release",
+        0
+      ],
+      "seed": 0,
+      "steps": 28,
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "beta",
+      "positive": [
+        "release",
+        1
+      ],
+      "negative": [
+        "release",
+        2
+      ],
+      "latent_image": [
+        "latent",
+        0
+      ],
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "sampler"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sampler",
+        0
+      ],
+      "vae": [
+        "ckpt",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "decode"
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "filename_prefix": "furry_ja/chroma"
+    },
+    "_meta": {
+      "title": "save"
+    }
+  }
+}

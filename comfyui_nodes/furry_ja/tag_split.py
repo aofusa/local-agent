@@ -25,6 +25,10 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPEN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 _THINK_CLOSE = re.compile(r"^.*?</think>", re.DOTALL | re.IGNORECASE)
 _CODE_FENCE = re.compile(r"```[a-zA-Z]*")
+# Prose mode (Chroma1-HD reads English sentences through T5): SDXL-only syntax is removed, not translated.
+_WEIGHT_SYNTAX = re.compile(r"\(([^():]*?)\s*:\s*[0-9.]+\s*\)")
+_BANNED_PROSE = re.compile(
+    r"\b(?:masterpiece|best quality|amazing quality|absurdres|8k|ultra[- ]detailed|BREAK)\b", re.IGNORECASE)
 # LLMs sometimes write "\ " or "\_" inside JSON strings; JSON only allows these escapes.
 _INVALID_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
 
@@ -66,11 +70,25 @@ def _merge_prefix(prefix: str, positive: str) -> str:
     return ", ".join(missing + ([positive] if positive else []))
 
 
+def clean_prose(text: str) -> str:
+    """Drop weight syntax, braces, BREAK and quality buzzwords from an English description."""
+    text = _WEIGHT_SYNTAX.sub(r"\1", text).replace("{", "").replace("}", "")
+    text = _BANNED_PROSE.sub("", text)
+    text = " ".join(text.split())
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"([,;])(?:\s*[,;])+", r"\1", text)
+    text = re.sub(r"[,;]+(?=[.!?])", "", text)
+    text = re.sub(r"\.(?:\s*[,;.])+", ".", text)
+    return text.strip(" ,;")
+
+
 def split_tags(
     raw: str,
     quality_prefix: str = QUALITY_PREFIX,
     default_negative: str = DEFAULT_NEGATIVE,
+    prompt_style: str = "tags",
 ) -> SplitResult:
+    """``prompt_style`` "tags" (SDXL, default) normalizes comma lists; "prose" (Chroma) keeps sentences."""
     if raw is None:
         raw = ""
     if not isinstance(raw, str):
@@ -78,6 +96,7 @@ def split_tags(
     if raw.lstrip().startswith("[LM Connect Error]"):
         raise LLMCallError(raw.strip())
 
+    prose = prompt_style == "prose"
     text = strip_think(raw)
     positive = negative = None
     start, end = text.find("{"), text.rfind("}")
@@ -88,15 +107,19 @@ def split_tags(
         except (ValueError, TypeError):
             data = None
         if isinstance(data, dict) and isinstance(data.get("positive"), str) and data["positive"].strip():
-            positive = _normalize_tags(data["positive"])
+            positive = clean_prose(data["positive"]) if prose else _normalize_tags(data["positive"])
             neg = data.get("negative")
             negative = _normalize_tags(neg) if isinstance(neg, str) and neg.strip() else default_negative
 
     if positive is None:
         fallback = _CODE_FENCE.sub("", text).replace("```", "")
+        if prose:
+            return SplitResult(positive=clean_prose(fallback), negative=default_negative, parsed=False)
         return SplitResult(
             positive=_merge_prefix(quality_prefix, " ".join(fallback.split())),
             negative=default_negative,
             parsed=False,
         )
+    if prose:
+        return SplitResult(positive=positive, negative=negative, parsed=True)
     return SplitResult(positive=_merge_prefix(quality_prefix, positive), negative=negative, parsed=True)

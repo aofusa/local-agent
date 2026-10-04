@@ -156,8 +156,8 @@ def test_missing_required_slot():
 
 
 def test_unknown_family_and_template():
-    with pytest.raises(TemplateError, match="flux"):
-        load_template("flux", "t2i_basic")
+    with pytest.raises(TemplateError, match="sd3"):
+        load_template("sd3", "t2i_basic")
     with pytest.raises(TemplateError):
         load_template("sdxl", "nope_t2i")
 
@@ -222,3 +222,103 @@ def test_encoders_released_after_all_conditioning(template_id):
 def test_basic_templates_have_no_release_node():
     for template_id in ("t2i_basic", "i2i_basic", "inpaint_basic"):
         assert "release" not in load_template("sdxl", template_id)[0]
+
+
+# --- flux (Chroma1-HD) family ------------------------------------------------------------------------------------
+
+CHROMA = load_map("flux")
+CHROMA_TYPES = KNOWN_TYPES | {"FurryJaDiffusionLoaderAfterEject", "T5TokenizerOptions", "ModelSamplingAuraFlow",
+                              "EmptySD3LatentImage"}
+
+
+def _chroma_plan(template_id, **kw):
+    d = CHROMA["defaults"]
+    values = {"model_family": "flux", **{k: d[k] for k in ("width", "height", "steps", "cfg", "sampler_name",
+                                                               "scheduler")}}
+    return _plan(template_id, **{**values, **kw})
+
+
+def test_chroma_generated_files_are_up_to_date():
+    spec = importlib.util.spec_from_file_location("build_workflows", ROOT / "scripts" / "build_workflows.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    mapping, prompts = module.chroma_map()
+    assert mapping == CHROMA
+    for template_id, prompt in prompts.items():
+        assert prompt == json.loads((ROOT / "workflows" / mapping["templates"][template_id]["file"]).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("template_id", ["t2i_basic", "i2i_basic"])
+def test_chroma_templates_keep_fixed_ids_and_order(template_id):
+    prompt, _ = load_template("flux", template_id)
+    for node_id in ("llm_backend", "user_prompt", "prompt_node", "eject", "split", "ckpt", "positive", "negative",
+                    "latent", "sampler", "decode", "save"):
+        assert node_id in prompt, node_id
+    assert not unknown_node_types(prompt, CHROMA_TYPES)
+    # The diffusion model loads only after the eject; KSampler only after the T5 is released.
+    assert prompt["ckpt"]["inputs"]["after"] == ["eject", 0]
+    assert "eject" in _ancestors(prompt, "sampler")
+    assert prompt["sampler"]["inputs"]["model"] == ["release", 0]
+    assert {"positive", "negative"} <= _ancestors(prompt, "release")
+
+
+def test_chroma_t2i_matches_official_graph():
+    prompt, entry = load_template("flux", "t2i_basic")
+    types = {node["class_type"] for node in prompt.values()}
+    # T5 through CLIPLoader type chroma, not SDXL's DualCLIPLoader / checkpoint CLIP; no Flux Dev guidance.
+    assert {"FurryJaDiffusionLoaderAfterEject", "T5TokenizerOptions", "ModelSamplingAuraFlow", "EmptySD3LatentImage"} <= types
+    assert not types & {"CheckpointLoaderSimple", "FurryJaCheckpointLoaderAfterEject", "DualCLIPLoader",
+                        "EmptyLatentImage", "FluxGuidance", "CLIPTextEncodeFlux"}
+    ckpt = prompt["ckpt"]["inputs"]
+    assert (ckpt["unet_name"], ckpt["clip_name"], ckpt["clip_type"], ckpt["vae_name"]) == (
+        "chroma_v10HD.safetensors", "t5xxl_fp8_e4m3fn.safetensors", "chroma", "ae.safetensors")
+    assert prompt["model_sampling"]["inputs"]["shift"] == 1.0
+    sampler = prompt["sampler"]["inputs"]
+    assert (sampler["sampler_name"], sampler["scheduler"], sampler["steps"]) == ("euler", "beta", 28)
+    assert 3.0 <= sampler["cfg"] <= 4.0
+    split = prompt["split"]["inputs"]
+    assert split["prompt_style"] == "prose" and split["quality_prefix"] == "" and split["default_negative"]
+    assert "natural English sentences" in prompt["prompt_node"]["inputs"]["system_prompt"]
+    assert "ref_image" not in prompt and "vision" not in prompt  # text only: no Load Image to miss
+    assert entry["slots"]["ckpt_name"] == "ckpt.inputs.unet_name"
+
+
+def test_chroma_build_run_prompt_injects_plan_and_models():
+    plan = _chroma_plan("t2i_basic", seed=42, steps=40, cfg=3.0, width=832, height=1216)
+    prompt = build_run_prompt("flux", plan, {}, "港の夕方", "other_chroma.safetensors",
+                              models={"vae_name": "flux_ae.safetensors", "weight_dtype": "default"})
+    assert prompt["user_prompt"]["inputs"]["value"] == "港の夕方"
+    assert prompt["ckpt"]["inputs"]["unet_name"] == "other_chroma.safetensors"
+    assert prompt["ckpt"]["inputs"]["vae_name"] == "flux_ae.safetensors"
+    assert prompt["ckpt"]["inputs"]["weight_dtype"] == "default"
+    assert prompt["ckpt"]["inputs"]["clip_name"] == "t5xxl_fp8_e4m3fn.safetensors"
+    s = prompt["sampler"]["inputs"]
+    assert (s["seed"], s["steps"], s["cfg"]) == (42, 40, 3.0)
+    assert (prompt["latent"]["inputs"]["width"], prompt["latent"]["inputs"]["height"]) == (832, 1216)
+
+
+def test_chroma_same_plan_gives_same_prompt():
+    plan = _chroma_plan("t2i_basic", seed=7)
+    assert build_run_prompt("flux", plan, {}, "港", None) == build_run_prompt("flux", plan, {}, "港", None)
+
+
+def test_chroma_i2i_uses_base_image_and_denoise():
+    prompt = build_run_prompt("flux", _chroma_plan("i2i_basic", denoise=0.55), {"base": "furry_ja/b.png"}, "港", None)
+    assert prompt["ref_image"]["inputs"]["image"] == "furry_ja/b.png"
+    assert prompt["latent"]["class_type"] == "VAEEncode" and prompt["latent"]["inputs"]["vae"] == ["ckpt", 2]
+    assert prompt["sampler"]["inputs"]["denoise"] == 0.55
+    assert prompt["prompt_node"]["inputs"]["prompt"] == ["prompt_join", 0]
+
+
+def test_chroma_loras_follow_the_diffusion_loader():
+    prompt = build_run_prompt("flux", _chroma_plan("t2i_basic"), {}, "港", None,
+                              loras=[LoraSpec("chroma_style.safetensors", 0.7, 0.7)])
+    assert prompt["lora_1"]["inputs"]["model"] == ["ckpt", 0]
+    assert prompt["model_sampling"]["inputs"]["model"] == ["lora_1", 0]
+    assert prompt["t5_options"]["inputs"]["clip"] == ["lora_1", 1]
+
+
+def test_chroma_registers_only_basic_templates():
+    assert sorted(CHROMA["templates"]) == ["i2i_basic", "t2i_basic"]
+    with pytest.raises(TemplateError):
+        load_template("flux", "pose_t2i")

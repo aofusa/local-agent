@@ -85,6 +85,8 @@ class GenerationPlan(TypedDict):
     seed: int
     steps: int
     cfg: float
+    sampler_name: str | None      # None: the template's value (sdxl)
+    scheduler: str | None
     denoise: float | None
     strengths: dict[str, float]
     pose_preprocessor: str | None
@@ -176,6 +178,8 @@ def classify_intent(text: str, references: list[ReferenceImage]) -> Intent:
         intent.width, intent.height = int(m.group(1)), int(m.group(2))
     elif "横長" in raw:
         intent.width, intent.height = 1216, 832
+    elif "縦長" in raw:
+        intent.width, intent.height = 832, 1216
     elif "正方形" in raw:
         intent.width, intent.height = 1024, 1024
     if m := _DENOISE.search(raw):
@@ -319,9 +323,18 @@ def template_roles(template_id: str) -> set[str]:
     return roles
 
 
-def clamp_size(value: int) -> int:
-    value = min(SIZE_MAX, max(SIZE_MIN, int(value)))
+def clamp_size(value: int, low: int = SIZE_MIN, high: int = SIZE_MAX) -> int:
+    value = min(high, max(low, int(value)))
     return int(round(value / SIZE_STEP) * SIZE_STEP)
+
+
+def fit_pixels(width: int, height: int, max_pixels: int | None) -> tuple[int, int]:
+    """Scale down (keeping the aspect ratio, multiples of SIZE_STEP) until width x height <= max_pixels."""
+    if not max_pixels or width * height <= max_pixels:
+        return width, height
+    scale = (max_pixels / (width * height)) ** 0.5
+    w, h = int(width * scale) // SIZE_STEP * SIZE_STEP, int(height * scale) // SIZE_STEP * SIZE_STEP
+    return max(SIZE_STEP, w), max(SIZE_STEP, h)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -343,8 +356,14 @@ def build_plan(
     roles: dict[str, str],
     intent: Intent,
     rng: random.Random | None = None,
+    defaults: dict | None = None,
 ) -> GenerationPlan:
-    """Clamp every number into §4.7 ranges and note each adjustment for the reply."""
+    """Clamp every number into §4.7 ranges and note each adjustment for the reply.
+
+    ``defaults`` is the family map's ``defaults`` (size, steps, cfg, sampler, size bounds); sdxl has none
+    and keeps the design-doc constants.
+    """
+    d = defaults or {}
     notes: list[str] = []
     present = set(roles.values())
 
@@ -354,9 +373,12 @@ def build_plan(
             notes.append(f"{label} の指定値 {value} を範囲内の {clamped} へ調整しました")
         return clamped
 
-    width, height = DEFAULT_WIDTH, DEFAULT_HEIGHT
+    width, height = fit_pixels(int(d.get("width", DEFAULT_WIDTH)), int(d.get("height", DEFAULT_HEIGHT)),
+                               d.get("max_pixels"))
     if intent.width and intent.height:
-        width, height = clamp_size(intent.width), clamp_size(intent.height)
+        low, high = int(d.get("size_min", SIZE_MIN)), int(d.get("size_max", SIZE_MAX))
+        width, height = fit_pixels(clamp_size(intent.width, low, high), clamp_size(intent.height, low, high),
+                                   d.get("max_pixels"))
         if (width, height) != (intent.width, intent.height):
             notes.append(f"サイズ {intent.width}x{intent.height} を {width}x{height} へ調整しました")
 
@@ -388,8 +410,10 @@ def build_plan(
         width=width,
         height=height,
         seed=int(seed),
-        steps=DEFAULT_STEPS,
-        cfg=DEFAULT_CFG,
+        steps=int(d.get("steps", DEFAULT_STEPS)),
+        cfg=float(d.get("cfg", DEFAULT_CFG)),
+        sampler_name=d.get("sampler_name"),
+        scheduler=d.get("scheduler"),
         denoise=denoise,
         strengths=strengths,
         pose_preprocessor=(intent.pose_preprocessor or "openpose") if "pose" in present else None,

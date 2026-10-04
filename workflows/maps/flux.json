@@ -1,0 +1,80 @@
+{
+  "family": "flux",
+  "label": "Chroma1-HD",
+  "models": {
+    "unet_name": "chroma_v10HD.safetensors",
+    "weight_dtype": "fp8_e4m3fn",
+    "clip_name": "t5xxl_fp8_e4m3fn.safetensors",
+    "clip_type": "chroma",
+    "vae_name": "ae.safetensors"
+  },
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 28,
+    "cfg": 3.5,
+    "sampler_name": "euler",
+    "scheduler": "beta",
+    "size_min": 512,
+    "size_max": 1216,
+    "max_pixels": 1048576
+  },
+  "presets": {
+    "quality": {
+      "steps": 40,
+      "cfg": 3.0
+    },
+    "speed": {
+      "steps": 26,
+      "cfg": 3.8
+    }
+  },
+  "supported_roles": [
+    "base"
+  ],
+  "pose_enabled": false,
+  "pose_fallback": "refuse",
+  "pose_fallback_denoise": 0.65,
+  "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
+  "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
+  "templates": {
+    "t2i_basic": {
+      "file": "flux/t2i_basic.api.json",
+      "roles": [],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height"
+      }
+    },
+    "i2i_basic": {
+      "file": "flux/i2i_basic.api.json",
+      "roles": [
+        "base"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise"
+      }
+    }
+  }
+}

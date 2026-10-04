@@ -106,11 +106,12 @@ class ComfyClient:
             await http.post("/queue", json={"delete": [prompt_id]})
             await http.post("/interrupt", json={"prompt_id": prompt_id})
 
-    async def checkpoints(self, node_class: str = "FurryJaCheckpointLoaderAfterEject") -> list[str]:
+    async def checkpoints(self, node_class: str = "FurryJaCheckpointLoaderAfterEject", field: str = "ckpt_name") -> list[str]:
+        """Choices of a model-file input (fresh, so newly placed files are seen)."""
         async with self._http(30) as http:
             r = await http.get(f"/object_info/{node_class}")
             r.raise_for_status()
-            return list(r.json()[node_class]["input"]["required"]["ckpt_name"][0])
+            return list(r.json()[node_class]["input"]["required"][field][0])
 
     async def queue_busy(self) -> bool:
         async with self._http(10) as http:
