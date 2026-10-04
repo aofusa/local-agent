@@ -528,12 +528,13 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | [yzd-v/DWPose](https://huggingface.co/yzd-v/DWPose) | DWPose のポーズ推定モデル（ONNX） | `setup-comfyui-refs.ps1` | Apache-2.0 |
 | [depth-anything/Depth-Anything-V2-Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) | 深度推定モデル | `setup-comfyui-refs.ps1` | Apache-2.0 |
 | [comfyanonymous/flux_text_encoders](https://huggingface.co/comfyanonymous/flux_text_encoders) | T5-XXL fp8（Chroma のテキストエンコーダ） | `setup-comfyui-chroma.ps1` | Apache-2.0（元の google/t5-v1_1-xxl） |
-| [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) | VAE（`ae.safetensors` として保存）、公式ワークフロー（`workflows/reference/` に同梱） | `setup-comfyui-chroma.ps1` | Apache-2.0 |
+| [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) | VAE（`ae.safetensors` として保存） | `setup-comfyui-chroma.ps1` | Apache-2.0 |
 | Chroma1-HD 拡散モデル | [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) または Civitai | 事前準備（手動） | Apache-2.0 |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) | `llama-quantize`（LLM の再量子化） | `setup-lmstudio.ps1`（`tools\`） | MIT |
 | LLM（Huihui Qwen3.8 27B Abliterated と mmproj） | LM Studio でダウンロード | 事前準備（手動） | 配布ページで確認 |
 | チェックポイント（yiffInHell など）、LoRA | Civitai などから入手 | 事前準備（手動） | 配布ページで確認（生成物や商用利用に条件があることが多い） |
 
+- 例外として、Chroma1-HD の公式ワークフロー `ComfyUI_Chroma1-HD_T2I-workflow.json`（Apache-2.0、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD)）は参照用に `workflows/reference/` へ無改変で同梱しています（出典は同フォルダの README）。
 - ComfyUI_IPAdapter_plus（GPL-3.0）は ComfyUI のプロセスに読み込まれるノードです。このリポジトリはそのコードを含まず、import もしません（API 形式のワークフロー JSON でノード名を指定するだけです）。
 - LM_Connect はリポジトリにライセンスの表示がありません。このリポジトリは再配布せず、利用者の環境へ clone するだけです。
 - 生成物の扱いは、使用したチェックポイント・LoRA・LLM の規約と、公開先の規約に従ってください。

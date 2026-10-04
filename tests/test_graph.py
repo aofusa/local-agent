@@ -502,7 +502,7 @@ async def test_message_commands_do_not_switch_family(settings, chroma):
 async def test_chroma_ckpt_under_sdxl_family_is_explained(settings):
     fake = FakeComfy()
     state = await _run("港", fake, replace(settings, ckpt_name="chroma_v10HD.safetensors"))
-    assert "COMFY_MODEL_FAMILY=chroma" in state["messages"][-1].content
+    assert "COMFY_MODEL_FAMILY=flux " in state["messages"][-1].content
     assert fake.submitted is None
 
 
