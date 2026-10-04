@@ -10,23 +10,32 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
    `.env` の `COMFY_MODEL_FAMILY=flux` にすると、LLM が英語の説明文を作り、Flux 系の Chroma1-HD で生成する（「4. 使い方 › Chroma1-HD」）
 5. 画像を ComfyUI の output とリポジトリの `outputs/` に保存し、同じ画像をチャットに表示する
 
-クラウド API は使いません。すべてローカルで動きます。
+画面上部のタブで **画像** と **チャット** を切り替えます（Grok の画面と同じ分け方）。画像タブは上の画像生成です。
+チャットタブでは LM Studio の 27B と会話でき、「/search …」「…を調べて」と送ると Tor 経由で Web を検索して、出典付きで答えます。
+検索は Grok のマルチエージェント検索を小さくしたもので、計画 → 並列検索 → reader によるページ読み → 批評 → 統合の順に進みます。
+検索のモデル（Bonsai / Qwen heretic）は、PrismML の llama.cpp fork で検索のあいだだけ起動します（「4. 使い方 › チャットタブ」）。
+
+クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
                          │ ブラウザから直接
                          ▼
-                   LangGraph       http://<LAN IP>:2024   graph id: agent
-                         │ ComfyUI HTTP API のみ
+                   LangGraph       http://<LAN IP>:2024   graph id: agent（画像タブ）/ chat（チャットタブ）
+                         │ 画像タブ: ComfyUI HTTP API のみ
                          ▼
                    ComfyUI         http://127.0.0.1:8188  （ループバックのみ）
                          │ LM Connect ノード（OpenAI 互換 API）
                          ▼
                    LM Studio       http://127.0.0.1:1234/v1（ループバックのみ）
+
+                   チャットタブ: LangGraph ──> LM Studio（会話、検索の計画。検索中は unload）
+                                          ──> PrismML llama-server 127.0.0.1:18181〜（検索中だけ）
+                                          ──> Tor SOCKS 127.0.0.1:9050 ──> 検索エンジンと結果のページ
 ```
 
 ## 動作環境
@@ -115,8 +124,19 @@ cd local-agent
 | `-Quant IQ3_M`（既定） / `none` | LLM を再量子化するか（「6. メモリと LLM の量子化」） |
 | `-GpuOffload 0.45`（既定） | LLM の GPU オフロード比率（0〜1） |
 | `-SkipLMStudio` / `-SkipComfyUI` | どちらかの設定を飛ばす |
+| `-SkipSearch` | チャットタブの検索の準備（Tor、llama.cpp fork、検索モデル約 20GB、probe）を飛ばす |
+| `-SkipProbe` | 検索モデルの検証（probe、数分）だけを飛ばす |
 
 個別に実行することもできます: `.\scripts\setup-lmstudio.ps1`、`.\scripts\setup-comfyui.ps1`、`.\scripts\open-firewall.ps1`（管理者）。
+チャットタブの検索だけを後から入れる場合:
+
+```powershell
+.\scripts\setup-tor.ps1             # Tor Expert Bundle（SHA-256 確認）を tools\tor へ。TOR_EXE を .env へ
+.\scripts\setup-llamacpp.ps1        # PrismML llama.cpp fork の Vulkan 版を tools\llama-prism へ（-FromSource でビルド）
+.\scripts\setup-search-models.ps1   # 検索モデル 8 つ（約 20GB、再開可）を tools\models へ
+.\scripts\probe-bonsai.ps1          # 各モデルを 1 回ずつ起動して検証し、tools\bonsai\rank.json に順位を書く
+```
+
 各スクリプトの詳細は `Get-Help .\scripts\setup-lmstudio.ps1 -Detailed` で表示できます。
 
 ### セットアップが行うこと
@@ -182,7 +202,7 @@ cd local-agent
 LM Studio を起動したうえで:
 
 ```powershell
-.\scripts\start-all.ps1      # ComfyUI / LangGraph / agent-chat-ui を別ウィンドウで起動（起動済みのものは飛ばす）
+.\scripts\start-all.ps1      # Tor（裏で）/ ComfyUI / LangGraph / agent-chat-ui を起動（起動済みのものは飛ばす）
 .\scripts\doctor.ps1         # 設定と待受を確認（NG があれば終了コード 1）
 ```
 
@@ -198,6 +218,9 @@ Deployment URL / Assistant ID の入力画面は出ません（ビルド時に�
 | 2 | `.\scripts\start-comfyui.ps1`（または Comfy Desktop でインスタンスを起動。どちらも `--cache-none` 付き） | `127.0.0.1:8188` |
 | 3 | `.\scripts\start-langgraph.ps1`（`langgraph dev --host 0.0.0.0 --port 2024`） | `0.0.0.0:2024` |
 | 4 | `.\scripts\start-ui.ps1`（`-HostAddress <IP>` で接続先を明示可） | `0.0.0.0:3000` |
+| 5 | `.\scripts\start-tor.ps1`（チャットタブの検索用。止めるときは `-Stop`） | `127.0.0.1:9050` |
+
+- 検索モデルの llama-server は常駐させません。チャットタブが検索のたびに起動し、終わったら止めます。Tor が止まっていれば、チャットタブが自動で起動します（`TOR_AUTOSTART=1`）。
 
 - agent-chat-ui は `NEXT_PUBLIC_API_URL=http://<LAN IP>:2024` を **ビルド時に** 埋め込みます。`localhost` にすると他ホストのブラウザは自分自身へ接続してしまうためです。
   LAN IP が変わったら `start-ui.ps1` が自動で再ビルドします。
@@ -332,6 +355,32 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | キャラクター + ポーズ、元画像 + 画風 | 約 8〜9 分 |
 | キャラクター + ポーズ + 画風 | 約 12.5 分 |
 
+### チャットタブ（会話と Tor 経由の検索）
+
+画面上部の「チャット」タブに切り替えて送ります。スレッドの履歴はタブごとに分かれます。画像の添付は受け付けず、絵を描く依頼（「〜を描いて」）は画像タブへ誘導します。
+
+- **会話**: LM Studio の Qwen3.8 27B が答えます（直近 12 往復を文脈にします）。
+- **検索**: 行頭の `/search`、または「検索」「調べて」「ググ」「最新」「ニュース」を含む文、URL を含む文（その URL を読みます）で検索します。
+  検索語の無い質問文（「〜はいつ？」など）は、Qwen3-1.7B が検索するかどうかを判断します。
+
+検索の流れ（Grok のマルチエージェント検索の縮小版）:
+
+| 段 | 担当 | 内容 |
+|---|---|---|
+| 計画 | LM Studio の Qwen3.8 27B | 質問を 1〜3 本の検索意図（web / news / 指定 URL）に分ける。reader と同時に載らなければ、ここで unload する |
+| 検索 | Python（モデルなし） | 意図ごとに並列で DuckDuckGo を Tor 経由で検索する |
+| フィルタ | Bonsai-4B | タイトルと抜粋から、関係の無い結果を落とす |
+| 読む | Ternary-Bonsai-8B × 最大 3 体 | 結果から開くページを選び（ツール呼び出し）、質問に関係する事実・数値・日付・反証だけを URL ごとのカードにする |
+| 批評 | Ternary-Bonsai-2-27B abliterated（代理） | 足りない観点があれば、1 回だけ追加で検索させる |
+| 統合 | 同上 | カードだけを根拠に、[n] 付きの日本語の回答を書く。参照 URL の一覧はシステムが付ける |
+
+- 回答の下の「Tor 経由の検索」を開くと、検索語、ヒットしたページ（● は reader が開いたページ）、役割ごとのモデルが見られます。reader 同士の下書きは返しません。
+- モデルは `config/search_models.json` の順と、`probe-bonsai.ps1` の検証結果（`tools/bonsai/rank.json`）、空きメモリから自動で選びます。ファイルが無いモデルや検証に落ちたモデルは使いません。
+  この端末（ROG Xbox Ally X）では、27B（IQ3_M）のロード中に空きが 1GB を切るため、計画のあと 27B を unload し、批評と統合は Bonsai 2 27B abliterated が代理で行います。
+- 1 回の検索に 6〜9 分かかります（27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
+- 画像タブとチャットタブは同時に動きません。片方の実行中にもう片方へ送ると、実行中のタブ名を示して断ります。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは待ちます。
+- 結果が 0 件のとき（Tor の出口が拒否されたときなど）は、統合モデルを起動せずにその旨を返します。
+
 ## 5. 設定（`.env`）
 
 | キー | 既定 | 説明 |
@@ -349,6 +398,21 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 | `COMFYUI_EXTRA_ARGS` | 空 | ComfyUI の追加引数（例 `--enable-manager`） |
 
 LM Studio 側の値を変えるときは、`.\scripts\setup-lmstudio.ps1 -GpuOffload 0.6` のように再実行します。
+
+チャットタブの設定（画像タブは読みません。全項目と説明は `.env.example`）:
+
+| キー | 既定 | 説明 |
+|---|---|---|
+| `LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | チャットタブの会話と検索の計画・統合だけが使う |
+| `TOR_SOCKS_URL` / `TOR_EXE` / `TOR_AUTOSTART` | `socks5h://127.0.0.1:9050` / セットアップが設定 / `1` | Tor。`socks5h` 以外は拒否（DNS 漏れ防止） |
+| `SEARCH_FANOUT_WIDTH` / `SEARCH_MAX_RESULTS` | `3` / `5` | 検索意図と reader の数の上限（1〜3）、1 検索の結果数 |
+| `SEARCH_TIMEOUT_S` / `SEARCH_TOTAL_TIMEOUT_S` | `30` / `150` | 1 リクエストの上限、reader 1 体の上限 |
+| `SEARCH_PLANNER` | `lmstudio` | `local` にすると、計画も代理 27B が行う（LM Studio を検索で使わない） |
+| `SEARCH_FILTER` / `SEARCH_CRITIQUE` / `SEARCH_AUTO_ROUTE` | `1` | フィルタ / 批評と追加検索 / 質問文の検索判定 |
+| `BONSAI_LLAMA_SERVER` / `BONSAI_MODELS_DIR` | セットアップが設定 | PrismML fork の llama-server.exe と、モデルの置き場 |
+| `BONSAI_MODEL` | 空（自動） | reader のモデルを固定する（`ternary-8b` など）。入らなければ断る |
+| `BONSAI_RESERVE_MB` | `3072` | モデルを何体載せるか決めるときに残す空きメモリ |
+| `JOB_LOCK_TIMEOUT_S` | `30` | もう片方のタブの実行が終わるのを待つ上限 |
 
 ## 6. メモリと LLM の量子化
 
@@ -368,7 +432,16 @@ OS・画面表示・ComfyUI の常駐分と合わせると物理メモリに収�
 
 ```
 AGENTS.md / docs/                     仕様
-langgraph.json                        graphs.agent -> src/furry_agent/graph.py:graph
+langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph
+src/furry_agent/chat_graph.py         チャットタブのグラフ（ingest → route → chat | plan → search → filter → read → critique → synthesize）
+src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
+src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定
+src/furry_agent/bonsai_select.py      タスクごとのモデル選択（順位、検証結果、空きメモリ）
+src/furry_agent/bonsai_worker.py      llama-server の起動と停止（PID）、reader のツール呼び出し
+src/furry_agent/bonsai_probe.py       検索モデルの検証（probe-bonsai.ps1）
+src/furry_agent/llm_client.py         OpenAI 互換クライアント（チャットタブ専用）、LM Studio の unload
+src/furry_agent/router.py, tor_service.py, html_text.py, job_lock.py   検索判定、Tor の自動起動、HTML のテキスト化、タブ共通のロック
+config/search_models.json             検索モデル 8 つ（ファイル、メモリの目安、タスクごとの順）
 src/furry_agent/graph.py              LangGraph のグラフ（ingest → plan → confirm → submit → await_tags → await_image）
 src/furry_agent/planner.py            役割推定（ルール）、テンプレート選択、数値のクランプ。純粋関数
 src/furry_agent/templates.py          テンプレートの読み込み、ノードマップ経由の注入、LoRA の挿入
@@ -387,6 +460,8 @@ prompts/system_furry_tags.txt         タグ生成の system prompt（テキス�
 prompts/system_furry_tags_roles.txt   役割付き参照のタグ統合用 system prompt
 prompts/system_vision_*.txt           参照画像タグ付けの system prompt（caption / style / pose / character）
 prompts/system_chroma_prose.txt       Chroma 用。英語の説明文を返させる system prompt
+prompts/system_chat.txt, system_search*.txt, system_bonsai_worker.txt   チャットタブの会話と検索の各段
+tools/tor/torrc                       Tor の設定（SOCKS 127.0.0.1:9050 のみ）
 scripts/setup*.ps1                    セットアップ（scripts/lib/common.ps1 が共通処理）
 scripts/start-*.ps1, doctor.ps1       起動と確認
 scripts/open-firewall.ps1             ファイアウォール（管理者）
@@ -449,10 +524,13 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
   （`ContentBlocksPreview.tsx`、`lib/image-roles.ts`、`hooks/use-file-upload.tsx`）。送信済みのメッセージには役割のラベルを表示します（`MultimodalPreview.tsx`）。
   添付は画像 4 枚までに制限します。metadata を送れないクライアントは、run の `configurable.references = [{"index": 1, "role": "style", "strength": 0.6}]` でも指定できます。
 - 確認カード: 役割の確認は agent-chat-ui 在庫の HITL 表示（承認 / 編集 / 却下）をそのまま使います。
+- タブ: 画面上部の「画像」「チャット」で、接続するグラフ（`agent` / `chat`）を切り替えます（`components/thread/mode-tabs.tsx`、配置は `thread/index.tsx`）。
+  履歴はグラフごとに分かれ、タブごとに最後のスレッドを覚えます。チャットタブでは添付ボタンを隠します。
+- 検索痕跡: チャットタブの応答の `additional_kwargs.search_trace` を、折りたたみの一覧として描画します（`messages/search-trace.tsx`、`ai.tsx`）。
 
 ## 8. ログ
 
-- `logs\furry_agent.log`（LangGraph 側）: 投入（prompt_id / seed）、タグ、`ckpt gate: LM Studio unloaded=[True]`、
+- `logs\furry_agent.log`（LangGraph 側）: チャットタブの経路・モデル・reader の所要時間・結果 URL（検索語の全文は残しません）、画像タブの投入（prompt_id / seed）、タグ、`ckpt gate: LM Studio unloaded=[True]`、
   `KSampler started ... LM Studio unloaded at checkpoint load=[True]`、`eject verified`、保存先。
 - ComfyUI のコンソール: `[LM Connect] Eject sonucu`、`[furry_ja] split mode=json|fallback`、
   `[furry_ja] LM Studio verified unloaded before checkpoint/KSampler`。
@@ -472,6 +550,12 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | 症状 | 対処 |
 |---|---|
 | `doctor.ps1` で custom nodes が NG | `setup-comfyui.ps1` の後に ComfyUI を再起動したか確認 |
+| チャットタブ「Tor が 127.0.0.1:9050 で待ち受けていません」 | `.\scripts\setup-tor.ps1` の後に `.\scripts\start-tor.ps1`。ログは `logs\tor.log` |
+| 「PrismML 版 llama.cpp がありません」/「検索用モデルがありません」 | `.\scripts\setup-llamacpp.ps1` / `.\scripts\setup-search-models.ps1` を実行して LangGraph を再起動 |
+| 「〜に使えるモデルがありません（メモリ不足…）」 | 他のアプリを閉じる。`BONSAI_RESERVE_MB` を下げる。`SEARCH_FANOUT_WIDTH` を 1〜2 にする |
+| 「検索結果がありません。Tor 出口が拒否された…」 | しばらく置いて送り直す（出口が変わる）。`logs\furry_agent.log` の `search provider=` を確認 |
+| 「チャットタブ（画像タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す |
+| `doctor.ps1` で「no orphan llama-server」が WARN | 検索中でなければ `Stop-Process -Name llama-server` |
 | ブラウザに Deployment URL の入力画面が出る / 接続できない | `start-ui.ps1` を再実行（LAN IP が変わると再ビルド）。`open-firewall.ps1` を管理者で実行。ネットワークがプライベートか確認 |
 | 「生成できませんでした: ... Failed to load model」 | メモリ不足。他のアプリを閉じる、`setup-lmstudio.ps1 -GpuOffload 0.4` に下げる、ComfyUI を再起動して常駐メモリを解放 |
 | 10 分でタイムアウト | 同上。参照画像の枚数を減らす。完了していれば `再取得 <prompt_id>` で受け取れる |
@@ -508,7 +592,9 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 - 登録済みの系統は `sdxl` と `flux`（Chroma1-HD）だけです（Flux Dev 本家、SD3 などは未登録）。
 - Chroma1-HD 経路は、ポーズ・画風・キャラクター参照とマスクに未対応です（Flux 用 ControlNet Union Pro / Redux / IP-Adapter の Chroma での動作を確認していないため。作業指示書 §2.4）。GGUF 量子化の読み込みにも未対応です。
 - 役割推定は LLM ではなくルール（日本語のキーワードと序数）です。LangGraph から LM Studio を呼ばない（AGENTS.md）ためです。
-- 認証なし。LAN 内の開発用途のみ。
+- 認証なし。LAN 内の開発用途のみ。チャットタブの検索も LAN から誰でも使えます（画像タブと同じリスク）。
+- チャットタブの検索は DuckDuckGo（Lite、空なら HTML 版）だけです。Tor の出口によっては空の結果になります。CAPTCHA の突破や指紋偽装、`.onion` の巡回はしません。
+- 検索モデルは PrismML の llama.cpp fork の Vulkan 版だけで動かします（Q1_0 / PQ2_0 / PTQ1_0 は素の llama.cpp や LM Studio では動かないため）。ROCm 版は使いません。
 
 ## ライセンス
 
@@ -532,6 +618,11 @@ uv run python scripts\build_workflows.py       # prompts\ を変えたら workfl
 | Chroma1-HD 拡散モデル | [lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) または Civitai | 事前準備（手動） | Apache-2.0 |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) | `llama-quantize`（LLM の再量子化） | `setup-lmstudio.ps1`（`tools\`） | MIT |
 | LLM（Huihui Qwen3.8 27B Abliterated と mmproj） | LM Studio でダウンロード | 事前準備（手動） | 配布ページで確認 |
+| [Tor Expert Bundle](https://www.torproject.org/download/tor/) | tor.exe（チャットタブの検索） | `setup-tor.ps1`（`tools\tor`） | BSD-3-Clause |
+| [PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp) | llama-server（Vulkan、検索モデルの実行） | `setup-llamacpp.ps1`（`tools\llama-prism`） | MIT |
+| [prism-ml/Bonsai-8B-gguf](https://huggingface.co/prism-ml/Bonsai-8B-gguf)、[Ternary-Bonsai-8B-gguf](https://huggingface.co/prism-ml/Ternary-Bonsai-8B-gguf)、[Bonsai-4B-gguf](https://huggingface.co/prism-ml/Bonsai-4B-gguf)、[Ternary-Bonsai-2-27B-gguf](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) | 検索モデル | `setup-search-models.ps1`（`tools\models`） | Apache-2.0 |
+| [Override-6/Ternary-Bonsai-2-27B-abliterated-gguf](https://huggingface.co/Override-6/Ternary-Bonsai-2-27B-abliterated-gguf) | 検索の代理リーダー（PTQ1_0） | `setup-search-models.ps1` | Apache-2.0 |
+| [mradermacher/Qwen3.5-4B-heretic-GGUF](https://huggingface.co/mradermacher/Qwen3.5-4B-heretic-GGUF)、[Qwen3-1.7B-heretic-GGUF](https://huggingface.co/mradermacher/Qwen3-1.7B-heretic-GGUF)、[Qwen3-0.6B-Heretic-GGUF](https://huggingface.co/mradermacher/Qwen3-0.6B-Heretic-GGUF) | 検索モデル | `setup-search-models.ps1` | Apache-2.0 |
 | チェックポイント（yiffInHell など）、LoRA | Civitai などから入手 | 事前準備（手動） | 配布ページで確認（生成物や商用利用に条件があることが多い） |
 
 - 例外として、Chroma1-HD の公式ワークフロー `ComfyUI_Chroma1-HD_T2I-workflow.json`（Apache-2.0、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD)）は参照用に `workflows/reference/` へ無改変で同梱しています（出典は同フォルダの README）。

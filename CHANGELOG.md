@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 — 画像 / チャットのタブと Tor 経由検索
+
+- agent-chat-ui の上部に「画像」「チャット」のタブを追加した（Grok の画面と同じ分け方）。画像タブは従来のグラフ（graph `agent`、別名 `image`）で、動作は変えていない。チャットタブは新しいグラフ `chat`。履歴はタブごとに分かれる。
+- チャットタブ: LM Studio の Qwen3.8 27B と会話できる。`/search`、「調べて」「最新」「ニュース」、URL を含む文では Tor 経由で Web を検索し、出典付きで答える。検索語の無い質問文は Qwen3-1.7B が検索の要否を判断する。
+- 検索は Grok のマルチエージェント検索の縮小版。27B が検索意図を 1〜3 本に分ける → Python が Tor 経由で並列に検索 → Bonsai-4B が関係の無い結果を落とす → Ternary-Bonsai-8B の reader（最大 3 体、並列）がページを選んで開き、事実カードを作る → 批評が不足を見つければ 1 回だけ追加検索 → 統合が [n] 付きで回答する。
+- 27B と reader が同時に載らない端末（ROG Ally X 実測: 27B ロード中の空き 1GB 未満）では、計画のあとに 27B を unload する。批評と統合は Override-6 の Ternary-Bonsai-2-27B abliterated（PTQ1_0）が PrismML の llama.cpp fork で代理を務める。
+- 検索モデル 8 つ（Bonsai 8B / 4B、Ternary Bonsai 8B、Ternary Bonsai 2 27B と abliterated 版、Qwen3.5-4B / Qwen3-1.7B / Qwen3-0.6B heretic）を、`config/search_models.json` の順と実機の検証結果（`scripts/probe-bonsai.ps1` → `tools/bonsai/rank.json`）、空きメモリからタスクごとに自動で選ぶ。llama-server は検索のあいだだけ起動し、PID を kill して後始末する。
+- モデルの JSON 出力は Pydantic のスキーマで文法制約をかけて検証し、不正なら同じ呼び出しを 1 回だけ再試行する。カードの引用は、実際に取得した本文と照合する。
+- Tor（socks5h のみ、127.0.0.1:9050）の導入と起動 `scripts/setup-tor.ps1` / `start-tor.ps1`、PrismML fork の導入 `scripts/setup-llamacpp.ps1`（Vulkan リリース、`-FromSource` でビルド）、モデルの取得 `scripts/setup-search-models.ps1` を追加した。`setup.ps1`、`start-all.ps1`、`doctor.ps1` も対応している。
+- 画像タブとチャットタブは共有ロックで直列化する。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは生成を始めない。
+- 実装記録と実測: `docs/chat-search-tor-bonsai-work-instruction.md`。
+
 ## v0.3.0 — Chroma1-HD
 
 - `.env` の `COMFY_MODEL_FAMILY=flux` で、Flux.1 由来の Chroma1-HD（`CKPT_NAME=chroma_v10HD.safetensors`）に切り替えられるようにした。既定（空 / `sdxl`）は従来の yiffInHell とタグ生成のまま。
