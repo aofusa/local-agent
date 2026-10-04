@@ -15,12 +15,14 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 検索は Grok のマルチエージェント検索を小さくしたもので、計画 → 並列検索 → reader によるページ読み → 批評 → 統合の順に進みます。
 検索のモデル（Bonsai / Qwen heretic）は、PrismML の llama.cpp fork で検索のあいだだけ起動します（「4. 使い方 › チャットタブ」）。
 チャットタブでは小説や文章（`/write`）とプログラム（`/code`）も書けます。入力欄の「自動 / 速い / 思考」で、すばやい回答と、深い検索（下位問いを埋めるまで追加検索）・アウトラインと推敲・承認後の Docker 実行・思考トークンを切り替えます。「自動」は内容から自動で選びます。
+`/docs <パス> [質問]` と送ると、許可したフォルダのローカル文書（Markdown やテキスト）を、検索と同じチーム（計画 → 並列の reader → カバー → 統合）で読んで、`パス#見出し` の出典付きで答えます（ネットワークは使いません）。
+検索と `/docs` の回答は、主張ごとに出典の抜粋と突き合わせ、支持された主張だけで書き、最後に文ごとに監査して支持されない文を削除します。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）、[docs/claim-verification-design.md](docs/claim-verification-design.md)（主張単位の検証）と [docs/local-doc-mapreduce-design.md](docs/local-doc-mapreduce-design.md)（`/docs`。いずれも末尾に実装記録）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
@@ -38,6 +40,7 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
                                           ──> PrismML llama-server 127.0.0.1:18181〜（検索中だけ）
                                           ──> Tor SOCKS 127.0.0.1:9050 ──> 検索エンジンと結果のページ
                                           ──> Docker（思考モードで承認したコードだけ。ネットワークなし、待受なし）
+                                          ──> LOCAL_DOC_ROOTS のファイル（/docs。読み取りだけ、LangGraph が開く）
 ```
 
 ## 動作環境
@@ -382,6 +385,7 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 - **検索**: 行頭の `/search`、または「検索」「調べて」「ググ」「最新」「ニュース」を含む文、URL を含む文（その URL を読みます）で検索します。
 - **文章**: 行頭の `/write`、または「小説」「物語」「設定を作って」「推敲」「続きを書いて」「記事の下書き」などを含む文。書くのは LM Studio の 27B です。
 - **コード**: 行頭の `/code`、または「コードを書いて」「実装して」「実行して」「テストして」「スクリプトを作って」などを含む文。
+- **ローカル文書**: 行頭の `/docs <パス> [質問]`。許可したフォルダ（`LOCAL_DOC_ROOTS`）の中のファイル 1 つかフォルダ 1 つを、検索と同じチームで読みます（下の「ローカル文書（`/docs`）」）。ネットワークは使いません。
 - どれとも決まらない文（「〜はいつ？」「〜をまとめて」など）は、Qwen3-1.7B が会話 / 検索 / 文章 / コードのどれかを選びます。失敗したら会話にします（画像タブへは誘導しません）。
 
 #### 応答モード（自動 / 速い / 思考）
@@ -456,6 +460,55 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
   - 検証結果の有無
   - 停止し損ねた llama-server が残っていないこと
 
+#### 主張の突き合わせ（検索と `/docs`）
+
+検索と `/docs` の回答は、カードに書いてあることだけで書くように、統合の前後で主張を 1 件ずつ出典と照らします（設計: `docs/claim-verification-design.md`）。
+
+```text
+… → 批評（思考モード） → 主張の抽出 → 主張の判定 → 統合 → 監査 → 削除
+```
+
+1. **抽出**: 代理リーダー（批評と同じ Ternary-Bonsai-2-27B abliterated のプロセス）が、質問に答えるのに要る主張を最大 12 件、短い日本語の文で出します。
+2. **判定**: 同じプロセスが、主張ごとにカードの抜粋だけを根拠に「支持 / 一部 / 矛盾 / 出典なし / 意見」を付けます。
+3. **門（オーケストレータ、モデルなし）**: モデルの判定は参考です。「支持」は、引用したカードが実在し、主張とカードの抜粋が 20 字以上連続で一致するか、カードの数値・日付・固有名詞が主張に含まれるときだけ通します。カードに無い数値を含む主張は「出典なし」、固有名詞も数値も無い主張は「一部」まで、引用を原文で確認できなかったカードだけが根拠の主張も「一部」までです。
+4. **統合**: 支持と一部の主張だけを渡して書かせます（一部は断定しない）。番号 [n] は振り直しません。
+5. **監査と削除**: 書いた回答を句点で文に分け、同じ判定と門をもう一度通します。出典なし・矛盾の文は削除し、言い換えません。削除した文の直後の「したがって」「そのため」で始まる文と、本文が無くなった見出しも消します。
+6. 回答の下の「主張の突き合わせ」を開くと、主張ごとの判定と出典番号、監査で削除した文が見られます。矛盾した候補があれば、出典一覧の前に 1 行だけそう書きます（中身は表にだけ出します）。
+
+- JSON が壊れたら同じプロセスに 1 回だけ直させます。2 回目も壊れたとき、または `CLAIM_TIMEOUT_S` を超えたときは、無監査の回答を出さず、抽出に使ったカードの抜粋だけを返します（`CLAIM_VERIFY_FAIL_OPEN=1` にすると、文頭に「突き合わせ失敗」と付けた無監査の統合を返します）。監査だけが時間切れなら、判定済みの主張から書いた統合をそのまま返します。
+- 判定のために通信はしません。追加の検索は、思考モードの批評の 1 回だけです。LM Studio の 27B を載せ直すこともしません。
+- `CLAIM_VERIFY=0` で、この段を飛ばして v0.5.0 までの統合に戻ります。
+
+#### ローカル文書（`/docs`）
+
+```text
+/docs <パス> [質問]
+/docs docs                                 … フォルダの要点、決定、未決
+/docs README.md チャットタブのタイムアウトは？
+/docs "C:\メモ\議事録 10月.md" 何が決まった？   … 空白を含むパスは引用符で囲む
+```
+
+検索の「計画 → 並列で読む → 批評 → 統合」の取得先を、Tor からローカルファイルに替えたものです（設計: `docs/local-doc-mapreduce-design.md`）。
+
+| 段 | 担当 | 内容 |
+|---|---|---|
+| 解決 | Python（モデルなし） | パスを実パスにし、`LOCAL_DOC_ROOTS` の中かを確かめ、拒否名を落とし、拡張子で絞り、見出しで分割する |
+| 計画 | 規則、またはチャンクが 12 を超えるとき LM Studio の 27B | ファイル名・見出し・大きさだけを見て、読む節（最大 12）の順を決める。本文は見せない。27B は計画のあと unload してから reader を起動する |
+| 読む | Ternary-Bonsai-8B × 最大 3 体（1 波） | 節の本文と質問だけを受け取り、原文の引用（400 字以内）と数値・日付・決定・未決のメモをカードにする。ツールは持たない |
+| カバー（思考モードのみ） | 代理リーダー | 読んだ節の位置とメモ、未読の計画だけを見て、次の波で読む節を最大 3 つ選ぶ。速いモードは計画の順に読む |
+| 統合 | 同上 | カードだけを根拠に、出典を `パス#見出し` で付けて答える（上の主張の突き合わせを通す） |
+
+- 波は 4 回まで、読む節は 12 まで、読む時間は `DOC_TIMEOUT_S` まで。同じ節は 2 回読みません。読み残しがあれば回答に「未読の節がある」と 1 行付きます。パスを絞ってください。
+- 回答の下の「ローカル文書」を開くと、対象ファイル、読まなかったもの（拒否名とその理由）、波ごとに読んだ節が見られます。
+- ファイルを開くのはオーケストレータ（LangGraph のプロセス）だけです。モデルの出力をパスとして開くことはありません。書き込み、実行、削除、移動はしません。Tor もネットワークも使いません。
+- 許可と拒否:
+  - `LOCAL_DOC_ROOTS` はカンマ区切りの絶対パスです。空なら `/docs` は「LOCAL_DOC_ROOTS が未設定です」と返します。ホームフォルダ全体のような広いフォルダは指定しないでください。
+  - パスは許可フォルダからの相対パスか絶対パスです。実パスで判定するので、シンボリックリンクやジャンクションで外へ出るものは読みません。`..`、`ファイル:ストリーム`（NTFS の代替データストリーム）、`\\?\` のようなデバイスのパスは拒否します。
+  - 次の名前は、パスのどこにあっても読みません（大文字小文字を区別しない）: `.env`、`.env.*`、`id_rsa`、`*.pem`、`*.key`、`*.pfx`、`credentials*`、`secret*`、`node_modules`、`.git`、`__pycache__`、`outputs`、`output`、`*.safetensors`、`*.gguf`、`*.png`、`*.jpg`。拒否したファイルは名前と理由だけを出し、中身はモデルにも進捗にも渡しません。
+  - 読む拡張子は `.md` `.txt` `.log` `.json` `.toml` `.yaml` `.yml`（`DOC_EXTENSIONS` で変更）。ログは秘密を含むことがあるので、広いフォルダを許可するときは `.log` を外してください（`DOC_EXTENSIONS=.md,.txt,.json,.toml,.yaml,.yml`）。PDF や画像は読みません。
+  - フォルダは深さ 4、30 ファイルまで（浅いものから）。1 ファイルは先頭 1MiB まで（超えたら切り詰めたと回答に書きます）。
+- 画像の添付と `/docs` は同時に受けません（画像タブへ誘導します）。`/docs` の文に「検索」とあっても Web は検索しません。
+
 #### 検索で使うモデルと採否
 
 | モデル | 採否 | 役割 | 理由（この端末の実測） |
@@ -511,6 +564,14 @@ LM Studio 側の値を変えるときは、`.\scripts\setup-lmstudio.ps1 -GpuOff
 | `BONSAI_MODEL` | 空（自動） | reader のモデルを固定する（`ternary-8b` など）。入らなければ断る |
 | `BONSAI_RESERVE_MB` | `3072` | モデルを何体載せるか決めるときに残す空きメモリ |
 | `JOB_LOCK_TIMEOUT_S` | `30` | もう片方のタブの実行が終わるのを待つ上限 |
+| `CLAIM_VERIFY` / `CLAIM_VERIFY_FAIL_OPEN` | `1` / `0` | 主張の突き合わせ（`0` で旧来の統合） / 失敗時に無監査の回答を出すか |
+| `CLAIM_MAX` / `CLAIM_QUOTE_CHARS` / `CLAIM_TIMEOUT_S` | `12` / `400` / `600` | 主張の上限、判定に見せる抜粋の長さ、抽出 + 判定 + 監査の時間の上限 |
+| `LOCAL_DOC_ROOTS` | 空（`/docs` はオフ） | `/docs` が読んでよいフォルダ（カンマ区切りの絶対パス） |
+| `DOC_EXTENSIONS` | `.md,.txt,.log,.json,.toml,.yaml,.yml` | `/docs` が読む拡張子 |
+| `DOC_MAX_FILES` / `DOC_MAX_DEPTH` / `DOC_MAX_FILE_BYTES` | `30` / `4` / `1048576` | 1 回に読むファイル数、フォルダの深さ、1 ファイルの読む量 |
+| `DOC_CHUNK_CHARS` / `DOC_CHUNK_OVERLAP` / `DOC_MAX_CHUNKS` | `3000` / `200` / `12` | 節の長さと重なり、読む節の上限（4 波 × 3） |
+| `DOC_TIMEOUT_S` | `600` | 最初の reader から最後の波までの時間の上限（読めた分で答える） |
+| `DOC_PLANNER` | `auto` | `auto`: 節が上限以下なら規則（ファイル順）、超えたら 27B / `lmstudio`: 常に 27B / `rules`: 常に規則 |
 
 ## 6. メモリと LLM の量子化
 
@@ -532,6 +593,11 @@ OS・画面表示・ComfyUI の常駐分と合わせると物理メモリに収�
 AGENTS.md / docs/                     仕様
 langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph
 src/furry_agent/chat_graph.py         チャットタブのグラフ（ingest → route → chat | plan → search → filter → read → critique → synthesize）
+src/furry_agent/chat_models.py        チャットタブの llama-server（reader、代理リーダー）の起動と停止、外部依存の差し替え口
+src/furry_agent/claim_verify.py       主張の突き合わせ: EvidenceCard / Claim、門（字面・数値・固有名詞）、文の分割と削除。モデルなし
+src/furry_agent/claim_nodes.py        主張の抽出 → 判定 → （統合）→ 監査 → 削除のノード
+src/furry_agent/doc_resolve.py, doc_chunk.py   /docs の許可ルート・拒否名・列挙（モデルなし）と、見出しでの分割
+src/furry_agent/doc_nodes.py          /docs のノード（解決 → 計画 → 読む（波） → カバー）
 src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
 src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定
 src/furry_agent/bonsai_select.py      タスクごとのモデル選択（順位、検証結果、空きメモリ）
@@ -559,6 +625,8 @@ prompts/system_furry_tags_roles.txt   役割付き参照のタグ統合用 syste
 prompts/system_vision_*.txt           参照画像タグ付けの system prompt（caption / style / pose / character）
 prompts/system_chroma_prose.txt       Chroma 用。英語の説明文を返させる system prompt
 prompts/system_chat.txt, system_search*.txt, system_bonsai_worker.txt   チャットタブの会話と検索の各段
+prompts/system_claim_extract.txt, system_claim_verify.txt   主張の抽出と判定（監査も判定と同じ）
+prompts/system_doc_plan.txt, system_doc_map.txt, system_doc_cover.txt   /docs の計画、読解、カバー
 tools/tor/torrc                       Tor の設定（SOCKS 127.0.0.1:9050 のみ）
 scripts/setup*.ps1                    セットアップ（scripts/lib/common.ps1 が共通処理）
 scripts/start-*.ps1, doctor.ps1       起動と確認
@@ -628,6 +696,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
   思考モードではラウンド、下位問いと状態、採用 / 不採用のカードと理由、停止理由、読んだページ数と経過秒も出します。
 - 応答モード: チャットタブの入力欄に「自動 / 速い / 思考」を置き、送信ごとに `config.configurable.mode`（`auto` / `fast` / `think`）として送ります（`mode-tabs.tsx` の `ChatModeSwitch`、配置は `thread/index.tsx`）。選択はブラウザの localStorage に覚えます。
 - 思考と手順: `additional_kwargs.thinking`（思考トークン、既定で閉じた折りたたみ）、`task_trace`（執筆とコードの手順）、`chat_mode`（選ばれたモードと自動の理由）を描画します（`search-trace.tsx`、`ai.tsx`）。思考は回答本文に混ぜません。
+- 主張の突き合わせとローカル文書: `additional_kwargs.claim_trace`（主張ごとの判定、出典番号、監査で削除した文）と `doc_trace`（対象ファイル、拒否したもの、波ごとに読んだ節）を折りたたみで描画します（`search-trace.tsx` の `ClaimTraceView` / `DocTraceView`、`ai.tsx`）。
 
 ## 8. ログ
 

@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索と `/docs` の回答の主張単位の検証（`docs/claim-verification-design.md`）とローカル文書の map-reduce `/docs`（`docs/local-doc-mapreduce-design.md`、v0.6.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -27,6 +27,8 @@
 | `docs/chat-search-tor-design-bonsai-tabs.md` | 画像 / チャットのタブと、Tor 経由検索（Bonsai ワーカー）の設計 |
 | `docs/chat-search-tor-bonsai-work-instruction.md` | 上の実装記録。追加要件、設計書との差分、実測、モデルと役割の対応 |
 | `docs/chat-deep-search-creative-sandbox.md` | チャットタブの深い検索、文章、コードと Docker サンドボックス、速い / 思考 / 自動。末尾に実装記録 |
+| `docs/claim-verification-design.md` | 検索と `/docs` の回答を主張単位で出典と照らす段（抽出・判定・統合・監査・削除）。末尾に実装記録 |
+| `docs/local-doc-mapreduce-design.md` | チャットタブの `/docs`（許可ルート内のローカル文書を検索と同じチームで読む）。末尾に実装記録 |
 
 ComfyUI と LM Studio の呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
 
@@ -121,9 +123,11 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 画像タブとチャットタブは `job_lock` で直列化する。チャットタブがロックを放すのは、llama-server がすべて消え、LM Studio を unload した後である。
 - LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
-- チャットグラフの kind は `CHAT` / `SEARCH` / `WRITE` / `CODE` / `TO_IMAGE_TAB` の 5 つ（設計は `docs/chat-deep-search-creative-sandbox.md`）。1 本の `chat` グラフの中で分岐し、グラフを増やさない。文章とコードを書くのは LM Studio の 27B で、検索モデルと画像用プロンプトは使わない。
+- チャットグラフの kind は `CHAT` / `SEARCH` / `WRITE` / `CODE` / `TO_IMAGE_TAB` / `DOCS` の 6 つ（設計は `docs/chat-deep-search-creative-sandbox.md`、`DOCS` は `docs/local-doc-mapreduce-design.md`）。1 本の `chat` グラフの中で分岐し、グラフを増やさない。`DOCS` は行頭の `/docs` だけで決まり（ルータは選ばない）、添付以外のすべてより先に判定する。文章とコードを書くのは LM Studio の 27B で、検索モデルと画像用プロンプトは使わない。
 - モードは `configurable.mode` の `fast` / `think` / `auto`（UI の「速い / 思考 / 自動」。無指定は `fast`、`auto` はルールとルータの判定で片方を選ぶ）。変わるのは予算と思考トークンだけ: 検索は 1 ラウンド / 下位問いの充足判定で最大 4 ラウンド・12 ページ・20 分、文章は一発 / アウトライン→本文→差分推敲、コードは生成のみ / 承認後に Docker で実行（最大 2 回）。思考トークンは回答本文に混ぜない。
 - コードの実行は `src/furry_agent/sandbox.py` だけが行う（`python:3.12-slim`、`--network none`、`--read-only`、`/work` のみマウント、2g / 2 CPU / 256 pids、`--cap-drop ALL`、非 root、60 秒、argv のみ）。承認（HITL）前に実行しない。サンドボックスは `job_lock` を握らない。
+- 主張の検証（`CLAIM_VERIFY=1`）は、検索と `/docs` の両方で、批評と同じ代理リーダーのプロセスで抽出 → 判定 → 統合 → 監査を行い、`claim_drop` が支持されない文を削除する（言い換えない）。採否を決めるのはオーケストレータの門（`claim_verify.gate`: 実在するカード、20 字の一致または数値・固有名詞、カードに無い数値は不可）で、モデルの判定は参考にとどめる。検証段は通信しない、LM Studio を載せ直さない、ツールを渡さない。失敗時の既定（`CLAIM_VERIFY_FAIL_OPEN=0`）は無監査の回答を出さず抜粋だけを返す。`job_lock` は監査が終わり、llama-server が消え、LM Studio を unload するまで放さない。
+- `/docs` のファイルを開くのはオーケストレータ（`doc_resolve.py` / `doc_nodes.py`）だけである。`LOCAL_DOC_ROOTS`（空ならオフ）の実パス配下だけを読み、拒否名を拡張子の許可より先に掛ける。モデルの出力をパスとして使わない。reader（Ternary-Bonsai-8B、幅 3、波ごとに kill）にはツールを渡さず、節の本文と質問だけを渡す。計画に LM Studio の 27B を使ったら、reader の起動前に unload する。`/docs` は Tor も外向き通信も開かない。書き込み・実行・削除・移動はしない。
 
 既定の役割（採否の理由と実測は README「検索で使うモデルと採否」と実装記録 §4）:
 
@@ -164,8 +168,11 @@ CHANGELOG.md                      版ごとの変更
 langgraph.json                    graphs.agent がグラフを指す
 src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント。
                                   チャットタブは chat_graph（ルーティングと検索）、write_nodes / code_nodes、chat_common、
-                                  modes（速い / 思考 / 自動）、sandbox（Docker）
+                                  modes（速い / 思考 / 自動）、sandbox（Docker）、chat_models（llama-server の起動と停止）、
+                                  claim_verify / claim_nodes（主張の検証）、doc_resolve / doc_chunk / doc_nodes（/docs）
 docs/chat-deep-search-creative-sandbox.md       チャットタブの深い検索、文章、コード、モードの設計と実装記録
+docs/claim-verification-design.md               主張単位の検証の設計と実装記録
+docs/local-doc-mapreduce-design.md              /docs（ローカル文書の map-reduce）の設計と実装記録
 comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
 workflows/furry_ja.json           UI 形式
 workflows/furry_ja_api.json       フェーズ 1 の API 形式。t2i_basic / i2i_basic の元
@@ -183,6 +190,8 @@ prompts/system_search*.txt        検索の計画 / ルータ / フィルタ / �
 prompts/system_bonsai_worker.txt  検索の reader（open_page と事実カード）
 prompts/system_write_*.txt        チャットタブの文章（アウトライン / 本文 / 推敲）
 prompts/system_code_plan.txt      チャットタブのコード生成
+prompts/system_claim_*.txt        主張の抽出 / 判定（監査も判定と同じ）
+prompts/system_doc_*.txt          /docs の計画 / 読解 / カバー
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
 scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai、コード実行用は setup-sandbox
@@ -194,7 +203,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表とローカル文書の読んだ範囲の表示（`search-trace.tsx` の `ClaimTraceView` / `DocTraceView`、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
@@ -252,6 +261,8 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - チャットタブの検索で、クラウド検索 API、CAPTCHA の突破、指紋偽装、`.onion` の巡回を行うこと。Tor を通らない検索の通信。
 - チャットタブのコードを、承認（HITL）なしで、または `sandbox.py` 以外（ホストのシェル、LangGraph プロセス内の subprocess）で実行すること。コンテナに docker.sock、ホームフォルダ、リポジトリ、`.env` を渡すこと。速いモードで実行すること。
 - 思考トークンを回答本文に混ぜること。文章生成に検索モデルや画像用プロンプトを使うこと。
+- `/docs` で、許可ルートの外・拒否名のファイルを読むこと、モデルの出力をパスとして開くこと、ファイルの書き込み・実行・削除・移動、ネットワーク（Tor を含む）を開くこと、埋め込みインデックスやベクトル DB を常設すること。
+- 主張の検証で、検証器同士の議論・多数決、検証段からの取得や追加検索、モデルの記憶での補完、数値の自動書き換え、支持されない文の言い換え。
 - 設計書 §5 の薄い `frontend/`。
 - ComfyUI または LM Studio をループバック以外へ開くこと。
 - ノード ID、JSON 契約、unload 順の変更。
