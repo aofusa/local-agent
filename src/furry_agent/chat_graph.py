@@ -43,7 +43,7 @@ from furry_agent import code_nodes, modes, search_agent as sa, write_nodes, writ
 from furry_agent.bonsai_select import (Catalog, Rank, Selection, SelectionError, available_models, free_memory_mb,
                                        select_model)
 from furry_agent.bonsai_worker import Ledger, LlamaServer, WorkerError, free_port, run_reader
-from furry_agent.chat_common import (RESET, ChatState, StageError, _ask, _cleanup, _conf, _fail, _final, _held,
+from furry_agent.chat_common import (RESET, ChatState, StageError, _ask, capped, _cleanup, _conf, _fail, _final, _held,
                                      _history, _is_think, _last_human, _leaders, _ledgers, _lmstudio, _lock,
                                      _progress, _prompt, _settings, _text_of, log)
 from furry_agent.config import ChatSettings
@@ -385,7 +385,8 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         if use_lmstudio:
             # The user's requirement: the Qwen3.8 27B does the first step (the plan) ...
             async with _held(token):
-                parsed = await sa.ask_json(lmstudio, planner_messages, schema, max_tokens=700 if think else 400)
+                parsed = await sa.ask_json(lmstudio, planner_messages, schema,
+                                           max_tokens=capped(settings, lmstudio, 700 if think else 400))
             planner = LEADER_LABEL
         if parsed is None:
             try:
@@ -704,7 +705,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
                 reflect = await sa.ask_json(client, [
                     {"role": "system", "content": await _prompt(settings, "system_search_critique.txt")},
                     {"role": "user", "content": sa.reflect_input(search, cards, refs)}],
-                    sa.Reflect, max_tokens=900, temperature=0.2)
+                    sa.Reflect, max_tokens=capped(settings, client, 900), temperature=0.2)
             roles["critic"] = label
         except asyncio.CancelledError:
             await asyncio.shield(_cleanup(token, lmstudio, unload=True))

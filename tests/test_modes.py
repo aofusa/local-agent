@@ -154,3 +154,31 @@ async def test_ask_never_thinks_in_fast_mode():
     await _ask(_state("fast"), ChatSettings(), llm, [{"role": "user", "content": "q"}], base=1000, answer_min=500,
                temperature=0.6, stage="回答")
     assert llm.calls[0]["thinking"] is False and llm.calls[0]["max_tokens"] == 1000
+
+
+async def test_lm_studio_budget_follows_the_measured_speed():
+    import json as _json
+
+    from furry_agent import chat_common
+    from furry_agent.chat_common import _ask, record_speed, time_cap
+    from furry_agent.config import ChatSettings
+    from furry_agent.llm_client import ChatReply
+
+    chat_common._speeds.clear()
+    sent = []
+
+    def handler(request: httpx.Request):
+        sent.append(_json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
+    settings = ChatSettings()  # 1.0 token/s until measured, 20-minute calls
+    assert time_cap(settings, lm) == 1080
+    assert time_cap(settings, OpenAICompatClient("http://127.0.0.1:8/v1")) is None  # llama-server: not guessed
+    await _ask(_state("think"), settings, lm, [{"role": "user", "content": "q"}], base=3500, answer_min=1200,
+               temperature=0.2, stage="コード")
+    # ~1000 tokens fit in 20 minutes: no room for thinking next to a 1200-token answer.
+    assert sent[0]["max_tokens"] == 1080 and sent[0]["chat_template_kwargs"]["enable_thinking"] is False
+    record_speed(lm, ChatReply("x", raw={"usage": {"completion_tokens": 900}}, seconds=100.0))
+    assert time_cap(settings, lm) == int(9.0 * 1200 * 0.9)
+    chat_common._speeds.clear()

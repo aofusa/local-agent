@@ -263,6 +263,44 @@ def prompt_tokens(messages: list[dict]) -> int:
     return total
 
 
+# Measured generation speed per server (tokens/s), updated from every reply of a long enough call.
+_speeds: dict[str, float] = {}
+
+
+def _speed_key(client) -> str:
+    return getattr(client, "base_url", "") or type(client).__name__
+
+
+def time_cap(settings: ChatSettings, client) -> int | None:
+    """The most tokens one call can produce within CHAT_TIMEOUT_S at the server's speed (10 % margin).
+
+    The LM Studio 27B makes ~0.9 tokens/s on this machine, so a 20-minute call ends near 1000 tokens: the
+    budget for an answer and its thinking must come from the speed, not only from the context window. Other
+    servers (the llama-server leader, 8-9 tokens/s) are capped only once a speed was measured.
+    """
+    speed = _speeds.get(_speed_key(client))
+    if speed is None:
+        if not isinstance(client, LMStudio):
+            return None
+        speed = settings.lmstudio_tokens_per_s
+    return max(128, int(speed * settings.chat_timeout_s * 0.9))
+
+
+def record_speed(client, reply) -> None:
+    usage = (getattr(reply, "raw", None) or {}).get("usage") or {}
+    tokens, seconds = usage.get("completion_tokens") or 0, getattr(reply, "seconds", 0.0) or 0.0
+    if tokens >= 64 and seconds > 1:
+        # The first call includes loading the model, so this errs on the slow side.
+        key = _speed_key(client)
+        measured = tokens / seconds
+        _speeds[key] = measured if key not in _speeds else 0.5 * _speeds[key] + 0.5 * measured
+
+
+def capped(settings: ChatSettings, client, max_tokens: int) -> int:
+    cap = time_cap(settings, client)
+    return max_tokens if cap is None else min(max_tokens, cap)
+
+
 def fit_messages(messages: list[dict], budget: int) -> list[dict]:
     """Drop the oldest turns (never the system prompt or the last message) until the prompt fits ``budget``
     tokens; a last message that is still too long keeps its end."""
@@ -291,11 +329,12 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
     window = context or settings.lmstudio_ctx
     want_think = thinking and _is_think(state)
     messages = fit_messages(messages, window - answer_min - (settings.think_tokens // 3 if want_think else 0) - 48)
-    room = max(256, window - prompt_tokens(messages) - 48)
+    room = capped(settings, client, max(256, window - prompt_tokens(messages) - 48))
     think = want_think and room >= answer_min + settings.think_tokens // 3
     max_tokens = min(room, base + settings.think_tokens) if think else min(room, base)
     reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature,
                               timeout_s=settings.chat_timeout_s, thinking=think)
+    record_speed(client, reply)
     log.info("%s: thinking=%s max_tokens=%d %s", stage, think, max_tokens, _usage(reply))
     thoughts = _thought(stage, reply)
     if think and not (reply.content or "").strip():
