@@ -1,0 +1,10 @@
+## Tor client for the chat tab's web search (scripts\start-tor.ps1).
+## SOCKS on loopback only; the LangGraph orchestrator is the only client (socks5h://127.0.0.1:9050).
+## DataDirectory and the log file are passed on the command line because their paths are machine-specific.
+SocksPort 127.0.0.1:9050
+SocksPolicy accept 127.0.0.1
+SocksPolicy reject *
+ClientOnly 1
+AvoidDiskWrites 1
+## Streams with different SOCKS credentials use different circuits (SocksPort's default IsolateSOCKSAuth);
+## the orchestrator sends one credential per search branch.

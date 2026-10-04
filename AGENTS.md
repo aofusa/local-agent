@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）は実装済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -24,6 +24,8 @@
 | `docs/lmstudio-comfyui-workflow-design.md` | ComfyUI と LM Studio の連携。実装指示であり、ノード、順序、モデル、メモリ、禁止事項を固定する |
 | `docs/multi-image-reference-work-instruction.md` | 複数参照画像の要件と設計。末尾の調査結果に、設計書・このファイルとの差分と吸収方法がある |
 | `docs/chroma-hd-support-work-instruction.md` | Chroma1-HD 系統の要件と設計。末尾の実装記録に、このファイル・設計書との差分と吸収方法がある |
+| `docs/chat-search-tor-design-bonsai-tabs.md` | 画像 / チャットのタブと、Tor 経由検索（Bonsai ワーカー）の設計 |
+| `docs/chat-search-tor-bonsai-work-instruction.md` | 上の実装記録。追加要件、設計書との差分、実測、モデルと役割の対応 |
 
 ComfyUI と LM Studio の呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
 
@@ -59,7 +61,7 @@ ComfyUI が LLM を unload してから KSampler
 - ComfyUI は、設計書のワークフローで参照画像の取り込み、LM Studio の呼び出し、モデルの eject、タグの分割、チェックポイントによる静止画生成、Save Image を行う。
 - LM Studio の LLM は、日本語と参照画像から Danbooru / e621 系タグの JSON を返す。画素は作らない。画素を作るのは ComfyUI のチェックポイントと KSampler である。
 
-LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の経路を置き換えない。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
+LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）だけである。チャットタブは会話と検索の計画・統合のために LM Studio を直接呼び、検索の前後で unload する。画像タブ（graph `agent`）の経路は変えない。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
 
 ## 待受と到達範囲
 
@@ -71,8 +73,10 @@ LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の�
 | ComfyUI | `127.0.0.1:8188` | この端末の LangGraph だけ |
 | LangGraph | 他ホストから到達できるアドレス。開発時の既定ポートは `2024` | agent-chat-ui、および他ホスト |
 | agent-chat-ui | 他ホストから到達できるアドレス。開発時の既定ポートは `3000` | 利用者のブラウザ |
+| Tor | `127.0.0.1:9050`（SOCKS） | この端末の LangGraph（チャットタブの検索）だけ |
+| PrismML llama-server | `127.0.0.1:18181〜18190` | この端末の LangGraph だけ。検索中だけ起動する |
 
-ComfyUI は `--listen 127.0.0.1 --port 8188` のままにする。LM Studio もループバックのままにする。他ホストへ開くのは LangGraph と agent-chat-ui だけである。
+ComfyUI は `--listen 127.0.0.1 --port 8188` のままにする。LM Studio、Tor、llama-server もループバックのままにする。他ホストへ開くのは LangGraph と agent-chat-ui だけである。検索の外向き通信は Tor の出口だけを通る（`socks5h://`）。
 
 他ホストのブラウザが UI を開くとき、UI が接続する LangGraph の URL は、そのブラウザから到達できるこの端末のアドレスにする。UI をこの端末で動かしていても、他ホスト向けの接続先を `localhost` のままにすると、相手のブラウザは自分自身へ接続しにいく。グラフ id は `agent` とし、agent-chat-ui の既定 `NEXT_PUBLIC_ASSISTANT_ID` と揃える。
 
@@ -104,6 +108,17 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
 - ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/sdxl.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補）に限る。構造の変更は、マップにある前処理候補の差し替えと、`LORAS` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
 - API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。タイムアウトはタグ生成と画像生成のそれぞれに 10 分。この呼び出しを行うのは LangGraph である。
+
+## チャットタブ（会話と Tor 経由検索）
+
+設計は `docs/chat-search-tor-design-bonsai-tabs.md`、実装記録は `docs/chat-search-tor-bonsai-work-instruction.md` にある。変えてはいけない点だけここに置く。
+
+- タブはグラフの選択である。画像タブは graph `agent`（`image` は別名）、チャットタブは graph `chat`。チャットタブは画像を受け取らず、画像タブへ誘導する。
+- 検索の通信を開くのは LangGraph（オーケストレータ）だけである。llama-server にはプロキシを渡さない。モデルが出すツール呼び出しは、オーケストレータが URL の許可判定をしてから実行する。
+- 検索用のモデル（Bonsai 系と Qwen heretic 系）は、PrismML の llama.cpp fork（`BONSAI_LLAMA_SERVER`）だけで動かす。LM Studio にも ComfyUI にも入れない。常駐させず、使い終わったら PID を kill する。
+- 画像タブとチャットタブは `job_lock` で直列化する。チャットタブがロックを放すのは、llama-server がすべて消え、LM Studio を unload した後である。
+- LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
+- モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
 
 ## 画像の保存と UI への返却
 
@@ -143,6 +158,11 @@ prompts/system_furry_tags.txt
 prompts/system_furry_tags_roles.txt
 prompts/system_vision_*.txt       caption / style / pose / character
 prompts/system_chroma_prose.txt   Chroma 用（英語の説明文）
+prompts/system_chat.txt           チャットタブの会話
+prompts/system_search*.txt        検索の計画 / ルータ / フィルタ / 批評 / 統合
+prompts/system_bonsai_worker.txt  検索の reader（open_page と事実カード）
+config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
+tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
 scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1
 tests/                            pytest
 agent-chat-ui/                    公式 UI。設定で接続する
@@ -152,7 +172,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像の表示（`ai.tsx`）と、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブ（`mode-tabs.tsx`、`thread/index.tsx` での配置）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
@@ -207,6 +227,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - LLM とチェックポイントの同時常駐。ComfyUI 内での GGUF 常駐。
 - クラウド API へのフォールバック。LangSmith クラウドへのデプロイを、このローカル連携の代替にすること。
 - 動画生成ワークフロー。Wan、LTX などを含む。
+- チャットタブの検索で、クラウド検索 API、CAPTCHA の突破、指紋偽装、`.onion` の巡回を行うこと。Tor を通らない検索の通信。
 - 設計書 §5 の薄い `frontend/`。
 - ComfyUI または LM Studio をループバック以外へ開くこと。
 - ノード ID、JSON 契約、unload 順の変更。
@@ -229,6 +250,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - タイムアウトはタグ生成と画像生成のそれぞれに `COMFYUI_TIMEOUT_S`（600 秒）。
 - ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1` と Comfy Desktop の起動引数）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
 - モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
+- 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則

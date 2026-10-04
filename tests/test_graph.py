@@ -556,3 +556,24 @@ async def test_chroma_tag_list_output_is_warned(settings, chroma):
     fake = FakeComfy()
     state = await _run("港", fake, settings)
     assert "タグ列" not in state["messages"][-1].content[0]["text"]
+
+
+async def test_chat_tab_holding_the_job_lock_refuses_the_image_tab(settings, monkeypatch):
+    from furry_agent.job_lock import job_lock
+
+    monkeypatch.setenv("JOB_LOCK_TIMEOUT_S", "0.2")
+    fake = FakeComfy()
+    token = job_lock.try_acquire("chat")
+    try:
+        state = await _run("テスト", fake, settings)
+    finally:
+        job_lock.release(token)
+    assert "チャットタブが実行中です" in state["messages"][-1].content
+    assert fake.submitted is None and "wait_queue_idle" not in fake.calls
+
+
+async def test_image_run_releases_the_job_lock(settings):
+    from furry_agent.job_lock import job_lock
+
+    await _run("夕焼けの海辺", FakeComfy(), settings)
+    assert job_lock.holder is None

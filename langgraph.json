@@ -1,7 +1,9 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "agent": "./src/furry_agent/graph.py:graph"
+    "agent": "./src/furry_agent/graph.py:graph",
+    "image": "./src/furry_agent/graph.py:graph",
+    "chat": "./src/furry_agent/chat_graph.py:graph"
   },
   "env": ".env",
   "python_version": "3.12"

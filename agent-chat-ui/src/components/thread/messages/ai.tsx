@@ -16,6 +16,7 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import { SearchTraceView, isSearchTrace } from "./search-trace";
 
 // local-agent: render base64 image blocks returned by the graph (stock UI renders text only).
 function AIImageBlocks({ content }: { content: Message["content"] }) {
@@ -206,6 +207,11 @@ export function AssistantMessage({
             )}
 
             <AIImageBlocks content={content} />
+
+            {/* local-agent: the chat tab's search trace */}
+            {isSearchTrace(message?.additional_kwargs?.search_trace) && (
+              <SearchTraceView trace={message.additional_kwargs.search_trace} />
+            )}
 
             {!hideToolCalls && (
               <>

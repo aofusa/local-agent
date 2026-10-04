@@ -9,7 +9,9 @@
   4. LM Studio setup (scripts\setup-lmstudio.ps1).
   5. ComfyUI setup (scripts\setup-comfyui.ps1), then the multi-image reference nodes and models
      (scripts\setup-comfyui-refs.ps1: IP-Adapter, ControlNet, DWPose / depth; about 6 GB of downloads).
-  6. Optionally open the Windows firewall for TCP 2024/3000 on Private networks (-OpenFirewall, asks for admin).
+  6. Chat tab search: Tor Expert Bundle (setup-tor.ps1), the PrismML llama.cpp fork (setup-llamacpp.ps1),
+     the search models (setup-search-models.ps1, about 20 GB) and their probe (probe-bonsai.ps1). -SkipSearch skips it.
+  7. Optionally open the Windows firewall for TCP 2024/3000 on Private networks (-OpenFirewall, asks for admin).
 
 .EXAMPLE
   .\scripts\setup.ps1 -OpenFirewall
@@ -25,6 +27,8 @@ param(
     [switch]$SkipLMStudio,
     [switch]$SkipComfyUI,
     [switch]$SkipReferenceModels,      # text-only / plain img2img work without them
+    [switch]$SkipSearch,               # the chat tab's web search (Tor, llama.cpp fork, ~20 GB of models)
+    [switch]$SkipProbe,
     [switch]$OpenFirewall
 )
 $ErrorActionPreference = "Stop"
@@ -73,6 +77,13 @@ if (-not $SkipComfyUI) {
     if ($ConfigureComfyDesktop) { $comfyArgs["ConfigureComfyDesktop"] = $true }
     & (Join-Path $PSScriptRoot "setup-comfyui.ps1") @comfyArgs
     if (-not $SkipReferenceModels) { & (Join-Path $PSScriptRoot "setup-comfyui-refs.ps1") }
+}
+
+if (-not $SkipSearch) {
+    & (Join-Path $PSScriptRoot "setup-tor.ps1")
+    & (Join-Path $PSScriptRoot "setup-llamacpp.ps1")
+    & (Join-Path $PSScriptRoot "setup-search-models.ps1")
+    if (-not $SkipProbe) { & (Join-Path $PSScriptRoot "probe-bonsai.ps1") }
 }
 
 if ($OpenFirewall) {

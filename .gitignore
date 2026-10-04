@@ -25,5 +25,12 @@ node_modules/
 *.bin
 logs/
 
-# Downloaded tools (llama.cpp for requantization)
-tools/
+# Downloaded tools (llama.cpp for requantization, the PrismML llama.cpp fork, Tor, Bonsai weights).
+# Only the torrc template and the empty bonsai folder are tracked.
+tools/*
+!tools/tor/
+tools/tor/*
+!tools/tor/torrc
+!tools/bonsai/
+tools/bonsai/*
+!tools/bonsai/.gitkeep

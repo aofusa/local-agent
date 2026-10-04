@@ -1,0 +1,127 @@
+{
+  "_comment": "Local models for the chat tab's search agent. Run only on the PrismML llama.cpp fork (scripts/setup-llamacpp.ps1), never in LM Studio or ComfyUI. Sizes are the GGUF sizes in bytes; mem_mb is a first guess (weights + 4k context) that scripts/probe-bonsai.ps1 replaces with a measurement in tools/bonsai/rank.json.",
+  "llama_release": "prism-b10754-2459f68",
+  "llama_asset": "llama-{tag}-bin-win-vulkan-x64.zip",
+  "llama_repo": "PrismML-Eng/llama.cpp",
+  "llama_branch": "prism",
+  "models": [
+    {
+      "id": "bonsai-8b",
+      "label": "Bonsai-8B (1-bit Q1_0)",
+      "repo": "prism-ml/Bonsai-8B-gguf",
+      "file": "Bonsai-8B-Q1_0.gguf",
+      "size": 1158654496,
+      "mem_mb": 1900,
+      "class": "small",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "ternary-8b",
+      "label": "Ternary-Bonsai-8B (PQ2_0)",
+      "repo": "prism-ml/Ternary-Bonsai-8B-gguf",
+      "file": "Ternary-Bonsai-8B-PQ2_0.gguf",
+      "size": 2182184672,
+      "mem_mb": 2700,
+      "class": "small",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "bonsai-4b",
+      "label": "Bonsai-4B (1-bit Q1_0)",
+      "repo": "prism-ml/Bonsai-4B-gguf",
+      "file": "Bonsai-4B-Q1_0.gguf",
+      "size": 572270624,
+      "mem_mb": 1000,
+      "class": "small",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "bonsai-2-27b",
+      "label": "Ternary-Bonsai-2-27B (PTQ1_0)",
+      "repo": "prism-ml/Ternary-Bonsai-2-27B-gguf",
+      "file": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+      "size": 5946648928,
+      "mem_mb": 6900,
+      "class": "large",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "bonsai-2-27b-abliterated",
+      "label": "Ternary-Bonsai-2-27B abliterated (PTQ1_0, Override-6)",
+      "repo": "Override-6/Ternary-Bonsai-2-27B-abliterated-gguf",
+      "file": "Ternary-Bonsai-2-27B-PTQ1_0-abliterated.gguf",
+      "size": 5946648928,
+      "mem_mb": 6900,
+      "class": "large",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "qwen3.5-4b-heretic",
+      "label": "Qwen3.5-4B-heretic (Q4_K_M)",
+      "repo": "mradermacher/Qwen3.5-4B-heretic-GGUF",
+      "file": "Qwen3.5-4B-heretic.Q4_K_M.gguf",
+      "size": 2707514720,
+      "mem_mb": 3200,
+      "class": "small",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "qwen3-1.7b-heretic",
+      "label": "Qwen3-1.7B-heretic (Q4_K_M)",
+      "repo": "mradermacher/Qwen3-1.7B-heretic-GGUF",
+      "file": "Qwen3-1.7B-heretic.Q4_K_M.gguf",
+      "size": 1107409568,
+      "mem_mb": 1500,
+      "class": "small",
+      "thinking": "qwen3"
+    },
+    {
+      "id": "qwen3-0.6b-heretic",
+      "label": "Qwen3-0.6B-heretic (Q8_0)",
+      "repo": "mradermacher/Qwen3-0.6B-Heretic-GGUF",
+      "file": "Qwen3-0.6B-Heretic.Q8_0.gguf",
+      "size": 639447520,
+      "mem_mb": 900,
+      "class": "small",
+      "thinking": "qwen3"
+    }
+  ],
+  "_tasks": "Preference order per task before probing (Grok-style graph: route -> plan -> search -> read -> critique -> synthesize). route = classify an ambiguous chat message (search or not) and rewrite the query (Qwen3-1.7B); plan = split the question into search intents when LM Studio's Qwen3.8 27B is not used; filter = relevant / not relevant on titles and snippets (Bonsai-4B); worker = the reader: opens pages with a tool call and extracts fact cards (Ternary-Bonsai-8B); critique = coverage gaps for at most one more search; synthesize = the single cited answer. critique and synthesize run on the Ternary-Bonsai-2-27B abliterated proxy when the 27B in LM Studio does not fit next to the readers. Bonsai-8B (1-bit) and Qwen3-0.6B are kept only as last fallbacks.",
+  "tasks": {
+    "route": [
+      "qwen3-1.7b-heretic",
+      "qwen3.5-4b-heretic",
+      "qwen3-0.6b-heretic"
+    ],
+    "plan": [
+      "bonsai-2-27b-abliterated",
+      "bonsai-2-27b",
+      "qwen3.5-4b-heretic",
+      "ternary-8b"
+    ],
+    "filter": [
+      "bonsai-4b",
+      "qwen3-1.7b-heretic",
+      "qwen3-0.6b-heretic"
+    ],
+    "worker": [
+      "ternary-8b",
+      "qwen3.5-4b-heretic",
+      "bonsai-8b",
+      "qwen3-1.7b-heretic",
+      "bonsai-2-27b"
+    ],
+    "critique": [
+      "bonsai-2-27b-abliterated",
+      "bonsai-2-27b",
+      "qwen3.5-4b-heretic",
+      "ternary-8b"
+    ],
+    "synthesize": [
+      "bonsai-2-27b-abliterated",
+      "bonsai-2-27b",
+      "qwen3.5-4b-heretic",
+      "ternary-8b"
+    ]
+  }
+}

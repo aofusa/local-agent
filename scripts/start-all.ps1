@@ -1,7 +1,9 @@
-﻿# Start ComfyUI (if not already running), LangGraph and agent-chat-ui, each in its own window.
+﻿# Start Tor (background), ComfyUI (if not already running), LangGraph and agent-chat-ui, each in its own window.
 # LM Studio must already be running (its server starts on launch; see README).
+# The search models (PrismML llama-server) are not started here: the chat tab starts them per search.
 param(
-    [switch]$SkipComfyUI    # use when ComfyUI is started from Comfy Desktop instead
+    [switch]$SkipComfyUI,   # use when ComfyUI is started from Comfy Desktop instead
+    [switch]$SkipTor        # the chat tab's search needs Tor; the image tab does not
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib\common.ps1")
@@ -23,6 +25,12 @@ function Wait-Port([int]$Port, [int]$TimeoutSec) {
 
 Write-Step "LM Studio"
 if (Test-Listening 1234) { Write-Ok "127.0.0.1:1234" } else { Write-Warn2 "LM Studio のサーバが起動していません（LM Studio を起動してください）" }
+
+if (-not $SkipTor) {
+    if (Get-DotEnvValue "TOR_EXE") {
+        try { & (Join-Path $PSScriptRoot "start-tor.ps1") } catch { Write-Warn2 "Tor を起動できません（チャットタブの検索だけが使えません）: $($_.Exception.Message)" }
+    } else { Write-Warn2 "Tor 未導入（scripts\setup-tor.ps1）。チャットタブの検索は使えません" }
+}
 
 if (-not $SkipComfyUI) {
     Write-Step "ComfyUI"
