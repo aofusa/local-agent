@@ -68,3 +68,18 @@ def test_prefixes_and_task_fix_the_kind():
     assert route("/chat 小説について話そう").kind == CHAT
     assert route("夏の詩", task="write").kind == WRITE
     assert route("こんにちは", task="search").kind == SEARCH
+
+
+def test_docs_prefix_comes_before_search_and_splits_path_and_question():
+    from furry_agent.router import DOC_DEFAULT_QUESTION, DOCS
+
+    r = route("/docs README.md 最新の決定を検索して")
+    assert r.kind == DOCS and r.doc_path == "README.md" and r.text == "最新の決定を検索して"
+    r = route('/docs "C:/my docs/a.md" 何が未決？')
+    assert r.doc_path == "C:/my docs/a.md" and r.text == "何が未決？"
+    r = route("/docs 「設計 書.md」")
+    assert r.doc_path == "設計 書.md" and r.text == DOC_DEFAULT_QUESTION
+    assert route("/docs").doc_path == "" and route("/docs").kind == DOCS
+    assert route("/docsy x").kind != DOCS
+    assert route("/docs a.md", has_media=True).kind == TO_IMAGE_TAB
+    assert route("docs", task="docs").doc_path == "docs"
