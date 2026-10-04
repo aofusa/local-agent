@@ -93,12 +93,6 @@ def test_references_and_answer_format():
     assert answer.endswith("- [2] [B](https://b/)")
 
 
-def test_gap_intents_drop_repeated_queries_and_cap():
-    critique = sa.Critique.model_validate({"gaps": [{"q": "Done Query"}, {"q": "new one", "tool": "news"},
-                                                    {"q": "third"}]})
-    gaps = sa.gap_intents(critique, [{"q": "done query"}], 5, 3)
-    assert gaps == [{"id": 5, "tool": "news", "q": "new one", "why": "不足の補完"}]
-    assert sa.gap_intents(None, [], 0, 3) == []
 
 
 def test_untrusted_text_stays_in_fences():

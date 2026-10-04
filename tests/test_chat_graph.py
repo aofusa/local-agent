@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from furry_agent import chat_graph, sandbox
+from furry_agent import chat_graph
 from furry_agent.bonsai_select import Catalog
 from furry_agent.config import ChatSettings
 from furry_agent.html_text import SearchHit
