@@ -30,6 +30,9 @@ log = logging.getLogger("furry_agent.chat")
 
 RESET = "__reset__"
 RENEW_EVERY_S = 60.0
+# The least room left for thinking before think mode turns it on (the rest of max_tokens is shared with the
+# answer; when the thoughts use everything, _ask answers again without thinking).
+THINK_RESERVE = 256
 _ledgers: dict[str, Ledger] = {}
 _leaders: dict[str, tuple[LlamaServer, Selection]] = {}
 
@@ -328,9 +331,9 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
     """
     window = context or settings.lmstudio_ctx
     want_think = thinking and _is_think(state)
-    messages = fit_messages(messages, window - answer_min - (settings.think_tokens // 3 if want_think else 0) - 48)
+    messages = fit_messages(messages, window - answer_min - (THINK_RESERVE if want_think else 0) - 48)
     room = capped(settings, client, max(256, window - prompt_tokens(messages) - 48))
-    think = want_think and room >= answer_min + settings.think_tokens // 3
+    think = want_think and room >= answer_min + THINK_RESERVE
     max_tokens = min(room, base + settings.think_tokens) if think else min(room, base)
     reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature,
                               timeout_s=settings.chat_timeout_s, thinking=think)

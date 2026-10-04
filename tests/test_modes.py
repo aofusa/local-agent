@@ -195,3 +195,24 @@ async def test_model_unloaded_race_is_retried_once():
 
     lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
     assert (await lm.chat([{"role": "user", "content": "x"}])).content == "ok" and len(calls) == 2
+
+
+async def test_think_chat_still_thinks_within_the_time_budget():
+    import json as _json
+
+    from furry_agent import chat_common
+    from furry_agent.chat_common import _ask
+    from furry_agent.config import ChatSettings
+
+    chat_common._speeds.clear()
+    sent = []
+
+    def handler(request: httpx.Request):
+        sent.append(_json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "60", "reasoning": "12=2^2*3"}}]})
+
+    lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
+    reply, thoughts = await _ask(_state("think"), ChatSettings(), lm, [{"role": "user", "content": "q"}], base=1536,
+                                 answer_min=512, temperature=0.6, stage="回答")
+    assert sent[0]["reasoning_effort"] == "medium" and sent[0]["max_tokens"] == 1080
+    assert thoughts == [{"stage": "回答", "text": "12=2^2*3"}]

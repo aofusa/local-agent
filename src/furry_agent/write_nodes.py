@@ -131,7 +131,7 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
             reply, thoughts = await _ask(state, settings, lmstudio,
                                          [{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
                                           {"role": "user", "content": user}],
-                                         base=DRAFT_TOKENS, answer_min=1200, temperature=0.7, stage="本文")
+                                         base=DRAFT_TOKENS, answer_min=800, temperature=0.7, stage="本文")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
