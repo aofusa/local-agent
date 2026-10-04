@@ -166,6 +166,44 @@ def plan_intents(plan: Plan | None, question: str, urls: list[str] | None, width
     return [dict(i, id=n) for n, i in enumerate(intents)], False
 
 
+# --- focused page reading ---------------------------------------------------------------------------------------
+
+
+def _terms(text: str) -> set[str]:
+    """Words (ASCII) and character bigrams (Japanese) of the question, for a cheap relevance score."""
+    text = unicodedata.normalize("NFKC", text or "").lower()
+    words = {w for w in re.findall(r"[a-z0-9][a-z0-9.\-]+", text) if len(w) > 1}
+    cjk = re.sub(r"[^぀-ヿ一-鿿]", " ", text)
+    grams = {chunk[i:i + 2] for chunk in cjk.split() for i in range(len(chunk) - 1)}
+    return words | grams
+
+
+def focus_text(text: str, query: str, limit: int = 1200) -> str:
+    """The lines of a page that share the most terms with the question, in page order, within ``limit``.
+
+    Grok's readers look only for what answers the question; a 4k-context reader on this machine cannot take
+    whole pages either, so the orchestrator cuts the page down before the model sees it.
+    """
+    lines = [line.strip() for line in re.split(r"\n|(?<=[。．!?！？])\s*", text or "") if line.strip()]
+    if sum(len(line) for line in lines) <= limit:
+        return "\n".join(lines)
+    terms = _terms(query)
+    scored = []
+    for index, line in enumerate(lines):
+        score = len(terms & _terms(line)) + (0.5 if re.search(r"\d", line) else 0)
+        scored.append((score, index, line))
+    chosen, used = [], 0
+    for score, index, line in sorted(scored, key=lambda item: (-item[0], item[1])):
+        if score <= 0 and chosen:
+            break
+        piece = line[:400]
+        if used + len(piece) > limit:
+            continue
+        chosen.append((index, piece))
+        used += len(piece) + 1
+    return "\n".join(piece for _, piece in sorted(chosen))
+
+
 # --- filter ------------------------------------------------------------------------------------------------------
 
 

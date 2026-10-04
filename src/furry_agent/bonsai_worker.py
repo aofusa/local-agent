@@ -27,11 +27,14 @@ from pathlib import Path
 import httpx
 
 from furry_agent.llm_client import OpenAICompatClient
+from furry_agent.search_agent import focus_text
 
 log = logging.getLogger("furry_agent.bonsai")
 
 HOST = "127.0.0.1"
 MAX_TOOL_ROUNDS = 2
+PAGE_TIMEOUT_S = 20.0
+PAGE_CHARS = 1200
 OPEN_PAGE_TOOL = {
     "type": "function",
     "function": {
@@ -251,13 +254,25 @@ def requested_url(reply, hits: list[dict]) -> tuple[str | None, bool]:
     return None, False
 
 
+async def _fetch(search, url: str):
+    try:
+        return await asyncio.wait_for(search.fetch(url), PAGE_TIMEOUT_S)
+    except (TimeoutError, asyncio.TimeoutError):
+        log.info("page fetch over %.0fs: %s", PAGE_TIMEOUT_S, url)
+        return None
+
+
 async def run_reader(intent: dict, hits: list[dict], client: OpenAICompatClient, search, ledger: Ledger,
-                     system_prompt: str, question: str, ask_cards) -> dict:
+                     system_prompt: str, question: str, ask_cards, browse_budget_s: float = 75.0) -> dict:
     """One Grok-style reader for one search intent.
 
     ``ask_cards(client, messages)`` returns validated fact cards (schema check and one retry, see
-    search_agent.ask_cards). Returns {"pages": [...], "cards": [...], "tool_call": bool, "opened": [...]}.
+    search_agent.ask_json). Opening pages stops after ``browse_budget_s`` so the card extraction always runs.
+    Pages are cut to the lines relevant to the question (search_agent.focus_text) before the model sees them.
+    Returns {"pages": [...], "cards": [...], "tool_call": bool, "opened": [...]}.
     """
+    deadline = time.monotonic() + browse_budget_s
+    focus = f"{question} {intent.get('q', '')} {intent.get('why', '')}"
     out: dict = {"pages": [], "cards": [], "tool_call": False, "opened": []}
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": (
@@ -265,6 +280,8 @@ async def run_reader(intent: dict, hits: list[dict], client: OpenAICompatClient,
                     f"検索結果:\n{hits_block(hits)}\n\n"
                     "質問に答えるのに最も役立つ結果を open_page で開いてください（最大 2 ページ）。")}]
     for round_no in range(1, MAX_TOOL_ROUNDS + 1):
+        if time.monotonic() > deadline:
+            break
         reply = await client.chat(messages, tools=[OPEN_PAGE_TOOL], tool_choice="auto", max_tokens=96,
                                   temperature=0.1)
         url, from_model = requested_url(reply, hits)
@@ -274,12 +291,13 @@ async def run_reader(intent: dict, hits: list[dict], client: OpenAICompatClient,
             url = next((h["url"] for h in hits if not ledger.seen(h["url"])), None)
         if url is None or not ledger.claim(url):
             break
-        page = await search.fetch(url)
+        page = await _fetch(search, url)
         out["opened"].append(url)
+        focused = focus_text(page.text, focus, PAGE_CHARS) if page else ""
         if page:
             out["pages"].append({"url": url, "title": page.title, "text": page.text[:3000]})
         call_id = f"call_{intent.get('id', 0)}_{round_no}"
-        text = f"{page.title}\n{page.text[:2500]}" if page else "（このページは取得できませんでした）"
+        text = f"{page.title}\n{focused}" if page else "（このページは取得できませんでした）"
         messages.append({"role": "assistant", "content": "", "tool_calls": [{
             "id": call_id, "type": "function",
             "function": {"name": "open_page", "arguments": json.dumps({"url": url})}}]})

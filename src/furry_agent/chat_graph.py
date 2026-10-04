@@ -619,7 +619,10 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
     logs: list[dict] = []
     started = time.monotonic()
     try:
-        async with asyncio.timeout(settings.search_total_timeout_s):
+        # The budget covers every intent this reader handles; opening pages may use 60 % of each share so the
+        # card extraction always gets its turn.
+        jobs_n = len(payload["jobs"])
+        async with asyncio.timeout(settings.search_total_timeout_s * jobs_n):
             await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
             llm = server.client(settings.worker_timeout_s)
 
@@ -633,7 +636,8 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
                 entry = {"intent_id": intent["id"], "kind": "read", "opened": [], "error": None}
                 try:
                     out = await run_reader(intent, hits, llm, client, ledger,
-                                           _prompt(settings, "system_bonsai_worker.txt"), search["question"], ask_cards)
+                                           _prompt(settings, "system_bonsai_worker.txt"), search["question"], ask_cards,
+                                           browse_budget_s=settings.search_total_timeout_s * 0.6)
                     allowed = {h["url"] for h in hits}
                     found = sa.card_dicts(out["cards"], allowed) or sa.snippet_cards(hits)
                     sources = {h["url"]: f"{h.get('title', '')} {h.get('snippet', '')}" for h in hits}
