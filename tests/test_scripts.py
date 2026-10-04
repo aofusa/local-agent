@@ -101,3 +101,18 @@ def test_json_arrays_enumerate_in_pipeline(shell, tmp_path):
             "$picked = @($m | Where-Object { $_.n -ge 1 } | Sort-Object n -Descending); "
             "\"$($picked.Count)|$($picked[0].path)\"")
     assert _run_ps(shell, body, tmp_path) == "2|b"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_file_sha256_matches_hashlib(shell, tmp_path):
+    import hashlib
+
+    data = tmp_path / "blob.bin"
+    data.write_bytes(bytes(range(256)) * 1000)
+    assert _run_ps(shell, f"Get-FileSha256 '{data}'", tmp_path) == hashlib.sha256(data.read_bytes()).hexdigest()
+
+
+def test_search_catalog_pins_sha256():
+    catalog = json.loads((ROOT / "config" / "search_models.json").read_text(encoding="utf-8"))
+    assert len(catalog["llama_sha256"]) == 64
+    assert all(len(m["sha256"]) == 64 and m["size"] > 0 for m in catalog["models"])
