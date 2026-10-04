@@ -721,3 +721,48 @@ llama-server 側は出力の `<think>` を本文から分離する。分離し�
 - 検索の幅（同時読解数）を Ally X 級のメモリ前提で増やすこと。増やすのはラウンドだけ
 - 画像用システムプロンプトを文章生成に流用すること
 - 失敗したコード実行を上限なく繰り返すこと
+
+---
+
+## 13. 実装記録（2026-10-04、ブランチ `feature/chat-deep-search-creative-sandbox`）
+
+### 13.1 本書に加えて入力にした要件
+
+利用者から次の追加要件を受けた。本書と食い違う箇所は下の 13.3 で吸収した。
+
+- コンテナは Debian ベースの `python3-slim` を想定。より良いものがあれば替えてよい。→ 本書どおり `python:3.12-slim`（Debian slim）にした。この端末で取得と実行を確認した。Rust の明示時だけ `rust:1.88-slim`。
+- 速い / 思考の明示的な切り替えに加えて、Grok のように自動で切り替わる「自動」を用意する。
+- 実行環境はこの端末（ROG Xbox Ally X）。この端末で動くことを最優先する。
+- 検索とチャットのタイムアウトは 10 分では短いので 20 分にする。
+- テストを書き、適度な粒度でコミットする。人間には判断を仰がない。
+- 既存の SDXL / Flux（Chroma1-HD）の画像生成が退行していないことを確かめる。
+
+### 13.2 実装した構成
+
+| 本書 | 実装 |
+|---|---|
+| §2 `mode` / `task` | `configurable.mode`（`fast` / `think` / `auto`）、`configurable.task`（`chat` / `search` / `write` / `code` / `image`）。`/search` `/write` `/code` `/chat` の接頭辞も明示扱い。`src/furry_agent/modes.py`、`router.py` |
+| §3 深い検索 | `search_agent.DeepPlan` / `Reflect` / `apply_reflect` / `next_round`。グラフは `plan → search → filter → read → judge → critique ↻ → synthesize`（`judge` は思考モードで「足りない点を判定しています」を先に出すための進捗ノード） |
+| §4 文章 | `write_nodes.py`（`write_brief` → `write_draft` → `write_revise` → `chapter_confirm`）、`writing.py`（スキーマ、置換による推敲、続きの入力） |
+| §5 コード | `code_nodes.py`（`code_plan` → `write_files` → `confirm_run` → `sandbox_exec` → `observe`）、`coding.py`（応答形式の解析）、`sandbox.py`（Docker） |
+| §6 速い / 思考 | `llm_client.chat(thinking=...)`、`ChatReply.reasoning`、UI の `ChatModeSwitch` と `ThinkingView` |
+| §8 共有部分 | `chat_common.py`（状態、ロック、進捗、HITL の形） |
+
+画像グラフ（`graph.py`）、`templates.py`、`comfy_client.py`、`workflows/`、`comfyui_nodes/` は変更していない。共有の `job_lock.py` には `holds(token)` を足しただけ。
+
+### 13.3 本書との差分と吸収方法
+
+- **自動モード（追加要件）**: 本書は `fast` / `think` の 2 値。`auto` を足し、`ingest` がルールで片方に解決して `state.mode` には常に `fast` / `think` を置く（以降のノードは本書どおり 2 値だけを見る）。ルール: 利用者の指定語（「じっくり」「手短に」）→ タスクごとの語（検索なら比較・違い・理由・分析など、文章なら章立て・構成、コードなら実行・テスト、会話なら推論・計算）→ 長さ。決まらない文でルータ（Qwen3-1.7B）を呼んだときは、その `deep` 判定を使う。モデルを 1 つ余計に載せることはしない。無指定は本書どおり `fast`、UI の既定は `auto`。
+- **タイムアウト 20 分（追加要件）**: 本書 §3.1 の `max_wall_clock_s` 480〜600 を 1200 にした（`SEARCH_WALL_CLOCK_S`）。モデル呼び出し 1 回の上限 `CHAT_TIMEOUT_S` も 180 → 1200。共有ロックのリース（15 分）より長い呼び出しになるため、呼び出し中は 60 秒ごとにリースを延長する（`_held`）。
+- **思考トークンの切り替え**: 本書は `chat_template_kwargs.enable_thinking`。この端末の LM Studio で実測すると、LM Studio はこのキーを無視し、`reasoning_effort` を付けたときだけ Qwen3.8 27B が思考し、思考は `message.reasoning` に分かれて返った。両方を送る（llama-server は前者、LM Studio は後者を読む）。代理リーダーの llama-server は `--reasoning off` で起動しているため、思考モードでも代理の出力に思考は無い。JSON を返す段（計画・批評・推敲・アウトライン）は文法制約と両立させるため思考なしで呼ぶ。
+- **`docker cp` による回収（§5.3）**: 本書の argv 例は `--rm` 付きで、`/work` はその実行の `artifacts/code/<run_id>` を bind mount する。このため終了時には出力がすでにホスト側にあり、`--rm` 後のコンテナからは `docker cp` できない。argv 例を優先し、`docker cp` は使わず run ディレクトリから回収する（新しく作られたファイルを一覧にする）。stdout / stderr は `docker run` のパイプから末尾 8KB。
+- **依存取得のネットワーク（§5.3）**: 本書は「明示と承認があればネットワークを有効にする」。プログラム本体にネットワークを渡さず、依存の取得（`pip install --target .deps -r requirements.txt` / `cargo fetch`）だけを別のコンテナでネットワーク付きで動かし、本体は常に `--network none` にした（より狭い）。承認カードでは `network: setup` と表示する。
+- **追加の制約**: `--security-opt no-new-privileges`、`--memory-swap 2g`、`--pull never`（実行中に取得しない。`setup-sandbox.ps1` が取得）、root の uid を拒否、`python -c` とシェル（`sh -c` など）を拒否。いずれも本書の制約を狭める方向。
+- **進捗（§6.3）**: ノードの進捗はノード終了時に UI へ届くため、「次の段の開始」を前のノードの終了時に出す（例: `plan` の終了で「第 1 ラウンドを検索しています」）。批評の前だけは前段が並列の reader なので、進捗だけのノード `judge` を足した。
+- **fast の停止理由**: 本書の `stop_reason` の値に「速いモード」は無い。速いモードは `max_rounds=1` を使い切ったものとして `budget`（結果 0 件なら `no_hits`）を記録し、回答本文には付けない（トレースには出す）。
+- **ルータの `TO_IMAGE_TAB`**: §7 は「ルータの kind は 5 つのいずれか」かつ「画像タブへ誤誘導しない」。ルータが `TO_IMAGE_TAB` を返しても会話として扱う。画像タブへの誘導はキーワード規則（描いて、画像にして など）だけが行う。
+- **章の確認とロック**: interrupt で利用者を待つあいだ共有ロックを持ち続けると画像タブが止まるため、`chapter_confirm` / `confirm_run` の前にロックを放し、再開後のモデル呼び出しで取り直す。
+- **会話履歴**: 実行中の進捗メッセージが履歴の最後の assistant ターンとしてモデルに渡っていた（既存の挙動）。その実行の進捗メッセージは履歴から外した。
+- **27B の context と速さ（この端末の実測）**: LM Studio は 27B を context 4096 で読み込む（`setup-lmstudio.ps1`。これ以上はメモリに載らない）。生成は約 0.9 トークン/秒で、Docker Desktop を止めても、ComfyUI に `/free` を送っても変わらなかった。本書の「思考は回答と別ブロック」「draft は 0.7」はそのままに、1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「20 分で出せる量」（速さは応答ごとに測る）の小さい方に収め、答えの分が残らないときは思考を使わない。思考が予算を使い切って本文が空なら、思考なしで 1 回だけ答え直す。修正前は、思考モードのコード生成が 4096 を超える `max_tokens` を要求して 15 分以上止まらなかった。
+- **Docker Desktop の起動（この端末の実測）**: Docker Desktop の VM は約 1.5GB を使い、27B のロード中の空き（約 0.4GB）を食う。止まっているときは確認カードにその旨を出し、承認後に `docker desktop start` で起動して、実行が終わったら止める（承認前には起動しない）。`setup-sandbox.ps1` も、自分で起動したときは最後に止める。
+- **検索モデルの probe**: ルータの出力（`kind`）と批評の出力（`Reflect`）が変わったため、`bonsai_probe.py` の判定を新しい契約に合わせ、`probe-bonsai.ps1` をやり直した。

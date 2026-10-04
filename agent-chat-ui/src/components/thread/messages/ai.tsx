@@ -16,12 +16,26 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
-import { SearchTraceView, isSearchTrace } from "./search-trace";
+import {
+  ChatModeBadge,
+  SearchTraceView,
+  TaskTraceView,
+  ThinkingView,
+  isChatModeInfo,
+  isSearchTrace,
+  isTaskTrace,
+  isThinking,
+} from "./search-trace";
 
 // local-agent: render base64 image blocks returned by the graph (stock UI renders text only).
 function AIImageBlocks({ content }: { content: Message["content"] }) {
   if (!Array.isArray(content)) return null;
-  type ImageBlock = { type: string; mimeType: string; data: string; metadata?: { name?: string } };
+  type ImageBlock = {
+    type: string;
+    mimeType: string;
+    data: string;
+    metadata?: { name?: string };
+  };
   const images = (content as unknown[]).filter(
     (block): block is ImageBlock =>
       isBase64ContentBlock(block) &&
@@ -35,7 +49,10 @@ function AIImageBlocks({ content }: { content: Message["content"] }) {
         const src = `data:${image.mimeType};base64,${image.data}`;
         const name = image.metadata?.name || `image-${i + 1}.png`;
         return (
-          <figure key={`${name}-${i}`} className="flex flex-col items-start gap-1">
+          <figure
+            key={`${name}-${i}`}
+            className="flex flex-col items-start gap-1"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={src}
@@ -200,6 +217,11 @@ export function AssistantMessage({
           </>
         ) : (
           <>
+            {/* local-agent: the chat tab's thinking, folded and apart from the answer (think mode only) */}
+            {isThinking(message?.additional_kwargs?.thinking) && (
+              <ThinkingView thoughts={message.additional_kwargs.thinking} />
+            )}
+
             {contentString.length > 0 && (
               <div className="py-1">
                 <MarkdownText>{contentString}</MarkdownText>
@@ -211,6 +233,12 @@ export function AssistantMessage({
             {/* local-agent: the chat tab's search trace */}
             {isSearchTrace(message?.additional_kwargs?.search_trace) && (
               <SearchTraceView trace={message.additional_kwargs.search_trace} />
+            )}
+            {isTaskTrace(message?.additional_kwargs?.task_trace) && (
+              <TaskTraceView trace={message.additional_kwargs.task_trace} />
+            )}
+            {isChatModeInfo(message?.additional_kwargs?.chat_mode) && (
+              <ChatModeBadge info={message.additional_kwargs.chat_mode} />
             )}
 
             {!hideToolCalls && (
