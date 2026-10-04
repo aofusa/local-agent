@@ -68,6 +68,10 @@ class JobLock:
                 raise JobLockBusy(holder)
             await asyncio.sleep(self.poll_s)
 
+    def holds(self, token: str | None) -> bool:
+        self._expire()
+        return bool(token) and self._holder is not None and self._holder.token == token
+
     def renew(self, token: str | None) -> None:
         if token and self._holder and self._holder.token == token:
             self._holder.expires = time.monotonic() + self.lease_s
