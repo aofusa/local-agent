@@ -10,6 +10,8 @@
 - モデルの JSON 出力は Pydantic のスキーマで文法制約をかけて検証し、不正なら同じ呼び出しを 1 回だけ再試行する。カードの引用は、実際に取得した本文と照合する。
 - Tor（socks5h のみ、127.0.0.1:9050）の導入と起動 `scripts/setup-tor.ps1` / `start-tor.ps1`、PrismML fork の導入 `scripts/setup-llamacpp.ps1`（Vulkan リリース、`-FromSource` でビルド）、モデルの取得 `scripts/setup-search-models.ps1` を追加した。`setup.ps1`、`start-all.ps1`、`doctor.ps1` も対応している。
 - 画像タブとチャットタブは共有ロックで直列化する。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは生成を始めない。
+- llama-server は `127.0.0.1` だけで待ち受け、起動ごとにランダムな API キーを付ける。取得物（Tor、fork の zip、モデル 8 つ）は SHA-256 を照合する。`setup-search-models.ps1 -Verify` で、取得済みのファイルも再照合できる。
+- モデルごとの役割と採否の理由を README（「検索で使うモデルと採否」）にまとめた。
 - 実装記録と実測: `docs/chat-search-tor-bonsai-work-instruction.md`。
 
 ## v0.3.0 — Chroma1-HD

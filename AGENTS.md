@@ -120,6 +120,18 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
 
+既定の役割（採否の理由と実測は README「検索で使うモデルと採否」と実装記録 §4）:
+
+| 役割 | モデル | 予備 |
+|---|---|---|
+| 計画 | LM Studio の Qwen3.8 27B abliterated（計画のあと unload） | 代理リーダー |
+| ルータ | Qwen3-1.7B-heretic | Qwen3.5-4B-heretic |
+| フィルタ | Bonsai-4B | Qwen3-1.7B-heretic、Qwen3-0.6B-heretic |
+| reader | Ternary-Bonsai-8B（最大 3 体） | Qwen3.5-4B-heretic、Bonsai-8B、Qwen3-1.7B-heretic |
+| 批評・統合 | Ternary-Bonsai-2-27B abliterated（PTQ1_0、代理リーダー） | Ternary-Bonsai-2-27B、Qwen3.5-4B-heretic、Ternary-Bonsai-8B |
+
+Qwen3-0.6B-heretic はルータの検証に落ちたため、フィルタの最後の予備にだけ使う。1-bit の Bonsai-8B は reader の予備にとどめる。
+
 ## 画像の保存と UI への返却
 
 生成のたびに、次の両方を満たす。
@@ -163,7 +175,7 @@ prompts/system_search*.txt        検索の計画 / ルータ / フィルタ / �
 prompts/system_bonsai_worker.txt  検索の reader（open_page と事実カード）
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
-scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1
+scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai
 tests/                            pytest
 agent-chat-ui/                    公式 UI。設定で接続する
 .env                              端末固有の設定。.env.example から作る。git に含めない
