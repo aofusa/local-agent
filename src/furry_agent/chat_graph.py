@@ -588,7 +588,9 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
             slots = [jobs[n::selection.width] for n in range(selection.width)]
             search.update({"reader_id": selection.model.id, "reader_path": str(selection.path),
                            "reader_ngl": selection.ngl, "reader_mem": selection.mem_mb, "width": selection.width})
-            roles["reader"] = f"{selection.model.label} × {selection.width}"
+            label = f"{selection.model.label} × {selection.width}"
+            # The first round's readers name the role; an extra round is appended.
+            roles["reader"] = label if search["round"] == 0 else f"{roles.get('reader') or ''}、追加 × {selection.width}"
         search["slots"] = slots
         search["roles"] = roles
     except asyncio.CancelledError:
