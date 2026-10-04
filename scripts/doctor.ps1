@@ -141,6 +141,20 @@ Check "no orphan llama-server" {
     "none"
 } -Optional
 
+Write-Step "チャットタブのコード実行（Docker サンドボックス、思考モードのみ）"
+Check "Docker Desktop (Linux engine)" {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "未導入（コードは書くが実行しない）" }
+    $os = & docker version --format "{{.Server.Os}}" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "停止中（scripts\setup-sandbox.ps1 が起動します）" }
+    if ("$os".Trim() -ne "linux") { throw "エンジンが $os（Linux コンテナに切り替え）" }
+    "linux"
+} -Optional
+Check "image python:3.12-slim" {
+    & docker image inspect python:3.12-slim *> $null
+    if ($LASTEXITCODE -ne 0) { throw "未取得（scripts\setup-sandbox.ps1）" }
+    "ok"
+} -Optional
+
 Write-Step "LangGraph / agent-chat-ui"
 $lan = Get-LanIPv4
 Check "LangGraph graphs 'agent' (image) and 'chat' on :$LangGraphPort" {
