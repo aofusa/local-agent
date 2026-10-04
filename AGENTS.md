@@ -115,7 +115,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 
 - タブはグラフの選択である。画像タブは graph `agent`（`image` は別名）、チャットタブは graph `chat`。チャットタブは画像を受け取らず、画像タブへ誘導する。
 - 検索の通信を開くのは LangGraph（オーケストレータ）だけである。llama-server にはプロキシを渡さない。モデルが出すツール呼び出しは、オーケストレータが URL の許可判定をしてから実行する。
-- 検索用のモデル（Bonsai 系と Qwen heretic 系）は、PrismML の llama.cpp fork（`BONSAI_LLAMA_SERVER`）だけで動かす。LM Studio にも ComfyUI にも入れない。常駐させず、使い終わったら PID を kill する。
+- 検索用のモデル（Bonsai 系と Qwen heretic 系）は、PrismML の llama.cpp fork（`BONSAI_LLAMA_SERVER`）だけで動かす。LM Studio にも ComfyUI にも入れない。常駐させず、使い終わったら PID を kill する。llama-server には起動ごとにランダムな `--api-key` を付ける。
 - 画像タブとチャットタブは `job_lock` で直列化する。チャットタブがロックを放すのは、llama-server がすべて消え、LM Studio を unload した後である。
 - LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
@@ -250,7 +250,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - タイムアウトはタグ生成と画像生成のそれぞれに `COMFYUI_TIMEOUT_S`（600 秒）。
 - ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1` と Comfy Desktop の起動引数）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
 - モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
-- 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
+- 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。取得物（Tor、fork の zip、モデル）は SHA-256 を照合する（値は `config/search_models.json` と Tor の配布元）。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則

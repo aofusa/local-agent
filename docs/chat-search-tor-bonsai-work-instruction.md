@@ -83,6 +83,8 @@ agent-chat-ui（画像 / チャットのタブ）
 | 変更してよい UI ファイル（現行 5 + 2） | 追加: `mode-tabs.tsx`、`messages/search-trace.tsx`。変更: `ai.tsx`（痕跡の描画）、`thread/index.tsx`（タブの配置、チャットタブで添付ボタンを隠す、プレースホルダ） | タブをシェルに置くには `index.tsx` の変更が避けられない |
 | unload は `eject_only.api.json` も可 | LM Studio の REST `/api/v1/models/unload` だけを使う（導入済みの版にある。ComfyUI のノードと同じ API） | §9 の未決 3 を確認した |
 | llama.cpp | fork のリリース版（Vulkan、`prism-b10754-2459f68`）を既定にした。`-FromSource` で `prism` ブランチを Vulkan ビルドもできる | §9 の未決 1。ROCm/HIP 版は使わない |
+| — | llama-server は起動ごとにランダムな `--api-key` を付ける（`/health` 以外はキーが要る） | ループバックでも CORS が全許可のため、検索中に同じ端末のブラウザのページから叩かれないようにする |
+| — | 取得物の SHA-256 を照合する。Tor は配布元の `sha256sums-signed-build.txt`、fork の zip とモデル 8 つは `config/search_models.json` に固定した値（GitHub / Hugging Face の公開値） | 公開リポジトリから第三者のバイナリと重みを取得するため |
 
 ## 4. 実測（2026-10-04、この端末）
 
@@ -116,7 +118,7 @@ PTQ1_0 / PQ2_0 / Q1_0 は、いずれも fork の Vulkan ビルドで 890M 上�
 | --- | --- | --- |
 | プロセス内 1 回目 | 計画 27B → unload → reader ×1 → 代理 27B（通常版。abliterated は未取得）→ 追加検索 1 回 → 統合 | 523 s。reader が 150 秒で打ち切られた（§3 の focus_text の理由） |
 | プロセス内 2 回目 | 計画 27B（150 s。うちロード約 115 s）→ reader ×2 並列 → 代理 abliterated → 追加検索 → 統合 | 492 s。出典 8 件。終了後に llama-server の PID 0、ロック解放 |
-| UI（Edge、`http://192.168.11.41:3000`） | 同上。reader は 1 本 60 s 前後 | 372 s。痕跡（検索語、ヒット、開いたページ、役割別モデル）と出典付きの回答を表示 |
+| UI（Edge、`http://<LAN IP>:3000`） | 同上。reader は 1 本 60 s 前後 | 372 s。痕跡（検索語、ヒット、開いたページ、役割別モデル）と出典付きの回答を表示 |
 
 UI からの 1 回目は、`langgraph dev` の blocking-call 検出（同期の `os.mkdir` / `os.stat`）で filter が失敗した。同期 I/O をスレッドへ移し、blockbuster 付きのテストを足して直した。
 
@@ -145,4 +147,4 @@ UI からの 1 回目は、`langgraph dev` の blocking-call 検出（同期の 
 
 - 検索 1 回に 6〜9 分かかる。内訳の大きいものは、LM Studio の 27B のロード（約 2 分）、reader（1 本 1 分前後）、代理 27B の生成（8〜9 tok/s）。`SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省ける。
 - DuckDuckGo は Tor の出口によって空の結果を返すことがある。Lite が空なら HTML 版を試すだけで、指紋偽装などの回避はしない。
-- 他ホストの実機ブラウザからの確認はしていない。この端末から LAN アドレス（`192.168.11.41`）で、headless の Edge を使って確認した。
+- 他ホストの実機ブラウザからの確認はしていない。この端末から LAN アドレス（`http://<LAN IP>:3000`）で、headless の Edge を使って確認した。
