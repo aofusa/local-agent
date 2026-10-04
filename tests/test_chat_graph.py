@@ -217,12 +217,19 @@ class FakeComfy:
 class FakeDocker:
     """sandbox's runner: records every docker CLI call."""
 
-    def __init__(self, world, *, up=True, image=True, exits=None, timeout=False):
+    def __init__(self, world, *, up=True, image=True, exits=None, timeout=False, desktop=False):
         self.world, self.up, self.image, self.exits, self.timeout = world, up, image, list(exits or [0]), timeout
+        self.desktop = desktop
 
     def __call__(self, argv, timeout_s):
         self.world.docker.append(list(argv))
         verb = argv[1]
+        if verb == "desktop":
+            if argv[2] == "start":
+                self.up = True
+            elif argv[2] == "stop":
+                self.up = False
+            return subprocess.CompletedProcess(argv, 0 if self.desktop else 1, b"", b"")
         if verb == "version":
             return subprocess.CompletedProcess(argv, 0 if self.up else 1, b"linux" if self.up else b"", b"")
         if verb == "image":
@@ -760,6 +767,20 @@ async def test_docker_missing_writes_files_and_says_why(models_dir):
     assert _runs(world) == [] and "Docker Desktop が起動していません" in message.content
     assert (settings.code_dir / state["code"]["run_id"] / "main.py").is_file()
     assert _interrupt(state) is None
+
+
+async def test_stopped_docker_desktop_is_started_only_for_the_approved_run(models_dir):
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="c7",
+                     docker=FakeDocker(world, up=False, desktop=True))
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    assert "Docker Desktop: 停止中" in _interrupt(state)["action_requests"][0]["description"]
+    assert not any(a[1:3] == ["desktop", "start"] for a in world.docker)  # nothing started before approval
+    state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+    verbs = [" ".join(a[1:3]) for a in world.docker if a[1] in ("desktop", "run")]
+    assert verbs[-3:] == ["desktop start", "run --rm", "desktop stop"]
+    assert state["code"]["last_exit"] == 0
 
 
 async def test_dependencies_get_network_only_for_the_setup_step(models_dir):

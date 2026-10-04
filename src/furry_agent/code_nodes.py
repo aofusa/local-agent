@@ -151,7 +151,11 @@ async def write_files(state: ChatState, config: RunnableConfig) -> dict:
         text = _answer(code, "コードを書きました。速いモードでは実行しません（「思考」で送ると、承認のあと Docker コンテナで実行します）。")
         return {"code": code, "messages": [_final(state, text, task=_task(code))]}
     ok, reason = await sandbox.docker_status(settings.docker_exe, _runner(config))
-    if ok and not await sandbox.image_present(code["image"], settings.docker_exe, _runner(config)):
+    code["start_desktop"] = False
+    if not ok and await sandbox.desktop_cli(settings.docker_exe, _runner(config)):
+        # Installed but stopped: started after the approval, only for the run (sandbox_exec).
+        ok, code["start_desktop"] = True, True
+    elif ok and not await sandbox.image_present(code["image"], settings.docker_exe, _runner(config)):
         ok, reason = False, (f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1"
                              + (" -Rust" if code["profile"] == "rust" else "") + " で取得してください）")
     if not ok:
@@ -186,7 +190,9 @@ def _card(code: dict) -> tuple[dict, str]:
         + f"- ネットワーク: {'依存の取得のときだけ使う' if args['network'] == 'setup' else 'なし'}\n"
         f"- 上限: {sandbox.TIMEOUT_S} 秒、メモリ {sandbox.MEMORY}、CPU {sandbox.CPUS}、プロセス {sandbox.PIDS_LIMIT}\n"
         f"- マウント: {code['artifact_dir']} → /work のみ（読み取り専用ルート、非 root、権限なし）\n"
-        f"- ファイル: {args['files']}\n"
+        + ("- Docker Desktop: 停止中。承認後に起動し（30 秒〜数分）、実行が終わったら止めます\n"
+           if code.get("start_desktop") else "")
+        + f"- ファイル: {args['files']}\n"
         "変えるときは command / setup / network（none か setup）/ file:<パス> を書き換えて送信（編集）、"
         "やめるときは却下してください。")
     return args, description
@@ -270,24 +276,41 @@ async def sandbox_exec(state: ChatState, config: RunnableConfig) -> dict:
     runs = list(code.get("runs") or [])
     round_no = code.get("round", 0) + 1
     async with sandbox_lock:
-        if code.get("setup") and code.get("network"):
-            setup = await sandbox.run(approved=True, docker=settings.docker_exe, run_dir=run_dir,
-                                      root=settings.code_dir, argv=code["setup"], profile=profile,
-                                      user=settings.sandbox_user, network=True, step="setup",
-                                      name=sandbox.container_name(code["run_id"], round_no, "setup"), runner=runner)
-            runs.append({"round": round_no, "step": "setup", "exit_code": setup.exit_code,
-                         "timed_out": setup.timed_out, "seconds": setup.seconds})
-        else:
+        started = False
+        if code.get("start_desktop") and not (await sandbox.docker_status(settings.docker_exe, runner))[0]:
+            # Docker Desktop was stopped (its VM holds ~1.5 GB the 27B and ComfyUI need on this machine): start it
+            # for this approved run only and stop it again afterwards.
+            started = True
+            ok, reason = await sandbox.start_desktop(settings.docker_exe, runner)
+            if ok and not await sandbox.image_present(code["image"], settings.docker_exe, runner):
+                ok, reason = False, f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1 で取得してください）"
+            if not ok:
+                await sandbox.stop_desktop(settings.docker_exe, runner)
+                code.update({"skipped": reason, "approved": False})
+                return {"code": code, "messages": [_final(state, _answer(code, f"実行できませんでした: {reason}"),
+                                                          task=_task(code))]}
+        try:
             setup = None
-        if setup is not None and not setup.ok:
-            result = setup
-        else:
-            result = await sandbox.run(approved=True, docker=settings.docker_exe, run_dir=run_dir,
-                                       root=settings.code_dir, argv=code["command"], profile=profile,
-                                       user=settings.sandbox_user, network=False, step="run",
-                                       name=sandbox.container_name(code["run_id"], round_no), runner=runner)
-            runs.append({"round": round_no, "step": "run", "exit_code": result.exit_code,
-                         "timed_out": result.timed_out, "seconds": result.seconds})
+            if code.get("setup") and code.get("network"):
+                setup = await sandbox.run(approved=True, docker=settings.docker_exe, run_dir=run_dir,
+                                          root=settings.code_dir, argv=code["setup"], profile=profile,
+                                          user=settings.sandbox_user, network=True, step="setup",
+                                          name=sandbox.container_name(code["run_id"], round_no, "setup"),
+                                          runner=runner)
+                runs.append({"round": round_no, "step": "setup", "exit_code": setup.exit_code,
+                             "timed_out": setup.timed_out, "seconds": setup.seconds})
+            if setup is not None and not setup.ok:
+                result = setup
+            else:
+                result = await sandbox.run(approved=True, docker=settings.docker_exe, run_dir=run_dir,
+                                           root=settings.code_dir, argv=code["command"], profile=profile,
+                                           user=settings.sandbox_user, network=False, step="run",
+                                           name=sandbox.container_name(code["run_id"], round_no), runner=runner)
+                runs.append({"round": round_no, "step": "run", "exit_code": result.exit_code,
+                             "timed_out": result.timed_out, "seconds": result.seconds})
+        finally:
+            if started:
+                await asyncio.shield(sandbox.stop_desktop(settings.docker_exe, runner))
     outputs = await asyncio.to_thread(sandbox.list_outputs, run_dir, before)
     # One approval is one run: a fix needs a new approval.
     code.update({"round": round_no, "last_exit": result.exit_code, "stdout_tail": result.stdout_tail,

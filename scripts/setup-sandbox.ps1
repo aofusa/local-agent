@@ -9,7 +9,9 @@
   --pull never, so the images are fetched here, not during a chat run.
 
   This script checks that Docker Desktop is installed and its Linux engine is running (it starts Docker Desktop
-  when it is installed but stopped), then pulls python:3.12-slim and, with -Rust, rust:1.88-slim.
+  when it is installed but stopped), then pulls python:3.12-slim and, with -Rust, rust:1.88-slim. Docker Desktop
+  started here is stopped again at the end (-KeepRunning keeps it): its VM takes about 1.5 GB, and the chat tab
+  starts it by itself for an approved run and stops it afterwards.
   Without Docker the chat tab still writes the files and says why it did not run them.
 
 .EXAMPLE
@@ -18,6 +20,7 @@
 #>
 param(
     [switch]$Rust,
+    [switch]$KeepRunning,
     [int]$WaitSeconds = 240
 )
 $ErrorActionPreference = "Stop"
@@ -37,7 +40,9 @@ function Test-DockerEngine {
 }
 
 $os = Test-DockerEngine
+$startedHere = $false
 if (-not $os) {
+    $startedHere = $true
     $desktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
     if (-not (Test-Path $desktop)) { throw "Docker のエンジンが動いていません。Docker Desktop を起動してください" }
     Write-Warn2 "Docker Desktop を起動します（最大 $WaitSeconds 秒待ちます）"
@@ -68,3 +73,11 @@ $probe = & docker run --rm --pull never --network none --read-only --memory 256m
     python -c "import os; print('uid', os.getuid())" 2>&1
 if ($LASTEXITCODE -ne 0) { throw "コンテナを起動できません: $probe" }
 Write-Ok "$probe"
+
+# Docker Desktop's VM holds about 1.5 GB that the 27B and ComfyUI need on this machine. The chat tab starts it
+# for an approved run and stops it afterwards, so it is stopped again here unless it was already running.
+if ($startedHere -and -not $KeepRunning) {
+    Write-Step "Docker Desktop を止めます（チャットタブが実行のときだけ起動します。-KeepRunning で起動したまま）"
+    & docker desktop stop --timeout 120 | Out-Null
+    Write-Ok "stopped"
+}

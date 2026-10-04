@@ -45,6 +45,7 @@ WORKDIR = "/work"
 MAX_FILES = 20
 MAX_FILE_BYTES = 200_000
 MAX_RUNS = 2  # first run + one fix (§5.1)
+DESKTOP_START_S = 180
 
 # Tokens that only mean something to a shell. An argv element equal to one of them, or containing a command
 # substitution, is refused: the container never sees a shell string.
@@ -261,6 +262,42 @@ async def docker_status(docker: str = "docker", runner=None) -> tuple[bool, str]
     if os_name and os_name != "linux":
         return False, f"Docker のエンジンが Linux ではありません（{os_name}）。Linux コンテナに切り替えてください"
     return True, "ok"
+
+
+async def desktop_cli(docker: str = "docker", runner=None) -> bool:
+    """Docker Desktop's CLI plugin (``docker desktop start/stop``) is installed."""
+    runner = runner or _exec
+    try:
+        out = await asyncio.to_thread(runner, [docker, "desktop", "version"], 20)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
+async def start_desktop(docker: str = "docker", runner=None, timeout_s: int = DESKTOP_START_S) -> tuple[bool, str]:
+    """Start Docker Desktop for one approved run (its VM holds ~1.5 GB this machine needs for the 27B and
+    ComfyUI the rest of the time) and wait for the Linux engine."""
+    runner = runner or _exec
+    log.info("starting Docker Desktop for a sandbox run")
+    try:
+        await asyncio.to_thread(runner, [docker, "desktop", "start", "--timeout", str(timeout_s)], timeout_s + 30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"Docker Desktop を起動できません（{exc}）"
+    deadline = time.monotonic() + timeout_s
+    while True:
+        ok, reason = await docker_status(docker, runner)
+        if ok or time.monotonic() > deadline:
+            return ok, reason
+        await asyncio.sleep(3)
+
+
+async def stop_desktop(docker: str = "docker", runner=None) -> None:
+    runner = runner or _exec
+    try:
+        await asyncio.to_thread(runner, [docker, "desktop", "stop", "--timeout", "120"], 150)
+        log.info("stopped Docker Desktop after the sandbox run")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("docker desktop stop failed: %s", exc)
 
 
 async def image_present(image: str, docker: str = "docker", runner=None) -> bool:
