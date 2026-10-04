@@ -182,3 +182,16 @@ async def test_lm_studio_budget_follows_the_measured_speed():
     record_speed(lm, ChatReply("x", raw={"usage": {"completion_tokens": 900}}, seconds=100.0))
     assert time_cap(settings, lm) == int(9.0 * 1200 * 0.9)
     chat_common._speeds.clear()
+
+
+async def test_model_unloaded_race_is_retried_once():
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(400, json={"error": "Model is unloaded."})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
+    assert (await lm.chat([{"role": "user", "content": "x"}])).content == "ok" and len(calls) == 2

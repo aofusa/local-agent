@@ -148,13 +148,20 @@ class OpenAICompatClient:
         elif json_mode:
             body["response_format"] = {"type": "json_object"}
         started = time.monotonic()
-        try:
-            async with self._http(timeout_s) as http:
-                response = await http.post(f"{self.base_url}/chat/completions", json=body)
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"時間切れです（{timeout_s or self.timeout_s:.0f} 秒）") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
+        for attempt in (1, 2):
+            try:
+                async with self._http(timeout_s) as http:
+                    response = await http.post(f"{self.base_url}/chat/completions", json=body)
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"時間切れです（{timeout_s or self.timeout_s:.0f} 秒）") from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
+            # LM Studio's idle TTL can unload the model just as a request arrives ("Model is unloaded."):
+            # the same request once more makes it load again (JIT).
+            if attempt == 1 and response.status_code == 400 and "Model is unloaded" in response.text:
+                log.info("LM Studio unloaded the model while the request arrived; sending it again")
+                continue
+            break
         if response.status_code >= 400:
             raise LLMError(f"HTTP {response.status_code}: {response.text[:300]}")
         data = response.json()
