@@ -174,3 +174,10 @@ def test_format_answer_lists_open_questions_and_stop_reason():
     assert "B?（一部）" in text and "A?" not in text.split("**未解決の下位問い**")[1].split("**")[0]
     assert "数が違う [1] [2]" in text and "停止理由: 予算の上限（4 ラウンド、12 ページ）" in text
     assert text.endswith("- [2] [B](https://b)")
+
+
+def test_partial_without_card_ids_stays_partial():
+    search = {"subquestions": [{"id": "q1", "question": "A", "status": "open"}], "intents": []}
+    reflect = sa.Reflect.model_validate({"subquestions": [{"id": "q1", "status": "partial"}]})
+    out = sa.apply_reflect(search, reflect, [], 1, 3)
+    assert out["subquestions"][0]["status"] == "partial" and out["open"] == ["q1"]

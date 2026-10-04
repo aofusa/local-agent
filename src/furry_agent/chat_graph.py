@@ -731,7 +731,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
                 + "\n".join(f"- {i['tool']}: `{i['q']}`（{i.get('subquestion_id')}）" for i in added))
     else:
         search.update({"pending": [], "stop_reason": reason})
-        text = f"{sa.STOP_LABELS.get(reason, reason)}ため検索を終え、{roles.get('leader', '')} が回答をまとめています…"
+        text = f"検索を終えました（停止理由: {sa.STOP_LABELS.get(reason, reason)}）。{roles.get('leader', '')} が回答をまとめています…"
     log.info("critique round=%d new_cards=%d pages=%d open=%d -> %s", search["round"], len(new_cards),
              search["pages_read"], len(search["open"]), "search" if go else reason)
     return {"search": search, "messages": [_progress(state, text, _trace(state, search))]}

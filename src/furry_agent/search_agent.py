@@ -453,8 +453,9 @@ def apply_reflect(search: dict, reflect: Reflect | None, cards: list[dict], next
             if sub["id"] in update:
                 u = update[sub["id"]]
                 evidence = [c for c in u.evidence_card_ids if c in known_cards]
-                # "answered" needs evidence: a sub-question without a card stays open (no guessing, §3.2).
-                status = u.status if (evidence or u.status == "open") else "open"
+                # "answered" needs evidence: an answered sub-question without a known card stays open (no guessing,
+                # §3.2). "partial" may come without ids (the critic saw part of an answer).
+                status = "open" if u.status == "answered" and not evidence else u.status
                 sub.update({"status": status, "evidence_card_ids": evidence, "note": u.note[:200]})
     contradictions = []
     for con in (reflect.contradictions if reflect else [])[:5]:
