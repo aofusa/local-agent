@@ -184,6 +184,15 @@ cd local-agent
 
 実行時にモデルを自動ダウンロードするノードはありません（すべてこのスクリプトで事前に取得します）。
 
+**チャットタブの検索**（`setup.ps1 -SkipSearch` で省略可。画像タブはこれが無くても動きます）
+
+| スクリプト | 内容 | 置き場（git 管理外） |
+|---|---|---|
+| `setup-tor.ps1` | Tor Expert Bundle の最新安定版を取得し、配布元の `sha256sums-signed-build.txt` で SHA-256 を照合する。`TOR_EXE` を `.env` へ保存する。設定は `tools\tor\torrc`（SOCKS は `127.0.0.1:9050` のみ） | `tools\tor\bin`、データは `tools\tor\data` |
+| `setup-llamacpp.ps1` | PrismML llama.cpp fork の Windows Vulkan 版（`config\search_models.json` に固定した版）を取得し、SHA-256 を照合する。`--list-devices` で Vulkan デバイスを確認し、`BONSAI_LLAMA_SERVER` を保存する。`-FromSource` なら `prism` ブランチを Vulkan でビルドする（Visual Studio の C++、CMake、Ninja、Vulkan SDK が必要） | `tools\llama-prism` |
+| `setup-search-models.ps1` | 検索モデル 8 つ（約 20GB）を Hugging Face から取得し、カタログの SHA-256 と照合する（中断しても再開できる）。`BONSAI_MODELS_DIR` を保存する | `tools\models` |
+| `probe-bonsai.ps1` | 各モデルを 1 回ずつ起動し、タスクごとに短いテストで検証する。起動時間・メモリ・生成速度・合否を記録する | `tools\bonsai\rank.json` |
+
 ### 手動で設定する場合
 
 スクリプトを使わない場合は、GUI で次を設定すれば同じ状態になります。
@@ -203,7 +212,7 @@ LM Studio を起動したうえで:
 
 ```powershell
 .\scripts\start-all.ps1      # Tor（裏で）/ ComfyUI / LangGraph / agent-chat-ui を起動（起動済みのものは飛ばす）
-.\scripts\doctor.ps1         # 設定と待受を確認（NG があれば終了コード 1）
+.\scripts\doctor.ps1         # 設定と待受を確認（NG があれば終了コード 1。チャットタブの検索の項目は WARN 扱い）
 ```
 
 表示される `http://<LAN IP>:3000` を他ホストのブラウザで開きます。
@@ -380,6 +389,29 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 - 1 回の検索に 6〜9 分かかります（27B のロード約 2 分、reader 1 体 1 分前後、代理 27B の生成 8〜9 tok/s）。`.env` の `SEARCH_PLANNER=local` にすると、計画も代理 27B が行い、LM Studio のロードを省けます。
 - 画像タブとチャットタブは同時に動きません。片方の実行中にもう片方へ送ると、実行中のタブ名を示して断ります。検索の後始末（llama-server の停止と LM Studio の unload）が済むまで、画像タブは待ちます。
 - 結果が 0 件のとき（Tor の出口が拒否されたときなど）は、統合モデルを起動せずにその旨を返します。
+- `doctor.ps1` は、検索について次を確認します。いずれも WARN 扱いで、無くても画像タブは使えます。
+  - Tor がループバックだけで待ち受けていて、`socks5h://` を使っていること
+  - fork と Vulkan デバイス
+  - モデルファイルの数
+  - 検証結果の有無
+  - 停止し損ねた llama-server が残っていないこと
+
+#### 検索で使うモデルと採否
+
+| モデル | 採否 | 役割 | 理由（この端末の実測） |
+|---|---|---|---|
+| Qwen3.8 27B abliterated（LM Studio、IQ3_M） | 計画だけ採用 | 検索意図に分ける | 指定どおり最初の処理だけ担当。ロード中は空きが 1GB を切り reader が載らないため、計画のあと unload する（ロード約 2 分） |
+| Ternary-Bonsai-2-27B abliterated（Override-6、PTQ1_0） | 採用 | 批評・統合（代理リーダー） | 6.8GB で 27B 系の品質。計画・批評・統合の検証に合格（起動 7 s、8.9 tok/s）。拒否が少なく、ソースの批評で止まりにくい |
+| Ternary-Bonsai-8B（PQ2_0） | 採用 | reader（最大 3 体） | ツール呼び出しと事実カードの検証に合格。2.9GB で、代理 27B を除いた空きに 3 体入る（29 tok/s） |
+| Bonsai-4B（1-bit） | 採用 | フィルタ | 関係あり / なしの判定に合格。1.4GB、46 tok/s と最も軽い。抽出や回答には使わない |
+| Qwen3-1.7B-heretic（Q4_K_M） | 採用 | ルータ（検索の要否、検索語の書き換え） | 要る / 要らないの両方を正しく判定。起動 1.8 s、59 tok/s。フィルタと reader の予備も兼ねる |
+| Qwen3.5-4B-heretic（Q4_K_M） | 予備 | reader・ルータ・批評・統合の 2〜3 番手 | 全タスクに合格したが、3.6GB と重く 19.8 tok/s と遅い |
+| Ternary-Bonsai-2-27B（通常版、PTQ1_0） | 予備 | 批評・統合の 2 番手 | 全タスクに合格（6.6GB、8.0 tok/s）。abliterated 版の方が拒否されにくいため 2 番手。abliterated 版の起動に失敗すると自動でこちらを使う |
+| Bonsai-8B（1-bit） | 予備（原則不採用） | reader の 3 番手 | reader の検証に合格し、速度は Ternary 8B と同じで 1.9GB と軽い。「同じ帯域なら Ternary 8B が上」という方針で順位を下げた（品質差はこの端末では比べていない） |
+| Qwen3-0.6B-heretic（Q8_0） | 不採用（フィルタの最後の予備だけ） | — | ルータの判定に不合格（分類の精度が足りない）。フィルタは合格したので、Bonsai-4B と 1.7B が使えないときだけ使う |
+
+検証（`scripts\probe-bonsai.ps1`）は、タスクごとに固定の短いテスト 1 本で合否を見ただけです。長い作業での安定性や、回答の質の細かい差は測っていません。
+順位は `config\search_models.json` を書き換えるか、probe をやり直すと変わります。reader だけは `.env` の `BONSAI_MODEL` で固定できます。
 
 ## 5. 設定（`.env`）
 

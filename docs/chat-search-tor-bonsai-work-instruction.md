@@ -131,6 +131,23 @@ UI からの 1 回目は、`langgraph dev` の blocking-call 検出（同期の 
 | Chroma1-HD t2i（`model_family=flux`、512×512、12 steps） | `t2i_basic`（flux）。英語の説明文。保存あり |
 | pytest | 既存 284 件を含め、全件合格 |
 
+### 4.5 モデルの採否
+
+| モデル | 採否 | 役割 | 理由（この端末の実測） |
+|---|---|---|---|
+| Qwen3.8 27B abliterated（LM Studio、IQ3_M） | 計画だけ採用 | 検索意図に分ける | 指定どおり最初の処理だけ担当。ロード中は空きが 1GB を切り reader が載らないため、計画のあと unload する（ロード約 2 分） |
+| Ternary-Bonsai-2-27B abliterated（Override-6、PTQ1_0） | 採用 | 批評・統合（代理リーダー） | 6.8GB で 27B 系の品質。計画・批評・統合の検証に合格（起動 7 s、8.9 tok/s）。拒否が少なく、ソースの批評で止まりにくい |
+| Ternary-Bonsai-8B（PQ2_0） | 採用 | reader（最大 3 体） | ツール呼び出しと事実カードの検証に合格。2.9GB で、代理 27B を除いた空きに 3 体入る（29 tok/s） |
+| Bonsai-4B（1-bit） | 採用 | フィルタ | 関係あり / なしの判定に合格。1.4GB、46 tok/s と最も軽い。抽出や回答には使わない |
+| Qwen3-1.7B-heretic（Q4_K_M） | 採用 | ルータ（検索の要否、検索語の書き換え） | 要る / 要らないの両方を正しく判定。起動 1.8 s、59 tok/s。フィルタと reader の予備も兼ねる |
+| Qwen3.5-4B-heretic（Q4_K_M） | 予備 | reader・ルータ・批評・統合の 2〜3 番手 | 全タスクに合格したが、3.6GB と重く 19.8 tok/s と遅い |
+| Ternary-Bonsai-2-27B（通常版、PTQ1_0） | 予備 | 批評・統合の 2 番手 | 全タスクに合格（6.6GB、8.0 tok/s）。abliterated 版の方が拒否されにくいため 2 番手。abliterated 版の起動に失敗すると自動でこちらを使う |
+| Bonsai-8B（1-bit） | 予備（原則不採用） | reader の 3 番手 | reader の検証に合格し、速度は Ternary 8B と同じで 1.9GB と軽い。「同じ帯域なら Ternary 8B が上」という方針で順位を下げた（品質差はこの端末では比べていない） |
+| Qwen3-0.6B-heretic（Q8_0） | 不採用（フィルタの最後の予備だけ） | — | ルータの判定に不合格（分類の精度が足りない）。フィルタは合格したので、Bonsai-4B と 1.7B が使えないときだけ使う |
+
+検証（`scripts\probe-bonsai.ps1`）は、タスクごとに固定の短いテスト 1 本で合否を見ただけです。長い作業での安定性や、回答の質の細かい差は測っていません。
+順位は `config\search_models.json` を書き換えるか、probe をやり直すと変わります。reader だけは `.env` の `BONSAI_MODEL` で固定できます。
+
 ## 5. 完了条件（設計書 §7）
 
 | 条件 | 確認 |
