@@ -20,6 +20,7 @@ import base64
 import json
 import logging
 import logging.handlers
+import os
 import queue
 import re
 import time
@@ -37,6 +38,7 @@ from PIL import Image
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import Settings
 from furry_agent.families import FLUX, LABELS, FamilyError, check_roles, looks_like_tag_list
+from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.media import IMAGE_ROLES, MAX_IMAGES, Media, MediaError, Request, parse_request
 from furry_agent.planner import (
     GenerationPlan,
@@ -66,7 +68,6 @@ log = logging.getLogger("furry_agent")
 DEFAULT_TEXT_FOR_IMAGES = "参照画像の内容をもとに、同じ主題で描いてください。"
 CONFIRM_ACTION = "generate_image"
 _REFETCH = re.compile(r"再取得\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
-_submit_lock: asyncio.Lock | None = None
 # sha256 -> ComfyUI input filename, so the same image is uploaded once (WI §4.6 upload_images).
 _uploaded: dict[str, str] = {}
 
@@ -446,7 +447,6 @@ async def _check_models(client: ComfyClient, settings: Settings, family: str, te
 
 
 async def submit(state: State, config: RunnableConfig) -> dict:
-    global _submit_lock
     settings = _settings(config)
     client = _client(config, settings)
     plan_ = state["plan"]
@@ -454,9 +454,10 @@ async def submit(state: State, config: RunnableConfig) -> dict:
     stage = "キュー待ち"
     try:
         loras: list[LoraSpec] = parse_loras(settings.loras_for(family))
-        if _submit_lock is None:
-            _submit_lock = asyncio.Lock()
-        async with _submit_lock:
+        # Shared with the chat tab (job_lock.py): another image run is waited for as before; a chat run
+        # (LM Studio 27B or Bonsai workers in memory) is refused after JOB_LOCK_TIMEOUT_S.
+        token = await job_lock.acquire("image", float(os.environ.get("JOB_LOCK_TIMEOUT_S") or 30), None)
+        try:
             # One generation at a time: never queue while ComfyUI is still busy.
             await client.wait_queue_idle(settings.timeout_s)
             # Drop ComfyUI's cached models so the 27B has the shared memory.
@@ -487,6 +488,10 @@ async def submit(state: State, config: RunnableConfig) -> dict:
             stage = "キュー投入"
             client_id = uuid.uuid4().hex
             prompt_id = await client.submit(prompt, client_id)
+        finally:
+            job_lock.release(token)
+    except JobLockBusy as exc:
+        return _fail(state, exc, stage)
     except (ComfyError, MediaError, TemplateError, OSError, ValueError) as exc:
         return _fail(state, exc, stage)
     except Exception as exc:  # httpx / websockets errors
