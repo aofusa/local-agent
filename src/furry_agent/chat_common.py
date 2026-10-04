@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import MessagesState
 
-from furry_agent import bonsai_worker
+from furry_agent import bonsai_worker, claim_verify as cv
 from furry_agent.bonsai_worker import Ledger, LlamaServer
 from furry_agent.bonsai_select import Selection
 from furry_agent.comfy_client import ComfyClient
@@ -62,6 +62,18 @@ class ChatState(MessagesState):
     artifact: dict[str, Any]
     # The code branch of this run (§5.2)
     code: dict[str, Any]
+    # Claim verification (docs/claim-verification-design.md §5.4): the cards every claim is checked against
+    # (search cards or local-document cards, numbered once), the claims and their verdicts, the audit of the
+    # final text, and why verification failed ("" when it did not).
+    evidence: Annotated[list[dict], _append]
+    claims: list[dict]
+    claim_audit: list[dict]
+    verify_error: str | None
+    # Local documents (/docs; docs/local-doc-mapreduce-design.md §5.6)
+    doc_root_hit: str
+    doc_files: list[dict]
+    doc_chunks: list[dict]
+    doc_waves: int
 
 
 class StageError(RuntimeError):
@@ -151,11 +163,49 @@ def _kwargs(state: ChatState, trace: dict | None = None, *, thinking: bool = Fal
         out["chat_mode"] = state["mode_info"]
     if task:
         out["task_trace"] = task
+    claims = claim_trace(state)
+    if claims:
+        out["claim_trace"] = claims
+    docs = doc_trace(state)
+    if docs:
+        out["doc_trace"] = docs
     if thinking and _is_think(state):
         thoughts = [t for t in state.get("thinking") or [] if t.get("text")]
         if thoughts:
             out["thinking"] = thoughts
     return out
+
+
+def claim_trace(state) -> dict | None:
+    """The progress table of claim verification (UI: claim_trace). None when verification did not run."""
+    claims = state.get("claims") or []
+    audit = state.get("claim_audit") or []
+    error = state.get("verify_error")
+    if not claims and not audit and not error:
+        return None
+    evidence = [c for c in state.get("evidence") or [] if c != RESET and c.get("evidence_id")]
+    dropped = [a for a in audit if a.get("status") in cv.DROP]
+    return {"claims": cv.table(claims, evidence), "error": error or "",
+            "audit": {"checked": len(audit), "dropped": [{"text": a["text"][:120], "status": a["status"],
+                                                          "note": a.get("note", "")} for a in dropped]},
+            "evidence": [{"n": c["n"], "locator": c["locator"], "source_type": c.get("source_type", "web")}
+                         for c in evidence][:30]}
+
+
+def doc_trace(state) -> dict | None:
+    """What /docs read (UI: doc_trace): the root, the files, the denied names, the chunks read per wave."""
+    if not state.get("doc_root_hit"):
+        return None
+    chunks = state.get("doc_chunks") or []
+    return {"root": state["doc_root_hit"], "files": [{"rel": f["rel"], "size": f.get("size", 0),
+                                                       "truncated": bool(f.get("truncated"))}
+                                                      for f in state.get("doc_files") or [] if not f.get("reason")][:40],
+            "denied": [{"rel": f["rel"], "reason": f["reason"]} for f in state.get("doc_files") or []
+                       if f.get("reason")][:40],
+            "waves": state.get("doc_waves", 0),
+            "read": [{"id": c["id"], "locator": c["locator"], "wave": c.get("wave", 0)} for c in chunks if c.get("read")],
+            "unread": sum(1 for c in chunks if not c.get("read")),
+            "total": len(chunks)}
 
 
 def _progress(state: ChatState, text: str, trace: dict | None = None, *, task: dict | None = None) -> AIMessage:

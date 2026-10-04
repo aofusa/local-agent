@@ -197,5 +197,5 @@ def test_plain_text_and_json_are_cut_by_characters():
 
 def test_outline_has_ids_and_headings_without_body():
     chunks = doc_chunk.chunk_file("# A\n本文の秘密\n# B\nx", "a.md", 1)
-    text = doc_chunk.outline(chunks, [{"file_no": 1, "rel": "a.md", "size": 30}])
+    text = doc_chunk.outline([c.meta() for c in chunks], [{"file_no": 1, "rel": "a.md", "size": 30}])
     assert "f1-c1 A" in text and "f1-c2 B" in text and "本文の秘密" not in text

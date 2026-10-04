@@ -101,17 +101,19 @@ def chunk_file(text: str, rel: str, file_no: int, size: int = 3000, overlap: int
     return chunks
 
 
-def outline(chunks: list[Chunk], files: list[dict], limit: int = 80) -> str:
-    """The planner's view: files (path, bytes) and their chunk ids with heading and size. No body text."""
+def outline(chunks: list[dict], files: list[dict], limit: int = 80) -> str:
+    """The planner's view: files (path, bytes) and their chunk ids with heading and size (``Chunk.meta()``
+    dicts). No body text."""
     lines = []
     shown = 0
     for f in files:
-        mine = [c for c in chunks if c.file_no == f["file_no"]]
+        mine = [c for c in chunks if c["file_no"] == f["file_no"]]
         lines.append(f"{f['rel']}（{f['size']} バイト、{len(mine)} チャンク{'、先頭のみ' if f.get('truncated') else ''}）")
         for chunk in mine:
             if shown >= limit:
                 break
-            lines.append(f"  {chunk.id} {chunk.heading or f'L{chunk.first_line}-L{chunk.last_line}'}（{chunk.chars} 字）")
+            label = chunk["heading"] or chunk["locator"].rsplit("#", 1)[-1]
+            lines.append(f"  {chunk['id']} {label}（{chunk['chars']} 字）")
             shown += 1
     if shown < len(chunks):
         lines.append(f"（ほか {len(chunks) - shown} チャンクは省略）")
