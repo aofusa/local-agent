@@ -788,5 +788,28 @@ llama-server 側は出力の `<think>` を本文から分離する。分離し�
 ### 13.5 残る制約
 
 - 他ホストの実機ブラウザからは確認していない（この端末から LAN アドレスに headless Edge で接続して確認した）。
-- `probe-bonsai.ps1` のやり直しは、Ternary-Bonsai-2-27B を読み込んだところでメモリ不足のため中断された（Ternary-Bonsai-8B は新しい批評の契約に合格）。`tools/bonsai/rank.json` は前回のまま。ルータは実際の検索で新しい契約どおりに動いた。
+- `probe-bonsai.ps1` のやり直し（13.6）で、8 モデルすべてが担当タスクに合格した。
+
+### 13.6 検索モデルの再検証と、1 回目が中断した理由（2026-10-05）
+
+2 回目の `probe-bonsai.ps1`（03:27〜03:34）は完走し、`tools/bonsai/rank.json` を書き直した。全モデルが担当タスクに合格し、順位は前回と同じ。違いは Qwen3-0.6B-heretic で、旧形式のルータには落ちていたが、新しい形式（`kind`）のルータ検証には合格したため、ルータの 3 番手（1.7B、3.5-4B の次）に入った。
+
+| モデル | メモリ | 速度 | 合格 |
+|---|---|---|---|
+| Ternary-Bonsai-8B | 2915 MB | 31.0 tok/s | plan / worker / critique / synthesize |
+| Bonsai-4B | 1359 MB | 46.5 tok/s | filter |
+| Bonsai-8B | 1730 MB | 25.7 tok/s | worker |
+| Ternary-Bonsai-2-27B | 6446 MB | 8.7 tok/s | plan / worker / critique / synthesize |
+| Ternary-Bonsai-2-27B abliterated | 7033 MB | 9.0 tok/s | plan / critique / synthesize |
+| Qwen3.5-4B-heretic | 3824 MB | 20.0 tok/s | route / plan / worker / critique / synthesize |
+| Qwen3-1.7B-heretic | 1894 MB | 57.0 tok/s | route / filter / worker |
+| Qwen3-0.6B-heretic | 1349 MB | 104.7 tok/s | route / filter |
+
+1 回目（10-04 23:57 ごろ）が中断した理由の調査:
+
+- 中断したのは probe そのものではなく、Claude Code のバックグラウンドシェルだった。Claude Code は、セッションが待機中に空き物理メモリが少なくなると自分のバックグラウンドシェルを止める。Windows 側にはメモリ枯渇のイベント（Resource-Exhaustion-Detector）は記録されておらず、コミットも上限（55 GB）に遠かった。llama-server の取り残しも無かった。
+- 2 回目は Claude Code のシェルの外（独立したプロセス）で動かし、5 秒ごとに空きメモリを記録した。Ternary-Bonsai-2-27B（約 7 GB）を読み込んだときの空き物理メモリの最小は 4.7 GB で、問題なく動いた。
+- 10-04 18:24 の probe（成功）と 1 回目（中断）の環境の違いは、この作業で Docker Desktop を起動したこと。`docker desktop stop` の後も WSL の VM（vmmemWSL）が約 0.8 GB（停止前は約 1.5 GB）を持ち続けていた（23:50 の測定）。この作業を始めた時点（18:24 より後）でも Docker Desktop は起動しておらず（`docker version` が接続できなかった）、18:24 の probe も Docker なしで動いたと考えられる。2 回目の時点では vmmemWSL は消えていた。
+- ComfyUI（約 6.3 GB のコミット、ほぼページアウト）、LM Studio の 27B（probe 前に unload）、LangGraph は 1 回目と 2 回目で同じ条件だった。
+- 結論: 1 回目は、Docker の VM が残っていた分（約 0.8 GB）だけ空きが少なく（推定の最小は約 3.5〜4 GB）、Claude Code の待機中のメモリ監視がそのしきい値を下回ったと判断してシェルを止めた。probe とこのリポジトリのコードがメモリを余計に使うようになったわけではない（各モデルのメモリは前回とほぼ同じ: 6567 → 6446 MB、6757 → 7033 MB）。Docker Desktop を実行のときだけ起動して止める変更（13.3）は、この取り合いを避けるためでもある。
 - 27B が遅いため、思考モードのコードと長い文章は 1 回 10 分以上かかる。1 回の呼び出しで出せるのは約 1000 トークン。

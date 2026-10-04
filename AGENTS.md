@@ -134,7 +134,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 | reader | Ternary-Bonsai-8B（最大 3 体） | Qwen3.5-4B-heretic、Bonsai-8B、Qwen3-1.7B-heretic |
 | 批評・統合 | Ternary-Bonsai-2-27B abliterated（PTQ1_0、代理リーダー） | Ternary-Bonsai-2-27B、Qwen3.5-4B-heretic、Ternary-Bonsai-8B |
 
-Qwen3-0.6B-heretic はルータの検証に落ちたため、フィルタの最後の予備にだけ使う。1-bit の Bonsai-8B は reader の予備にとどめる。
+Qwen3-0.6B-heretic は旧形式のルータの検証に落ちたため、フィルタの最後の予備に使う。v0.5.0 のルータ（`kind` を返す形式）の検証には合格したので、ルータの 3 番手にも入る（`tools/bonsai/rank.json`）。1-bit の Bonsai-8B は reader の予備にとどめる。
 
 ## 画像の保存と UI への返却
 
