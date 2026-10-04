@@ -167,6 +167,14 @@ def _final(state: ChatState, text: str, trace: dict | None = None, *, task: dict
                      additional_kwargs=_kwargs(view, trace, thinking=True, task=task))
 
 
+def _usage(reply) -> str:
+    """Tokens of one reply for the log (completion, of which thinking) and the time it took."""
+    usage = (getattr(reply, "raw", None) or {}).get("usage") or {}
+    thinking = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+    return (f"tokens={usage.get('completion_tokens', '?')} thinking_tokens={thinking if thinking is not None else '?'} "
+            f"seconds={getattr(reply, 'seconds', 0.0):.1f}")
+
+
 def _thought(stage: str, reply) -> list[dict]:
     text = (getattr(reply, "reasoning", "") or "").strip()
     return [{"stage": stage, "text": text[-12000:]}] if text else []

@@ -287,8 +287,9 @@ async def run(*, approved: bool, docker: str, run_dir: Path, root: Path, argv: l
     if approved is not True:
         raise NotApproved("承認されていないコードは実行しません")
     runner = runner or _exec
-    command = build_argv(docker=docker, name=name, run_dir=run_dir, root=root, argv=argv, profile=profile,
-                         user=user, network=network, setup=step == "setup")
+    # build_argv resolves paths (file system calls): off the event loop, which langgraph dev guards.
+    command = await asyncio.to_thread(build_argv, docker=docker, name=name, run_dir=run_dir, root=root, argv=argv,
+                                      profile=profile, user=user, network=network, setup=step == "setup")
     log.info("sandbox %s start name=%s image=%s network=%s argv=%s", step, name, profile.image, network,
              command[command.index(profile.image) + 1:])
     started = time.monotonic()

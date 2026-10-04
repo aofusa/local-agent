@@ -46,7 +46,7 @@ from furry_agent.bonsai_select import (Catalog, Rank, Selection, SelectionError,
 from furry_agent.bonsai_worker import Ledger, LlamaServer, WorkerError, free_port, run_reader
 from furry_agent.chat_common import (RESET, ChatState, StageError, _cleanup, _conf, _fail, _final, _held,
                                      _history, _is_think, _last_human, _leaders, _ledgers, _lmstudio, _lock,
-                                     _max_tokens, _progress, _prompt, _settings, _text_of, _thought, log)
+                                     _max_tokens, _progress, _prompt, _settings, _text_of, _thought, _usage, log)
 from furry_agent.config import ChatSettings
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
@@ -329,7 +329,7 @@ async def chat(state: ChatState, config: RunnableConfig) -> dict:
             reply = await lmstudio.chat(messages, max_tokens=_max_tokens(state, settings, 1536, True),
                                         temperature=0.6, timeout_s=settings.chat_timeout_s, thinking=think)
         text = reply.content or "（空の応答でした）"
-        log.info("chat answered in %.1fs thinking=%s", reply.seconds, think)
+        log.info("chat answered thinking=%s %s", think, _usage(reply))
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -364,6 +364,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         "max_pages": settings.search_max_pages, "max_wall_clock_s": settings.search_wall_clock_s,
         "pages_read": 0, "wall_clock_s": 0.0, "new_cards_last_round": 0, "stop_reason": None,
         "goal": "", "subquestions": [], "covered": [], "open": [], "contradictions": [], "rejected": [],
+        "critique": settings.search_critique,
         "roles": {"router": state["route"].get("router")}}
     try:
         token = await _lock(state, config, settings)
@@ -570,10 +571,14 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
 
 
 def _after_reading(state: ChatState) -> str:
-    """Think mode scores the round (critique); fast mode skips the critic and answers (§3.3)."""
+    """Think mode scores the round (critique); fast mode, or SEARCH_CRITIQUE=0, skips the critic (§3.3)."""
     if state.get("error"):
         return END
-    return "judge" if _is_think(state) else "synthesize"
+    return "judge" if _is_think(state) and _settings_critique(state) else "synthesize"
+
+
+def _settings_critique(state: ChatState) -> bool:
+    return bool(state["search"].get("critique", True))
 
 
 def _to_read(state: ChatState):
