@@ -172,3 +172,9 @@ def test_schemas_sent_as_grammar_have_no_long_length_limits():
 
     for schema in (cv.Extracted, cv.Verdicts, cv.DocCards, cv.Cover, cv.DocPlan):
         assert "maxLength" not in json.dumps(schema.model_json_schema()), schema.__name__
+
+
+def test_quoted_sentence_is_not_split():
+    text = "失敗すると「突き合わせに失敗した。抜粋は末尾に残す」と明示する [2]。次の文。"
+    assert [s["text"] for s in cv.split_sentences(text)] == [
+        "失敗すると「突き合わせに失敗した。抜粋は末尾に残す」と明示する [2]。", "次の文。"]

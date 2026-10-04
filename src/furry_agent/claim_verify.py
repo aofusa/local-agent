@@ -293,7 +293,6 @@ def table_text(claims: list[dict], evidence: list[dict]) -> str:
 # --- the final text: sentences, audit and deletion ---------------------------------------------------------------
 
 
-_SENTENCE_END = re.compile(r"(?<=[。！？!?])")
 _CONNECTIVE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+)?(したがって|そのため|このため|よって|つまり|ゆえに|従って|以上から|以上より)")
 _HEDGE = re.compile(r"確認できません|確認できなかった|出典に(は)?無|出典には書かれて|分かりません|わかりません|不明です|見つかりません")
 _STRUCTURE = re.compile(r"^\s*(#{1,6}\s|\*\*[^*]+\*\*\s*$|[-*]\s*$|\|)")
@@ -306,10 +305,28 @@ def split_sentences(text: str) -> list[dict]:
     for line_no, line in enumerate((text or "").split("\n")):
         if not line.strip() or _STRUCTURE.match(line):
             continue
-        for piece in _SENTENCE_END.split(line):
+        for piece in _pieces(line):
             if piece.strip():
                 out.append({"index": len(out), "line": line_no, "text": piece})
     return out
+
+
+_OPEN, _CLOSE = "「『（(【", "」』）)】"
+
+
+def _pieces(line: str) -> list[str]:
+    """Split after 。！？!? that are not inside brackets (a quoted 「…。…」 stays one sentence)."""
+    pieces, start, depth = [], 0, 0
+    for i, ch in enumerate(line):
+        if ch in _OPEN:
+            depth += 1
+        elif ch in _CLOSE:
+            depth = max(0, depth - 1)
+        elif ch in "。！？!?" and depth == 0:
+            pieces.append(line[start:i + 1])
+            start = i + 1
+    pieces.append(line[start:])
+    return pieces
 
 
 def audit_claims(sentences: list[dict]) -> list[dict]:

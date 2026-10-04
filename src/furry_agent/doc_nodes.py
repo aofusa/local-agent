@@ -45,6 +45,7 @@ from furry_agent.llm_client import LLMError
 WIDTH = 3
 MAX_WAVES = 4
 MAP_TOKENS = 600
+WAVE_PAUSE_S = 3.0
 _texts: dict[str, dict[str, doc_chunk.Chunk]] = {}  # progress id -> chunk id -> chunk (text stays out of state)
 
 
@@ -260,9 +261,11 @@ async def doc_map(payload: dict, config: RunnableConfig) -> dict:
     started = time.monotonic()
     left = settings.doc_timeout_s - (time.time() - search.get("map_started", time.time()))
     wave = payload["wave"]
+    booted = False
     try:
         async with asyncio.timeout(max(30.0, left)):
             await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
+            booted = True
             llm = server.client(settings.worker_timeout_s)
             system = await _prompt(settings, "system_doc_map.txt")
             for chunk_id in payload["ids"]:
@@ -292,8 +295,10 @@ async def doc_map(payload: dict, config: RunnableConfig) -> dict:
         await asyncio.shield(server.stop())
     log.info("doc reader slot=%s model=%s chunks=%s cards=%d seconds=%.1f", payload["slot"], selection.model.id,
              payload["ids"], len(cards), time.monotonic() - started)
+    # A reader that did not start (the iGPU's Vulkan heap is smaller than the free RAM says, and ComfyUI's ROCm
+    # runtime keeps ~2 GB after a generation) read nothing: doc_cover puts its chunks back and narrows the wave.
     return {"evidence": cards, "logs": [{"kind": "doc_read", "slot": payload["slot"], "ids": payload["ids"],
-                                         "wave": wave, "cards": len(cards)}]}
+                                         "wave": wave, "cards": len(cards), "booted": booted}]}
 
 
 async def doc_cover(state: ChatState, config: RunnableConfig) -> dict:
@@ -304,7 +309,17 @@ async def doc_cover(state: ChatState, config: RunnableConfig) -> dict:
     job_lock.renew(token)
     search = dict(state["search"])
     waves = state.get("doc_waves", 0) + 1
-    wave_ids = set(search.get("wave") or [])
+    entries = [e for e in state.get("logs") or [] if isinstance(e, dict) and e.get("kind") == "doc_read"
+               and e.get("wave") == waves]
+    not_started = {i for e in entries if not e.get("booted", True) for i in e.get("ids") or []}
+    booted = sum(1 for e in entries if e.get("booted", True))
+    wave_ids = set(search.get("wave") or []) - not_started
+    if not_started:
+        # Fewer readers next time; when not even one started, stop instead of looping.
+        search["max_width"] = max(1, booted)
+        search["boot_failures"] = int(search.get("boot_failures", 0)) + 1
+        log.info("doc wave %d: %d reader(s) did not start, chunks %s go back; width -> %d", waves,
+                 len(entries) - booted, sorted(not_started), search["max_width"])
     chunks = [{**c, "read": c["read"] or c["id"] in wave_ids, "wave": waves if c["id"] in wave_ids else c["wave"]}
               for c in state["doc_chunks"]]
     read = [c for c in chunks if c["read"]]
@@ -313,7 +328,9 @@ async def doc_cover(state: ChatState, config: RunnableConfig) -> dict:
     room = settings.doc_max_chunks - len(read)
     nxt: list[str] = []
     reason = ""
-    if not unread_planned:
+    if not_started and booted == 0 and search.get("boot_failures", 0) >= 2:
+        reason = "reader を起動できない（GPU メモリ不足）"
+    elif not unread_planned:
         reason = "計画した節を読み終えた"
     elif waves >= MAX_WAVES or room <= 0:
         reason = "上限"
@@ -343,18 +360,22 @@ async def doc_cover(state: ChatState, config: RunnableConfig) -> dict:
             reason = "カバーの判定で十分"
         else:
             known = {c["id"] for c in unread_planned}
-            nxt = [i for i in dict.fromkeys(cover.next if cover else []) if i in known]
+            nxt = [i for i in dict.fromkeys([*sorted(not_started), *(cover.next if cover else [])]) if i in known]
             if not nxt and cover is not None:
                 reason = "カバーの判定で十分"
             elif not nxt:
                 nxt = [c["id"] for c in unread_planned]
     else:
         nxt = [c["id"] for c in unread_planned]
+    if reason:
+        nxt = []
     nxt = nxt[:min(WIDTH, max(room, 0))]
     update: dict[str, Any] = {"doc_waves": waves, "doc_chunks": chunks}
     if nxt:
+        await asyncio.sleep(WAVE_PAUSE_S)  # let the driver hand back the killed readers' device memory
         try:
-            selection = await asyncio.to_thread(_select_readers, config, settings, nxt, _leader_up(token))
+            selection = await asyncio.to_thread(_select_readers, config, settings, nxt[:search.get("max_width", WIDTH)],
+                                                _leader_up(token))
         except SelectionError as exc:
             log.info("doc readers do not fit for the next wave: %s", exc)
             nxt, reason = [], "reader のメモリ不足"

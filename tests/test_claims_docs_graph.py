@@ -83,6 +83,9 @@ def _claims_part(user: str) -> str:
 @pytest.fixture(autouse=True)
 def _fake_prompts(monkeypatch):
     monkeypatch.setattr(FakeLLM, "chat", _chat)
+    from furry_agent import doc_nodes
+
+    monkeypatch.setattr(doc_nodes, "WAVE_PAUSE_S", 0.0)
 
 
 def _world(**kw):
@@ -385,3 +388,34 @@ async def test_docs_no_blocking_calls(models_dir, doc_root):
         world.answer = "page text for https://alpha.example/0 である [1]。"
         state, message = await _run("/search topic", world, _vsettings(models_dir), mode="think")
         assert not state.get("error") and "claim_trace" in message.additional_kwargs
+
+
+async def test_docs_reader_that_does_not_start_gives_its_chunks_back(models_dir, doc_root, monkeypatch):
+    # The iGPU's Vulkan heap is smaller than the free RAM: parallel readers may fail to allocate at start.
+    from test_chat_graph import FakeServer
+
+    real_start = FakeServer.start
+    fails = {"left": 2}
+
+    async def start(self, timeout):
+        if self.selection.model.id == "ternary-8b" and fails["left"] > 0:
+            fails["left"] -= 1
+            raise chat_graph.WorkerError("起動直後に終了しました")
+        return await real_start(self, timeout)
+
+    monkeypatch.setattr(FakeServer, "start", start)
+    world = _world()
+    state, message = await _run("/docs . 決定は何？", world, _dsettings(models_dir, doc_root), mode="fast")
+    assert sorted(world.mapped) == sorted(set(world.mapped)) and len(world.mapped) == 7  # nothing lost, none twice
+    assert state["search"]["max_width"] == 1  # one of three started: later waves use one reader
+    assert all(c["read"] for c in state["doc_chunks"])
+    _assert_freed(world)
+
+
+async def test_docs_stop_when_no_reader_starts(models_dir, doc_root):
+    world = _world()
+    world.crash = {"ternary-8b", "qwen3.5-4b-heretic", "bonsai-8b", "qwen3-1.7b-heretic", "bonsai-2-27b"}
+    state, message = await _run("/docs README.md", world, _dsettings(models_dir, doc_root), mode="fast")
+    assert state["search"]["stop_reason"] == "reader を起動できない（GPU メモリ不足）"
+    assert state["doc_waves"] == 2 and world.mapped == []
+    _assert_freed(world)
