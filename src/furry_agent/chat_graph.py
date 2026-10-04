@@ -39,6 +39,7 @@ from furry_agent.bonsai_select import (Catalog, Rank, Selection, SelectionError,
 from furry_agent.bonsai_worker import Ledger, LlamaServer, WorkerError, free_port, run_reader
 from furry_agent.comfy_client import ComfyClient
 from furry_agent.config import ChatSettings
+from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError, LMStudio, OpenAICompatClient, strip_thinking
 from furry_agent.router import CHAT, SEARCH, TO_IMAGE_TAB, route as route_rules
@@ -130,8 +131,15 @@ def _comfy(config: RunnableConfig | None, settings: ChatSettings) -> ComfyClient
     return ComfyClient(settings.comfyui_url, 30)
 
 
-def _prompt(settings: ChatSettings, name: str) -> str:
-    return (Path(settings.prompts_dir) / name).read_text(encoding="utf-8").strip()
+_prompts: dict[Path, str] = {}
+
+
+async def _prompt(settings: ChatSettings, name: str) -> str:
+    """Prompt file text, read in a thread once (langgraph dev fails runs that block the event loop)."""
+    path = Path(settings.prompts_dir) / name
+    if path not in _prompts:
+        _prompts[path] = (await asyncio.to_thread(path.read_text, encoding="utf-8")).strip()
+    return _prompts[path]
 
 
 def _catalog(settings: ChatSettings) -> tuple[Catalog, Rank, dict[str, Path]]:
@@ -249,7 +257,7 @@ async def _run_model(config, settings: ChatSettings, task: str, port: int,
     for _ in range(2):
         selection = select_model(task, catalog, rank, available, _free_mb(config), leader_resident=leader_resident,
                                  reserve_mb=settings.reserve_mb, exclude=tuple(failed))
-        server = _server(config, settings, selection, free_port(settings.base_port + port))
+        server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + port))
         try:
             await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
             return await fn(server.client(max_tokens_timeout or settings.worker_timeout_s), selection), selection
@@ -274,7 +282,7 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
     for _ in range(2):
         selection = select_model(task, catalog, rank, available, _free_mb(config), leader_resident=False,
                                  reserve_mb=settings.reserve_mb, exclude=tuple(failed))
-        server = _server(config, settings, selection, free_port(settings.base_port + PORT_LEADER))
+        server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + PORT_LEADER))
         try:
             await server.start(LARGE_BOOT_S)
         except WorkerError as exc:
@@ -316,6 +324,8 @@ def _trace(state: ChatState, search: dict, hits: list[dict] | None = None, cards
 
 
 async def ingest(state: ChatState, config: RunnableConfig) -> dict:
+    settings = _settings(config)
+    await asyncio.to_thread(_setup_file_logging, settings.logs_dir)
     progress_id = f"progress-{uuid.uuid4()}"
     reset = {"progress_id": progress_id, "error": None, "lock_token": None, "search": {},
              "hits": [RESET], "cards": [RESET], "logs": [RESET]}
@@ -324,7 +334,6 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
         return {**reset, "error": "no input", "messages": [AIMessage(id=progress_id, content="メッセージがありません。")]}
     text, media = _text_of(human)
     decision = route_rules(text, media)
-    settings = _settings(config)
     kind = decision.kind
     if kind == CHAT and settings.auto_route and sa.ambiguous_question(decision.text):
         kind = "route"
@@ -357,7 +366,7 @@ async def route(state: ChatState, config: RunnableConfig) -> dict:
     decision, label = None, None
     try:
         async def ask(client, selection):
-            return await sa.ask_json(client, [{"role": "system", "content": _prompt(settings, "system_search_route.txt")},
+            return await sa.ask_json(client, [{"role": "system", "content": await _prompt(settings, "system_search_route.txt")},
                                               {"role": "user", "content": state["route"]["text"]}],
                                      sa.RouteDecision, max_tokens=80, temperature=0.0)
 
@@ -388,7 +397,7 @@ async def chat(state: ChatState, config: RunnableConfig) -> dict:
     token = state.get("lock_token")
     try:
         token = await _lock(state, config, settings)
-        messages = [{"role": "system", "content": _prompt(settings, "system_chat.txt")},
+        messages = [{"role": "system", "content": await _prompt(settings, "system_chat.txt")},
                     *_history(state, settings.history_turns)]
         reply = await lmstudio.chat(messages, max_tokens=1536, temperature=0.6, timeout_s=settings.chat_timeout_s)
         text = strip_thinking(reply.content) or "（空の応答でした）"
@@ -422,14 +431,14 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         token = await _lock(state, config, settings)
         stage = "search"
         log.info("tor %s", await _ensure_tor(config, settings))
-        if not settings.llama_server or not Path(settings.llama_server).is_file():
+        if not settings.llama_server or not await asyncio.to_thread(Path(settings.llama_server).is_file):
             raise StageError("search", "PrismML 版 llama.cpp がありません。scripts\\setup-llamacpp.ps1 を実行してください")
         catalog, rank, available = await asyncio.to_thread(_catalog, settings)
         if not available:
             raise StageError("search", "検索用モデルがありません。scripts\\setup-search-models.ps1 を実行してください")
 
         stage = "plan"
-        planner_messages = [{"role": "system", "content": _prompt(settings, "system_search_plan.txt")},
+        planner_messages = [{"role": "system", "content": await _prompt(settings, "system_search_plan.txt")},
                             {"role": "user", "content": question}]
         use_lmstudio = settings.search_planner == "lmstudio" and await lmstudio.reachable()
         parsed, planner = None, None
@@ -472,8 +481,8 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
                                  "leader": LEADER_LABEL if mode == "resident" else
                                  "Ternary-Bonsai-2-27B abliterated（代理、llama.cpp）"}})
         _ledgers[token] = Ledger()
-        log.info("search plan mode=%s planner=%s intents=%s", mode, planner,
-                 [(i["tool"], i.get("why")) for i in intents])
+        # Query and intent texts are not logged (design doc §5.10); result URLs are, in search_client.
+        log.info("search plan mode=%s planner=%s intents=%s", mode, planner, [i["tool"] for i in intents])
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -550,7 +559,7 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
         if settings.search_filter and len(hits) > 2 and any(i["tool"] != "browse" for i in search["intents"]):
             async def judge(client, selection):
                 return await sa.ask_json(client, [
-                    {"role": "system", "content": _prompt(settings, "system_search_filter.txt")},
+                    {"role": "system", "content": await _prompt(settings, "system_search_filter.txt")},
                     {"role": "user", "content": sa.filter_input(search["question"], hits)}],
                     sa.Relevance, max_tokens=80, temperature=0.0)
 
@@ -609,7 +618,7 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
     settings = _settings(config)
     search, token = payload["search"], payload.get("lock_token")
     job_lock.renew(token)
-    catalog = Catalog.load(settings.catalog_path)
+    catalog = await asyncio.to_thread(Catalog.load, settings.catalog_path)
     selection = Selection("worker", catalog.models[search["reader_id"]], 1, search["reader_mem"],
                           Path(search["reader_path"]), search["reader_ngl"])
     server = _server(config, settings, selection, settings.base_port + payload["slot"])
@@ -636,7 +645,7 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
                 entry = {"intent_id": intent["id"], "kind": "read", "opened": [], "error": None}
                 try:
                     out = await run_reader(intent, hits, llm, client, ledger,
-                                           _prompt(settings, "system_bonsai_worker.txt"), search["question"], ask_cards,
+                                           await _prompt(settings, "system_bonsai_worker.txt"), search["question"], ask_cards,
                                            browse_budget_s=settings.search_total_timeout_s * 0.6)
                     allowed = {h["url"] for h in hits}
                     found = sa.card_dicts(out["cards"], allowed) or sa.snippet_cards(hits)
@@ -690,7 +699,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
             client, label = await _leader_client(config, settings, state, "critique")
             refs = sa.references(cards, state.get("hits") or [])
             result = await sa.ask_json(client, [
-                {"role": "system", "content": _prompt(settings, "system_search_critique.txt")},
+                {"role": "system", "content": await _prompt(settings, "system_search_critique.txt")},
                 {"role": "user", "content": sa.critique_input(search["question"], search["intents"], cards, refs)}],
                 sa.Critique, max_tokens=300, temperature=0.2)
             next_id = max(i["id"] for i in search["intents"]) + 1
@@ -705,7 +714,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
         gap["round"] = 1
     search.update({"roles": roles, "round": search["round"] + (1 if gaps else 0),
                    "intents": [*search["intents"], *gaps], "pending": [g["id"] for g in gaps]})
-    log.info("critique gaps=%s", [(g["tool"], g.get("why")) for g in gaps])
+    log.info("critique gaps=%s", [g["tool"] for g in gaps])
     if gaps:
         text = "足りない点を追加で検索しています（1 回だけ）:\n" + "\n".join(f"- {g['tool']}: `{g['q']}`" for g in gaps)
     else:
@@ -741,7 +750,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
             await _cleanup(token, lmstudio, unload=True)
             return {"lock_token": None, "messages": [_progress(state, text, _trace(state, search))]}
         client, label = await _leader_client(config, settings, state, "synthesize")
-        reply = await client.chat([{"role": "system", "content": _prompt(settings, "system_search.txt")},
+        reply = await client.chat([{"role": "system", "content": await _prompt(settings, "system_search.txt")},
                                    {"role": "user", "content": sa.leader_input(search["question"], cards, refs)}],
                                   max_tokens=1200, temperature=0.4, timeout_s=settings.chat_timeout_s)
         answer = strip_thinking(reply.content) or "（統合モデルの応答が空でした）"

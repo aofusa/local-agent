@@ -20,6 +20,17 @@ ROOT = Path(__file__).resolve().parent.parent
 CATALOG = Catalog.load(ROOT / "config" / "search_models.json")
 
 
+@pytest.fixture(autouse=True)
+def _no_shared_log_handler():
+    """ingest installs the logs/furry_agent.log handler once per process; drop it so the image tests that
+    check their own logs_dir still see it created."""
+    yield
+    import logging
+
+    logger = logging.getLogger("furry_agent")
+    logger.handlers[:] = [h for h in logger.handlers if not getattr(h, "_furry_agent", False)]
+
+
 @pytest.fixture
 def models_dir(tmp_path):
     d = tmp_path / "models"
@@ -310,3 +321,16 @@ async def test_missing_llama_server_is_reported(models_dir):
     settings = replace(_settings(models_dir), llama_server="")
     state, message = await _run("/search x", world, settings)
     assert "setup-llamacpp" in message.content and job_lock.holder is None
+
+
+async def test_no_blocking_calls_in_event_loop(models_dir):
+    # langgraph dev runs nodes under blockbuster and fails runs that block the loop.
+    from blockbuster import blockbuster_ctx
+
+    with blockbuster_ctx():
+        world = World()
+        state, message = await _run("/search topic", world, _settings(models_dir))
+        assert not state.get("error") and world.synth
+        world = World()
+        state, message = await _run("ROG Ally X の発売日はいつ？", world, _settings(models_dir))
+        assert not state.get("error")

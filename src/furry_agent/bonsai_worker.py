@@ -128,12 +128,13 @@ class LlamaServer:
         return OpenAICompatClient(self.base_url, timeout_s=timeout_s)
 
     async def start(self, timeout_s: float = 120.0) -> float:
-        if not self.exe or not Path(self.exe).is_file():
+        # File and socket checks run in a thread: langgraph dev fails runs that block the event loop.
+        if not self.exe or not await asyncio.to_thread(Path(self.exe).is_file):
             raise WorkerError("PrismML 版 llama-server がありません（scripts\\setup-llamacpp.ps1 を実行してください）")
-        if port_in_use(self.port):
+        if await asyncio.to_thread(port_in_use, self.port):
             raise WorkerError(f"ポート {self.port} は使用中です")
         if self.logs_dir:
-            Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(Path(self.logs_dir).mkdir, parents=True, exist_ok=True)
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -176,7 +177,7 @@ class LlamaServer:
             log.info("llama-server stopped pid=%s port=%s", process.pid, self.port)
         # The port must be free afterwards; kill whatever still listens there (design doc §5.5).
         for _ in range(3):
-            if not port_in_use(self.port):
+            if not await asyncio.to_thread(port_in_use, self.port):
                 return
             for pid in await asyncio.to_thread(pids_on_port, self.port):
                 log.warning("killing leftover listener pid=%s on port %s", pid, self.port)

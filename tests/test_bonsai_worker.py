@@ -148,3 +148,12 @@ async def test_reader_accepts_result_number():
     search = FakeSearch()
     await run_reader({"id": 0, "q": "q"}, HITS, NumberLLM([]), search, Ledger(), "sys", "質問", _cards)
     assert search.fetched == [HITS[2]["url"]]
+
+
+async def test_start_stop_do_not_block_the_event_loop(tmp_path):
+    from blockbuster import blockbuster_ctx
+
+    server = FakeServer(sys.executable, Path("model.gguf"), free_port(18700), label="fake", logs_dir=tmp_path / "logs")
+    with blockbuster_ctx():
+        await server.start(20)
+        await server.stop()
