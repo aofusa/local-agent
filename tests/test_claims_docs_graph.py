@@ -419,3 +419,23 @@ async def test_docs_stop_when_no_reader_starts(models_dir, doc_root):
     assert state["search"]["stop_reason"] == "reader を起動できない（GPU メモリ不足）"
     assert state["doc_waves"] == 2 and world.mapped == []
     _assert_freed(world)
+
+
+def test_reader_echoing_the_question_is_not_a_card():
+    from furry_agent.doc_nodes import _echo
+
+    q = "検証段で使うモデルと、失敗したときの既定の挙動を詳しく"
+    assert _echo("検証段で使うモデルと、失敗したときの既定の挙動を詳しく", q, "本文")
+    assert _echo("検証段で使うモデルと、失敗したときの既定の挙動は以下の通りです。", q, "本文")
+    assert not _echo("検証段で使うモデル", q, "表: 検証段で使うモデルは 27B")  # really in the section
+    assert not _echo("別の文", q, "本文")
+
+
+def test_plan_puts_the_model_picks_first_and_fills_in_file_order():
+    from furry_agent import claim_verify as cv
+    from furry_agent.doc_nodes import _plan_ids
+
+    chunks = [{"id": f"f1-c{i}"} for i in range(1, 8)]
+    ids, fallback = _plan_ids(cv.DocPlan(chunks=["f1-c5", "f9-c9", "f1-c5", "f1-c2"]), chunks, 4)
+    assert ids == ["f1-c5", "f1-c2", "f1-c1", "f1-c3"] and not fallback
+    assert _plan_ids(None, chunks, 3) == (["f1-c1", "f1-c2", "f1-c3"], True)

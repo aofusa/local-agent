@@ -17,6 +17,7 @@ The model's verdict is only advice. The gate that counts is here, in the orchest
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from typing import Literal
@@ -42,7 +43,8 @@ class ExtractedClaim(BaseModel):
 
 
 class Extracted(BaseModel):
-    claims: list[ExtractedClaim] = Field(default_factory=list)
+    # Required: a cut-off reply must not validate as an empty list through its first inner object.
+    claims: list[ExtractedClaim]
 
 
 class Verdict(BaseModel):
@@ -55,7 +57,7 @@ class Verdict(BaseModel):
 
 
 class Verdicts(BaseModel):
-    claims: list[Verdict] = Field(default_factory=list)
+    claims: list[Verdict]
 
 
 class DocCard(BaseModel):
@@ -64,7 +66,7 @@ class DocCard(BaseModel):
 
 
 class DocCards(BaseModel):
-    cards: list[DocCard] = Field(default_factory=list)
+    cards: list[DocCard]
 
 
 class Cover(BaseModel):
@@ -73,7 +75,34 @@ class Cover(BaseModel):
 
 
 class DocPlan(BaseModel):
-    chunks: list[str] = Field(default_factory=list)
+    chunks: list[str]
+
+
+def salvage(schema: type[BaseModel], text: str) -> BaseModel | None:
+    """The complete items of a reply cut off by max_tokens: every whole ``{"claim_id": ...}`` object (Extracted,
+    Verdicts) or ``{"quote": ...}`` object (DocCards). None when nothing complete is found."""
+    key = {"Extracted": "claim_id", "Verdicts": "claim_id", "DocCards": "quote"}.get(schema.__name__)
+    if not key:
+        return None
+    decoder = json.JSONDecoder()
+    items, i = [], (text or "").find("{", 1)
+    while i != -1:
+        try:
+            value, end = decoder.raw_decode(text, i)
+        except ValueError:
+            i = text.find("{", i + 1)
+            continue
+        if isinstance(value, dict) and key in value:
+            items.append(value)
+            i = text.find("{", end)
+        else:
+            i = text.find("{", i + 1)
+    if not items:
+        return None
+    try:
+        return schema.model_validate({"cards" if key == "quote" else "claims": items})
+    except ValueError:
+        return None
 
 
 Status = Literal["supported", "partial", "contradicted", "unsupported", "opinion"]

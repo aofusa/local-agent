@@ -178,3 +178,18 @@ def test_quoted_sentence_is_not_split():
     text = "失敗すると「突き合わせに失敗した。抜粋は末尾に残す」と明示する [2]。次の文。"
     assert [s["text"] for s in cv.split_sentences(text)] == [
         "失敗すると「突き合わせに失敗した。抜粋は末尾に残す」と明示する [2]。", "次の文。"]
+
+
+def test_cut_off_reply_does_not_validate_as_empty_and_is_salvaged():
+    # Measured: 12 verdicts hit max_tokens; the first inner object used to validate as Verdicts(claims=[]).
+    from furry_agent.search_agent import validated
+
+    cut = ('{"claims":[{"claim_id":"c1","status":"supported","evidence_ids":["e2"],"quote":"a","note":"n"},'
+           '{"claim_id":"c2","status":"partial","evidence_ids":["e1"],"quote":"b","note":"m"},{"claim_id":"c3","sta')
+    assert validated(cv.Verdicts, cut) is None
+    got = cv.salvage(cv.Verdicts, cut)
+    assert [v.claim_id for v in got.claims] == ["c1", "c2"] and got.claims[1].status == "partial"
+    assert cv.salvage(cv.Verdicts, "nothing") is None
+    cards = cv.salvage(cv.DocCards, '{"cards":[{"quote":"q1","note":"n"},{"quote":"q2"')
+    assert [c.quote for c in cards.cards] == ["q1"]
+    assert cv.salvage(cv.Cover, '{"next":["f1') is None

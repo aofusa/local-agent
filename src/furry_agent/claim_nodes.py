@@ -39,7 +39,8 @@ from furry_agent.llm_client import LLMError
 from furry_agent.router import DOCS
 
 T = TypeVar("T", bound=BaseModel)
-EXTRACT_TOKENS, VERIFY_TOKENS = 700, 1100
+# Measured: 12 verdicts with short notes take ~1100 tokens; 1100 cut the reply (finish_reason=length).
+EXTRACT_TOKENS, VERIFY_TOKENS = 1200, 2000
 AUDIT_MAX = 24  # sentences judged; later ones are kept as written
 _CITED = re.compile(r"\[(\d+)\]")
 REPAIR = ("直前の出力は指定の JSON として読めませんでした。説明や前置きを付けず、指定の形の JSON オブジェクト 1 つだけを"
@@ -76,18 +77,23 @@ def evidence_of(state: ChatState, settings: ChatSettings) -> list[dict]:
 
 async def ask_repair(client, messages: list[dict], schema: type[T], *, max_tokens: int) -> T | None:
     """One JSON call; an invalid reply is shown back to the same process once with a request to repair it (§5.3).
-    Returns None after the second failure. LLMError and timeouts propagate."""
+    Returns None after the second failure. LLMError and timeouts propagate.
+
+    A reply cut off by max_tokens keeps its complete items (claim_verify.salvage): asking again would be cut at the
+    same place. Items left out are treated as not judged by the caller."""
     reply = await client.chat(messages, max_tokens=max_tokens, temperature=0.1, json_mode=True,
                               json_schema=schema.model_json_schema())
-    value = sa.validated(schema, reply.content)
+    value = sa.validated(schema, reply.content) or cv.salvage(schema, reply.content)
     if value is not None:
+        if sa.validated(schema, reply.content) is None:
+            log.info("%s: reply cut off, kept its complete items", schema.__name__)
         return value
     log.info("%s: invalid JSON, asking once to repair: %.200s", schema.__name__, reply.content)
     repair = [*messages, {"role": "assistant", "content": (reply.content or "")[:2000]},
               {"role": "user", "content": REPAIR}]
     reply = await client.chat(repair, max_tokens=max_tokens, temperature=0.0, json_mode=True,
                               json_schema=schema.model_json_schema())
-    value = sa.validated(schema, reply.content)
+    value = sa.validated(schema, reply.content) or cv.salvage(schema, reply.content)
     if value is None:
         log.info("%s: invalid JSON after repair: %.200s", schema.__name__, reply.content)
     return value

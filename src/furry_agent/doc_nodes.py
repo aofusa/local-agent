@@ -144,7 +144,10 @@ def _plan_ids(parsed: cv.DocPlan | None, chunks: list[dict], limit: int) -> tupl
     ids = list(dict.fromkeys(i.strip() for i in (parsed.chunks if parsed else []) if i.strip() in known))[:limit]
     if not ids:
         return _rule_plan(chunks, limit), True
-    return ids, False
+    # The plan is an order: the model's picks first, then the rest in file order up to the limit (measured: the
+    # 27B named 2 of 26 chunks, which would end the reading after one wave).
+    rest = [c["id"] for c in chunks if c["id"] not in ids]
+    return [*ids, *rest][:limit], False
 
 
 def _select_readers(config, settings: ChatSettings, wave: list[str], leader_up: bool) -> Selection:
@@ -187,12 +190,12 @@ async def doc_plan(state: ChatState, config: RunnableConfig) -> dict:
                         {"role": "user", "content": f"質問: {search['question']}\n\nファイルとチャンク:\n```text\n"
                                                     f"{outline.replace('```', chr(39) * 3)}\n```"}],
                         cv.DocPlan, max_tokens=300)
-                planner = LEADER_LABEL
             except LLMError as exc:
                 log.info("doc plan: LM Studio failed, rule plan: %s", exc)
+            planner = LEADER_LABEL
         ids, fallback = _plan_ids(parsed, chunks, limit)
         if use_model and fallback:
-            planner = f"{planner} → 規則（ファイル順）"
+            planner = f"{planner} → 失敗、規則（ファイル順）" if planner == LEADER_LABEL else planner
         # The readers do not fit next to the 27B on this machine: unload before any llama-server starts (§5.4).
         if use_model:
             await lmstudio.unload_all()
@@ -237,6 +240,13 @@ def _doc_card(chunk: doc_chunk.Chunk, card: cv.DocCard, wave: int) -> dict:
     verified = len(cv.norm(quote)) >= 6 and cv.norm(quote) in cv.norm(chunk.text)
     return {"chunk_id": chunk.id, "locator": chunk.locator, "title": chunk.rel, "quote": quote,
             "note": " ".join((card.note or "").split())[:cv.NOTE_CHARS], "verified": verified, "wave": wave}
+
+
+def _echo(quote: str, question: str, text: str) -> bool:
+    """A "quote" that is the user's question copied back (seen with Ternary-Bonsai-8B when the section has
+    nothing on it), not text of the section."""
+    q, ask = cv.norm(quote), cv.norm(question)
+    return bool(q) and q not in cv.norm(text) and (q in ask or ask[:20] in q)
 
 
 def _fallback_card(chunk: doc_chunk.Chunk, wave: int) -> dict:
@@ -285,7 +295,8 @@ async def doc_map(payload: dict, config: RunnableConfig) -> dict:
                 if found is None:
                     cards.append(_fallback_card(chunk, wave))
                 else:
-                    cards += [_doc_card(chunk, c, wave) for c in found.cards[:3] if (c.quote or "").strip()]
+                    cards += [_doc_card(chunk, c, wave) for c in found.cards[:3]
+                              if (c.quote or "").strip() and not _echo(c.quote, search["question"], chunk.text)]
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, _lmstudio(config, settings), unload=True))
         raise
