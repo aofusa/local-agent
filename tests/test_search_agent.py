@@ -113,3 +113,70 @@ def test_focus_text_keeps_relevant_lines_in_order():
     out = sa.focus_text(page, "ROG Xbox Ally X のメモリ容量と発売日", 120)
     assert out == "ROG Xbox Ally X のメモリは 24GB LPDDR5X です。\n発売日は 2025 年 10 月 16 日。"
     assert sa.focus_text("短い本文。", "q", 100) == "短い本文。"
+
+
+# --- think mode: deep plan, reflect, stop rule ---------------------------------------------------------------------
+
+
+def _search(**kw):
+    base = {"round": 1, "max_rounds": 4, "pages_read": 2, "max_pages": 12, "wall_clock_s": 10, "max_wall_clock_s": 1200,
+            "new_cards_last_round": 2, "open": ["q2"], "next_intents": [{"id": 3}], "round_hits": 4,
+            "critic_stop": False, "critic_reason": "need_more"}
+    return {**base, **kw}
+
+
+def test_next_round_goes_on_while_open_and_new_cards():
+    assert sa.next_round(_search()) == (True, "need_more")
+
+
+def test_next_round_stop_reasons():
+    assert sa.next_round(_search(open=[])) == (False, "sufficient")
+    assert sa.next_round(_search(new_cards_last_round=0)) == (False, "diminishing")
+    assert sa.next_round(_search(round=4)) == (False, "budget")
+    assert sa.next_round(_search(pages_read=12)) == (False, "budget")
+    assert sa.next_round(_search(wall_clock_s=1200)) == (False, "budget")
+    assert sa.next_round(_search(round_hits=0)) == (False, "no_hits")
+    assert sa.next_round(_search(critic_stop=True, critic_reason="sufficient")) == (False, "sufficient")
+    assert sa.next_round(_search(critic_reason="error")) == (False, "error")
+    assert sa.next_round(_search(next_intents=[])) == (False, "diminishing")
+
+
+def test_deep_plan_and_fallback():
+    plan = sa.DeepPlan.model_validate({"goal": "g", "subquestions": [{"id": "q1", "question": "A"}, {"id": "q1", "question": "B"}],
+                                       "intents": [{"tool": "web", "q": "a", "subquestion_id": "q1"},
+                                                   {"tool": "web", "q": "b", "subquestion_id": "zz"}]})
+    goal, subs, intents, fallback = sa.deep_plan(plan, "質問", [], 3)
+    assert not fallback and goal == "g" and [s["id"] for s in subs] == ["q1", "q2"]
+    assert [i["subquestion_id"] for i in intents] == ["q1", "q1"]  # unknown ids go to the first sub-question
+    goal, subs, intents, fallback = sa.deep_plan(None, "ROG Ally X を調べて", [], 3)
+    assert fallback and len(intents) == 1 and subs[0]["question"] == "ROG Ally X を調べて"
+
+
+def test_apply_reflect_needs_evidence_and_only_searches_open_questions():
+    search = {"subquestions": [{"id": "q1", "question": "A", "status": "open"}, {"id": "q2", "question": "B", "status": "open"}],
+              "intents": [{"id": 0, "tool": "web", "q": "alpha"}]}
+    cards = [{"id": "0.1", "url": "u"}]
+    reflect = sa.Reflect.model_validate({
+        "subquestions": [{"id": "q1", "status": "answered", "evidence_card_ids": ["0.1"]},
+                         {"id": "q2", "status": "answered", "evidence_card_ids": ["9.9"]}],
+        "contradictions": [{"subquestion_id": "q1", "card_ids": ["0.1"], "summary": "one card only"}],
+        "next_intents": [{"q": "alpha", "subquestion_id": "q2"}, {"q": "new topic", "subquestion_id": "q1"},
+                         {"q": "beta", "subquestion_id": "q2"}]})
+    out = sa.apply_reflect(search, reflect, cards, 1, 3)
+    assert [s["status"] for s in out["subquestions"]] == ["answered", "open"]  # unknown card -> not answered
+    assert out["contradictions"] == []  # a contradiction needs two cards
+    assert [i["q"] for i in out["next_intents"]] == ["beta"]  # no repeat, no new topic
+    assert out["open"] == ["q2"] and out["covered"] == ["q1"]
+
+
+def test_format_answer_lists_open_questions_and_stop_reason():
+    refs = [{"n": 1, "url": "https://a", "title": "A"}, {"n": 2, "url": "https://b", "title": "B"}]
+    cards = [{"id": "0.1", "url": "https://a"}, {"id": "1.1", "url": "https://b"}]
+    search = {"subquestions": [{"id": "q1", "question": "A?", "status": "answered"},
+                               {"id": "q2", "question": "B?", "status": "partial"}],
+              "contradictions": [{"card_ids": ["0.1", "1.1"], "summary": "数が違う"}],
+              "stop_reason": "budget", "round": 4, "pages_read": 12}
+    text = sa.format_answer("答え [1]", refs, search, cards)
+    assert "B?（一部）" in text and "A?" not in text.split("**未解決の下位問い**")[1].split("**")[0]
+    assert "数が違う [1] [2]" in text and "停止理由: 予算の上限（4 ラウンド、12 ページ）" in text
+    assert text.endswith("- [2] [B](https://b)")
