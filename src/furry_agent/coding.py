@@ -99,8 +99,8 @@ def fix_input(request: str, code: dict) -> str:
     files = "\n\n".join(f"FILE: {f['path']}\n```{f.get('language', '')}\n{f['content']}\n```" for f in code["files"])
     status = "時間切れ（60 秒）" if code.get("timed_out") else f"終了コード {code.get('last_exit')}"
     return (f"依頼: {request}\n\n前回のファイル:\n{files}\n\nCOMMAND: {' '.join(code['command'])}\n\n"
-            f"実行結果: {status}\n\nstdout（末尾）:\n```text\n{code.get('stdout_tail', '')[-3000:]}\n```\n\n"
-            f"stderr（末尾）:\n```text\n{code.get('stderr_tail', '')[-3000:]}\n```\n\n"
+            f"実行結果: {status}\n\nstdout（末尾）:\n```text\n{code.get('stdout_tail', '')[-1000:]}\n```\n\n"
+            f"stderr（末尾）:\n```text\n{code.get('stderr_tail', '')[-1500:]}\n```\n\n"
             "失敗の原因を直してください。変わるファイルは全文で返してください。")
 
 

@@ -28,7 +28,6 @@ docs/chat-deep-search-creative-sandbox.md is the design.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -44,9 +43,9 @@ from furry_agent import code_nodes, modes, search_agent as sa, write_nodes, writ
 from furry_agent.bonsai_select import (Catalog, Rank, Selection, SelectionError, available_models, free_memory_mb,
                                        select_model)
 from furry_agent.bonsai_worker import Ledger, LlamaServer, WorkerError, free_port, run_reader
-from furry_agent.chat_common import (RESET, ChatState, StageError, _cleanup, _conf, _fail, _final, _held,
+from furry_agent.chat_common import (RESET, ChatState, StageError, _ask, _cleanup, _conf, _fail, _final, _held,
                                      _history, _is_think, _last_human, _leaders, _ledgers, _lmstudio, _lock,
-                                     _max_tokens, _progress, _prompt, _settings, _text_of, _thought, _usage, log)
+                                     _progress, _prompt, _settings, _text_of, log)
 from furry_agent.config import ChatSettings
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
@@ -61,6 +60,7 @@ LEADER_LABEL = "Qwen3.8 27B abliterated（LM Studio）"
 HITS_PER_INTENT = 4  # default of SEARCH_HITS_PER_INTENT
 PORT_ROUTE, PORT_FILTER, PORT_LEADER = 7, 8, 9  # offsets from BONSAI_BASE_PORT; readers use 0..2
 LARGE_BOOT_S = 300.0
+LEADER_CTX = 8192  # the proxy leader's llama-server context (_server: large models get at least 8192)
 ROUTER_KINDS = {"SEARCH": SEARCH, "WRITE": WRITE, "CODE": CODE, "CHAT": CHAT}  # the router never sends to the image tab
 
 
@@ -320,16 +320,15 @@ async def chat(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
     lmstudio = _lmstudio(config, settings)
     token = state.get("lock_token")
-    think = _is_think(state)
     try:
         token = await _lock(state, config, settings)
         messages = [{"role": "system", "content": await _prompt(settings, "system_chat.txt")},
                     *_history(state, settings.history_turns)]
         async with _held(token):
-            reply = await lmstudio.chat(messages, max_tokens=_max_tokens(state, settings, 1536, True),
-                                        temperature=0.6, timeout_s=settings.chat_timeout_s, thinking=think)
+            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=1536, answer_min=512,
+                                         temperature=0.6, stage="回答")
         text = reply.content or "（空の応答でした）"
-        log.info("chat answered thinking=%s %s", think, _usage(reply))
+        log.info("chat answered mode=%s", state.get("mode"))
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -340,7 +339,7 @@ async def chat(state: ChatState, config: RunnableConfig) -> dict:
         return _fail(state, f"LM Studio に接続できないか、時間切れです（{exc}）", "chat")
     # Plain chat keeps the 27B loaded (LM Studio's JIT TTL unloads it); the image workflow ejects it anyway.
     await _cleanup(token)
-    return {"messages": [_final(state, text, thoughts=_thought("回答", reply))], "lock_token": None}
+    return {"messages": [_final(state, text, thoughts=thoughts)], "lock_token": None}
 
 
 # --- plan ---------------------------------------------------------------------------------------------------------
@@ -782,16 +781,16 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
                         "messages": [_progress(state, text + "\n\n資料なしで書きます…", _trace(state, search))]}
             return {"lock_token": None, "messages": [_progress(state, text, _trace(state, search))]}
         client, label = await _leader_client(config, settings, state, "synthesize")
-        # Thinking tokens only on the LM Studio 27B (the proxy leader runs with --reasoning off).
-        thinking = think and search["mode"] == "resident"
+        # Thinking tokens only on the LM Studio 27B (the proxy leader runs with --reasoning off, 8192 context).
+        resident = search["mode"] == "resident"
         async with _held(token):
-            reply = await client.chat([{"role": "system", "content": await _prompt(settings, "system_search.txt")},
-                                       {"role": "user", "content": sa.leader_input(search["question"], cards, refs,
-                                                                                   search if think else None)}],
-                                      max_tokens=_max_tokens(state, settings, 1600 if think else 1200, thinking),
-                                      temperature=0.4, timeout_s=settings.chat_timeout_s, thinking=thinking)
+            reply, thoughts = await _ask(
+                state, settings, client,
+                [{"role": "system", "content": await _prompt(settings, "system_search.txt")},
+                 {"role": "user", "content": sa.leader_input(search["question"], cards, refs, search if think else None)}],
+                base=1600 if think else 1200, answer_min=800, temperature=0.4, stage="統合", thinking=resident,
+                context=None if resident else LEADER_CTX)
         answer = reply.content or "（統合モデルの応答が空でした）"
-        thoughts = _thought("統合", reply)
         roles["synthesizer"] = label
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))

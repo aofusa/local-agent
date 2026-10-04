@@ -253,8 +253,57 @@ async def _held(token: str | None):
                 await task
 
 
-def _max_tokens(state: ChatState, settings: ChatSettings, base: int, thinking: bool) -> int:
-    return base + (settings.think_tokens if thinking and _is_think(state) else 0)
+def prompt_tokens(messages: list[dict]) -> int:
+    """A cautious token estimate: ~1 token per Japanese character, ~1 per 3.5 ASCII characters."""
+    total = 0
+    for message in messages:
+        text = str(message.get("content") or "")
+        ascii_ = sum(1 for ch in text if ord(ch) < 128)
+        total += (len(text) - ascii_) + ascii_ // 3 + 8
+    return total
+
+
+def fit_messages(messages: list[dict], budget: int) -> list[dict]:
+    """Drop the oldest turns (never the system prompt or the last message) until the prompt fits ``budget``
+    tokens; a last message that is still too long keeps its end."""
+    out = list(messages)
+    while prompt_tokens(out) > budget and len(out) > 2:
+        del out[1]
+    if prompt_tokens(out) > budget and out:
+        last = dict(out[-1])
+        over = prompt_tokens(out) - budget
+        text = str(last.get("content") or "")
+        last["content"] = text[min(len(text), over + 16):]
+        out[-1] = last
+    return out
+
+
+async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[dict], *, base: int,
+               answer_min: int, temperature: float, stage: str, thinking: bool = True,
+               context: int | None = None) -> tuple[Any, list[dict]]:
+    """One free-text model call that fits the model's context window.
+
+    LM Studio loads the 27B with LMSTUDIO_CONTEXT tokens (4096 from scripts/setup-lmstudio.ps1: more does not fit
+    this machine's memory), and thinking tokens count against max_tokens. Thinking is used only in think mode
+    and only when the window still leaves ``answer_min`` tokens plus a thinking budget; when the thoughts used
+    everything and no answer came, the call is made once more without thinking (the thoughts are kept).
+    """
+    window = context or settings.lmstudio_ctx
+    want_think = thinking and _is_think(state)
+    messages = fit_messages(messages, window - answer_min - (settings.think_tokens // 3 if want_think else 0) - 48)
+    room = max(256, window - prompt_tokens(messages) - 48)
+    think = want_think and room >= answer_min + settings.think_tokens // 3
+    max_tokens = min(room, base + settings.think_tokens) if think else min(room, base)
+    reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature,
+                              timeout_s=settings.chat_timeout_s, thinking=think)
+    log.info("%s: thinking=%s max_tokens=%d %s", stage, think, max_tokens, _usage(reply))
+    thoughts = _thought(stage, reply)
+    if think and not (reply.content or "").strip():
+        log.info("%s: thinking used the whole budget; answering again without thinking", stage)
+        reply = await client.chat(messages, max_tokens=min(room, base), temperature=temperature,
+                                  timeout_s=settings.chat_timeout_s, thinking=False)
+        log.info("%s: retry %s", stage, _usage(reply))
+    return reply, thoughts
 
 
 def _hitl(name: str, args: dict, description: str) -> dict:

@@ -106,6 +106,8 @@ class ChatSettings:
 
     lmstudio_url: str = "http://127.0.0.1:1234/v1"
     lmstudio_model: str = ""
+    # Context window of the LM Studio 27B (scripts/setup-lmstudio.ps1 loads it with 4096: more does not fit).
+    lmstudio_ctx: int = 4096
     # One model call of the chat tab (conversation, writing, code, synthesis). 20 minutes: the 27B on this machine
     # needs minutes for a long draft or for thinking tokens.
     chat_timeout_s: float = 1200.0
@@ -159,6 +161,7 @@ class ChatSettings:
         return cls(
             lmstudio_url=os.environ.get("LMSTUDIO_URL", "").strip() or "http://127.0.0.1:1234/v1",
             lmstudio_model=os.environ.get("LMSTUDIO_MODEL", "").strip(),
+            lmstudio_ctx=_int("LMSTUDIO_CONTEXT", 4096, 1024, 262144),
             chat_timeout_s=_float("CHAT_TIMEOUT_S", 1200.0),
             history_turns=_int("CHAT_HISTORY_TURNS", 12, 1, 100),
             tor_socks_url=socks,

@@ -86,3 +86,71 @@ async def test_lm_studio_thinking_uses_reasoning_effort_and_separates_the_though
     assert result.content == "答え" and result.reasoning == "思考の中身"
     body, result = await _body(LMStudio, False, {"choices": [{"message": {"content": "<think>x</think>答え"}}]})
     assert "reasoning_effort" not in body and result.content == "答え" and result.reasoning == "x"
+
+
+# --- fitting LM Studio's 4096-token window ----------------------------------------------------------------------
+
+
+class _Recorder:
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    async def chat(self, messages, **kw):
+        from furry_agent.llm_client import ChatReply
+
+        self.calls.append({"messages": messages, **kw})
+        content, reasoning = self.replies.pop(0)
+        return ChatReply(content, reasoning=reasoning)
+
+
+def _state(mode):
+    return {"mode": mode, "thinking": []}
+
+
+async def test_ask_keeps_max_tokens_inside_the_window():
+    from furry_agent.chat_common import _ask, prompt_tokens
+    from furry_agent.config import ChatSettings
+
+    settings = ChatSettings()
+    llm = _Recorder(("答え", "考え"))
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "質問" * 50}]
+    reply, thoughts = await _ask(_state("think"), settings, llm, messages, base=3500, answer_min=1200,
+                                 temperature=0.2, stage="コード")
+    call = llm.calls[0]
+    assert call["thinking"] is True and call["max_tokens"] + prompt_tokens(messages) <= settings.lmstudio_ctx
+    assert reply.content == "答え" and thoughts == [{"stage": "コード", "text": "考え"}]
+
+
+async def test_ask_turns_thinking_off_when_the_window_is_too_small_and_trims_history():
+    from furry_agent.chat_common import _ask, prompt_tokens
+    from furry_agent.config import ChatSettings
+
+    settings = ChatSettings()
+    llm = _Recorder(("答え", ""))
+    history = [{"role": "user" if i % 2 == 0 else "assistant", "content": "長い" * 600} for i in range(6)]
+    messages = [{"role": "system", "content": "s"}, *history, {"role": "user", "content": "最後の質問"}]
+    await _ask(_state("think"), settings, llm, messages, base=1536, answer_min=512, temperature=0.6, stage="回答")
+    sent = llm.calls[0]["messages"]
+    assert sent[0]["content"] == "s" and sent[-1]["content"] == "最後の質問" and len(sent) < len(messages)
+    assert prompt_tokens(sent) + llm.calls[0]["max_tokens"] <= settings.lmstudio_ctx
+
+
+async def test_ask_retries_without_thinking_when_no_answer_came():
+    from furry_agent.chat_common import _ask
+    from furry_agent.config import ChatSettings
+
+    llm = _Recorder(("", "延々と考えた"), ("答え", ""))
+    reply, thoughts = await _ask(_state("think"), ChatSettings(), llm, [{"role": "user", "content": "q"}],
+                                 base=1000, answer_min=500, temperature=0.6, stage="回答")
+    assert [c["thinking"] for c in llm.calls] == [True, False]
+    assert reply.content == "答え" and thoughts[0]["text"] == "延々と考えた"
+
+
+async def test_ask_never_thinks_in_fast_mode():
+    from furry_agent.chat_common import _ask
+    from furry_agent.config import ChatSettings
+
+    llm = _Recorder(("答え", ""))
+    await _ask(_state("fast"), ChatSettings(), llm, [{"role": "user", "content": "q"}], base=1000, answer_min=500,
+               temperature=0.6, stage="回答")
+    assert llm.calls[0]["thinking"] is False and llm.calls[0]["max_tokens"] == 1000

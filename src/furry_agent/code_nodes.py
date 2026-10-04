@@ -24,9 +24,8 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 
 from furry_agent import coding, sandbox
-from furry_agent.chat_common import (ChatState, _cleanup, _conf, _decision, _edited_args, _fail, _final, _held,
-                                     _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock, _max_tokens,
-                                     _progress, _prompt, _settings, _thought, _usage, log)
+from furry_agent.chat_common import (ChatState, _ask, _cleanup, _conf, _decision, _edited_args, _fail, _final, _held,
+                                     _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock, _progress, _prompt, _settings, log)
 from furry_agent.config import REPO_ROOT, ChatSettings
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
@@ -83,17 +82,16 @@ async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSett
     try:
         token = await _lock(state, config, settings)
         async with _held(token):
-            reply = await lmstudio.chat(messages, max_tokens=_max_tokens(state, settings, CODE_TOKENS, True),
-                                        temperature=0.2, timeout_s=settings.chat_timeout_s, thinking=_is_think(state))
+            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=1200,
+                                         temperature=0.2, stage="修正" if fix else "コード")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
     finally:
         # The container never needs the job lock (§5.5): give it back right after the model call.
         await _cleanup(token)
-    log.info("code %s generated thinking=%s %s", "fix" if fix else "plan", _is_think(state), _usage(reply))
     plan = coding.parse_plan(reply.content, profile, code.get("files") if fix else None)
-    return plan, _thought("修正" if fix else "コード", reply)
+    return plan, thoughts
 
 
 async def code_plan(state: ChatState, config: RunnableConfig) -> dict:

@@ -24,9 +24,9 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 
 from furry_agent import search_agent as sa, writing
-from furry_agent.chat_common import (ChatState, _cleanup, _decision, _edited_args, _fail, _final, _held, _hitl,
-                                     _is_think, _lmstudio, _lock, _max_tokens, _progress, _prompt, _settings,
-                                     _thought, _usage, log)
+from furry_agent.chat_common import (ChatState, _ask, _cleanup, _decision, _edited_args, _fail, _final, _held, _hitl,
+                                     _is_think, _lmstudio, _lock, _progress, _prompt, _settings,
+                                     _usage, log)
 from furry_agent.job_lock import JobLockBusy
 from furry_agent.llm_client import LLMError
 
@@ -127,10 +127,10 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
         user = writing.draft_input(artifact, route["text"], chapter=chapter, continuation=continuation,
                                    instruction=instruction)
         async with _held(token):
-            reply = await lmstudio.chat([{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
-                                         {"role": "user", "content": user}],
-                                        max_tokens=_max_tokens(state, settings, DRAFT_TOKENS, True), temperature=0.7,
-                                        timeout_s=settings.chat_timeout_s, thinking=think)
+            reply, thoughts = await _ask(state, settings, lmstudio,
+                                         [{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
+                                          {"role": "user", "content": user}],
+                                         base=DRAFT_TOKENS, answer_min=1200, temperature=0.7, stage="本文")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -146,7 +146,6 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
     keep = continuation or (chapter is not None and artifact.get("chapter_index", 0) > 0)
     artifact.update({"draft": writing.append_piece(artifact.get("draft", "") if keep else "", piece),
                      "last_piece": piece, "status": "draft"})
-    thoughts = _thought("本文", reply)
     log.info("write draft chars=%d continuation=%s chapter=%s think=%s %s", len(piece), continuation,
              artifact.get("chapter_index") if chapter else None, think, _usage(reply))
     if not think:
