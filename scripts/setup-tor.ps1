@@ -51,10 +51,7 @@ if ($LASTEXITCODE -ne 0) { throw "ダウンロードに失敗しました: $dist
 $sums = (Invoke-WebRequest "$dist/$Version/sha256sums-signed-build.txt" -UseBasicParsing -TimeoutSec 30).Content
 if ($sums -is [byte[]]) { $sums = [Text.Encoding]::UTF8.GetString($sums) }
 $expected = ($sums -split "`n" | Where-Object { $_ -match [regex]::Escape($file) + '\s*$' } | Select-Object -First 1) -replace '\s.*$', ''
-# .NET instead of Get-FileHash: the cmdlet is missing when the module path comes from another PowerShell.
-$stream = [IO.File]::OpenRead($archive)
-try { $actual = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object { $_.ToString("x2") }) }
-finally { $stream.Dispose() }
+$actual = Get-FileSha256 $archive
 if (-not $expected -or $expected.ToLowerInvariant() -ne $actual) { Remove-Item $archive; throw "SHA-256 が一致しません（期待 $expected / 実際 $actual）" }
 Write-Ok "sha256 $actual"
 

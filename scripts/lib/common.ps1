@@ -249,3 +249,14 @@ function Get-ComfyServerArgs($Layout, [int]$Port = 8188) {
     if ($Layout.OutputDir) { $arguments += @("--output-directory", $Layout.OutputDir) }
     $arguments
 }
+
+# --- downloads ---------------------------------------------------------------------
+
+function Get-FileSha256([string]$Path) {
+    # .NET instead of Get-FileHash: the cmdlet is missing when the module path comes from another PowerShell.
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        -join ($hasher.ComputeHash($stream) | ForEach-Object { $_.ToString("x2") })
+    } finally { $stream.Dispose() }
+}

@@ -132,8 +132,8 @@ cd local-agent
 
 ```powershell
 .\scripts\setup-tor.ps1             # Tor Expert Bundle（SHA-256 確認）を tools\tor へ。TOR_EXE を .env へ
-.\scripts\setup-llamacpp.ps1        # PrismML llama.cpp fork の Vulkan 版を tools\llama-prism へ（-FromSource でビルド）
-.\scripts\setup-search-models.ps1   # 検索モデル 8 つ（約 20GB、再開可）を tools\models へ
+.\scripts\setup-llamacpp.ps1        # PrismML llama.cpp fork の Vulkan 版を tools\llama-prism へ（SHA-256 照合。-FromSource でビルド）
+.\scripts\setup-search-models.ps1   # 検索モデル 8 つ（約 20GB、再開可、SHA-256 照合）を tools\models へ（-Verify で取得済みも再照合）
 .\scripts\probe-bonsai.ps1          # 各モデルを 1 回ずつ起動して検証し、tools\bonsai\rank.json に順位を書く
 ```
 
@@ -220,7 +220,7 @@ Deployment URL / Assistant ID の入力画面は出ません（ビルド時に�
 | 4 | `.\scripts\start-ui.ps1`（`-HostAddress <IP>` で接続先を明示可） | `0.0.0.0:3000` |
 | 5 | `.\scripts\start-tor.ps1`（チャットタブの検索用。止めるときは `-Stop`） | `127.0.0.1:9050` |
 
-- 検索モデルの llama-server は常駐させません。チャットタブが検索のたびに起動し、終わったら止めます。Tor が止まっていれば、チャットタブが自動で起動します（`TOR_AUTOSTART=1`）。
+- 検索モデルの llama-server は常駐させません。チャットタブが検索のたびに `127.0.0.1` で起動し（起動ごとにランダムな API キー付き）、終わったら止めます。Tor が止まっていれば、チャットタブが自動で起動します（`TOR_AUTOSTART=1`）。
 
 - agent-chat-ui は `NEXT_PUBLIC_API_URL=http://<LAN IP>:2024` を **ビルド時に** 埋め込みます。`localhost` にすると他ホストのブラウザは自分自身へ接続してしまうためです。
   LAN IP が変わったら `start-ui.ps1` が自動で再ビルドします。

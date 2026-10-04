@@ -87,6 +87,15 @@ if ($FromSource) {
         $url = "https://github.com/$($catalog.llama_repo)/releases/download/$tag/$asset"
         Invoke-Native curl.exe -L --fail --retry 3 -o $zip $url | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "ダウンロードに失敗しました: $url" }
+        # The pinned release's SHA-256 is in the catalog; another tag uses the digest GitHub publishes.
+        $expected = if ($tag -eq $catalog.llama_release) { $catalog.llama_sha256 } else {
+            $release = Invoke-RestMethod "https://api.github.com/repos/$($catalog.llama_repo)/releases/tags/$tag" -TimeoutSec 30
+            ((ConvertTo-ObjectArray $release.assets | Where-Object { $_.name -eq $asset }).digest -replace '^sha256:', '')
+        }
+        $actual = Get-FileSha256 $zip
+        if (-not $expected) { Write-Warn2 "この版には公開された SHA-256 がありません（sha256 $actual）" }
+        elseif ($expected -ne $actual) { Remove-Item $zip; throw "SHA-256 が一致しません（期待 $expected / 実際 $actual）" }
+        else { Write-Ok "sha256 $actual" }
         if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
         Expand-Archive -Path $zip -DestinationPath $dir
         Remove-Item $zip

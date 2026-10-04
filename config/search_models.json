@@ -1,7 +1,8 @@
 {
-  "_comment": "Local models for the chat tab's search agent. Run only on the PrismML llama.cpp fork (scripts/setup-llamacpp.ps1), never in LM Studio or ComfyUI. Sizes are the GGUF sizes in bytes; mem_mb is a first guess (weights + 4k context) that scripts/probe-bonsai.ps1 replaces with a measurement in tools/bonsai/rank.json.",
+  "_comment": "Local models for the chat tab's search agent. Run only on the PrismML llama.cpp fork (scripts/setup-llamacpp.ps1), never in LM Studio or ComfyUI. Sizes are the GGUF sizes in bytes; mem_mb is a first guess (weights + 4k context) that scripts/probe-bonsai.ps1 replaces with a measurement in tools/bonsai/rank.json. sha256 values come from the Hugging Face / GitHub release metadata and are checked after download.",
   "llama_release": "prism-b10754-2459f68",
   "llama_asset": "llama-{tag}-bin-win-vulkan-x64.zip",
+  "llama_sha256": "790c979ca73f8b57c5a89ae782e952d8641e64280df4a11664198245f81e9df7",
   "llama_repo": "PrismML-Eng/llama.cpp",
   "llama_branch": "prism",
   "models": [
@@ -11,6 +12,7 @@
       "repo": "prism-ml/Bonsai-8B-gguf",
       "file": "Bonsai-8B-Q1_0.gguf",
       "size": 1158654496,
+      "sha256": "284a335aa3fb2ced3b1b01fcb40b08aa783e3b70832767f0dd2e3fdfa134bd54",
       "mem_mb": 1900,
       "class": "small",
       "thinking": "qwen3"
@@ -21,6 +23,7 @@
       "repo": "prism-ml/Ternary-Bonsai-8B-gguf",
       "file": "Ternary-Bonsai-8B-PQ2_0.gguf",
       "size": 2182184672,
+      "sha256": "1376f942aa90e60f7b570c1d81b3916fea1315ff85aa1c4d19006af68fb4b922",
       "mem_mb": 2700,
       "class": "small",
       "thinking": "qwen3"
@@ -31,6 +34,7 @@
       "repo": "prism-ml/Bonsai-4B-gguf",
       "file": "Bonsai-4B-Q1_0.gguf",
       "size": 572270624,
+      "sha256": "4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168",
       "mem_mb": 1000,
       "class": "small",
       "thinking": "qwen3"
@@ -41,6 +45,7 @@
       "repo": "prism-ml/Ternary-Bonsai-2-27B-gguf",
       "file": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
       "size": 5946648928,
+      "sha256": "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3",
       "mem_mb": 6900,
       "class": "large",
       "thinking": "qwen3"
@@ -51,6 +56,7 @@
       "repo": "Override-6/Ternary-Bonsai-2-27B-abliterated-gguf",
       "file": "Ternary-Bonsai-2-27B-PTQ1_0-abliterated.gguf",
       "size": 5946648928,
+      "sha256": "0b3106548351a309b080951705cf978bf3d49288df127d8f99e39d7af47378ed",
       "mem_mb": 6900,
       "class": "large",
       "thinking": "qwen3"
@@ -61,6 +67,7 @@
       "repo": "mradermacher/Qwen3.5-4B-heretic-GGUF",
       "file": "Qwen3.5-4B-heretic.Q4_K_M.gguf",
       "size": 2707514720,
+      "sha256": "c053dcec1473e31e361dd93e8cddcdc052b521d7d9f6086e4e6f38b657047b38",
       "mem_mb": 3200,
       "class": "small",
       "thinking": "qwen3"
@@ -71,6 +78,7 @@
       "repo": "mradermacher/Qwen3-1.7B-heretic-GGUF",
       "file": "Qwen3-1.7B-heretic.Q4_K_M.gguf",
       "size": 1107409568,
+      "sha256": "403235e8f7ceac8531bcf7337085803a2c741c96e04566523e6b0e952332e1e3",
       "mem_mb": 1500,
       "class": "small",
       "thinking": "qwen3"
@@ -81,6 +89,7 @@
       "repo": "mradermacher/Qwen3-0.6B-Heretic-GGUF",
       "file": "Qwen3-0.6B-Heretic.Q8_0.gguf",
       "size": 639447520,
+      "sha256": "d0bfa13c05af77e1d7139aa70661da9d786a9dc2ec3416ae99155023a3ae89ab",
       "mem_mb": 900,
       "class": "small",
       "thinking": "qwen3"

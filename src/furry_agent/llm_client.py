@@ -89,8 +89,9 @@ class ChatReply:
 
 class OpenAICompatClient:
     def __init__(self, base_url: str, model: str = "", timeout_s: float = 180.0, *, thinking_off: bool = True,
-                 transport: httpx.AsyncBaseTransport | None = None):
+                 transport: httpx.AsyncBaseTransport | None = None, api_key: str = "local"):
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self.model = model
         self.timeout_s = timeout_s
         self.thinking_off = thinking_off
@@ -98,7 +99,7 @@ class OpenAICompatClient:
 
     def _http(self, timeout: float | None = None) -> httpx.AsyncClient:
         kwargs: dict = {"timeout": timeout or self.timeout_s, "trust_env": False,
-                        "headers": {"Authorization": "Bearer local"}}
+                        "headers": {"Authorization": f"Bearer {self.api_key}"}}
         if self._transport is not None:
             kwargs["transport"] = self._transport
         return httpx.AsyncClient(**kwargs)
