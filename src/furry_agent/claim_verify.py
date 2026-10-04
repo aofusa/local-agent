@@ -38,7 +38,7 @@ CLAIM_CHARS = 120
 
 class ExtractedClaim(BaseModel):
     claim_id: str = ""
-    text: str = Field(default="", max_length=600)
+    text: str = ""
 
 
 class Extracted(BaseModel):
@@ -59,7 +59,7 @@ class Verdicts(BaseModel):
 
 
 class DocCard(BaseModel):
-    quote: str = Field(default="", max_length=2000)
+    quote: str = ""
     note: str = ""
 
 
