@@ -50,7 +50,7 @@ def test_unset_roots_turn_the_feature_off(tree):
 def test_parse_roots_keeps_absolute_existing_dirs_only(tree, tmp_path):
     root, _ = tree
     roots = parse_roots(f"{root}, relative/dir ,{tmp_path / 'missing'},")
-    assert roots == [root.resolve()]
+    assert roots == [root, tmp_path / "missing"]  # existence is checked per request (real_roots)
 
 
 def test_directory_lists_text_files_breadth_first_and_denies_secrets(tree):

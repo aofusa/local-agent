@@ -52,16 +52,27 @@ class DocTarget:
 
 
 def parse_roots(value: str) -> list[Path]:
-    """LOCAL_DOC_ROOTS: comma separated absolute paths. Relative or missing entries are ignored."""
+    """LOCAL_DOC_ROOTS: comma separated absolute paths; relative entries are ignored. No file system access here
+    (settings are read on the event loop); ``real_roots`` resolves them when a request is served."""
     roots = []
     for raw in (value or "").split(","):
         raw = raw.strip().strip('"')
-        if not raw:
-            continue
-        path = Path(raw)
-        if path.is_absolute() and path.is_dir():
-            roots.append(path.resolve())
+        if raw and Path(raw).is_absolute():
+            roots.append(Path(raw))
     return roots
+
+
+def real_roots(roots: list[Path]) -> list[Path]:
+    """The roots that exist, as real paths (blocking: call in a thread)."""
+    out = []
+    for root in roots:
+        try:
+            real = Path(root).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if real.is_dir() and real not in out:
+            out.append(real)
+    return out
 
 
 def _key(path: Path | str) -> str:
@@ -124,6 +135,9 @@ def resolve(raw: str, roots: list[Path], *, max_files: int = 30, max_depth: int 
     """The files of one /docs request. Raises DocError for every refusal."""
     if not roots:
         raise DocError("unset", "LOCAL_DOC_ROOTS が未設定です")
+    roots = real_roots(roots)
+    if not roots:
+        raise DocError("unset", "LOCAL_DOC_ROOTS のディレクトリが見つかりません")
     text = _check_text(raw)
     found: tuple[Path, Path] | None = None
     exists = False

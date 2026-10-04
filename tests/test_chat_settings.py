@@ -22,5 +22,14 @@ def test_env_values(monkeypatch, tmp_path):
     monkeypatch.setenv("DOC_MAX_CHUNKS", "99")
     s = ChatSettings.from_env()
     assert not s.claim_verify and s.claim_fail_open and s.claim_max == 12  # capped at the design's 12
-    assert s.local_doc_roots == (tmp_path.resolve(),)
+    assert s.local_doc_roots == (tmp_path,)
     assert s.doc_extensions == (".md", ".txt") and s.doc_max_chunks == 12
+
+
+async def test_from_env_does_not_touch_the_disk_on_the_event_loop(monkeypatch, tmp_path):
+    # langgraph dev runs nodes under blockbuster; every node reads the settings.
+    from blockbuster import blockbuster_ctx
+
+    monkeypatch.setenv("LOCAL_DOC_ROOTS", f"{tmp_path},{tmp_path / 'missing'}")
+    with blockbuster_ctx():
+        assert len(ChatSettings.from_env().local_doc_roots) == 2
