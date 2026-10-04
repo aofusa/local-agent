@@ -766,3 +766,27 @@ llama-server 側は出力の `<think>` を本文から分離する。分離し�
 - **27B の context と速さ（この端末の実測）**: LM Studio は 27B を context 4096 で読み込む（`setup-lmstudio.ps1`。これ以上はメモリに載らない）。生成は約 0.9 トークン/秒で、Docker Desktop を止めても、ComfyUI に `/free` を送っても変わらなかった。本書の「思考は回答と別ブロック」「draft は 0.7」はそのままに、1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「20 分で出せる量」（速さは応答ごとに測る）の小さい方に収め、答えの分が残らないときは思考を使わない。思考が予算を使い切って本文が空なら、思考なしで 1 回だけ答え直す。修正前は、思考モードのコード生成が 4096 を超える `max_tokens` を要求して 15 分以上止まらなかった。
 - **Docker Desktop の起動（この端末の実測）**: Docker Desktop の VM は約 1.5GB を使い、27B のロード中の空き（約 0.4GB）を食う。止まっているときは確認カードにその旨を出し、承認後に `docker desktop start` で起動して、実行が終わったら止める（承認前には起動しない）。`setup-sandbox.ps1` も、自分で起動したときは最後に止める。
 - **検索モデルの probe**: ルータの出力（`kind`）と批評の出力（`Reflect`）が変わったため、`bonsai_probe.py` の判定を新しい契約に合わせ、`probe-bonsai.ps1` をやり直した。
+
+### 13.4 実測と確認（2026-10-05、この端末）
+
+| 確認 | 結果 |
+|---|---|
+| pytest | 457 passed、2 skipped（Docker 実機テストは Docker 起動中に単独で実行して合格: uid 10001、読み取り専用ルート、ネットワークなし、`/work` への出力） |
+| 速いモードの会話 | 約 165 秒（27B のロード込み） |
+| 思考モードの会話 | 思考 157 トークン + 回答、約 196 秒。思考は回答と別の折りたたみに出た |
+| 思考モードのコード | 生成 → 確認カード → 承認 → `python:3.12-slim` で実行（終了コード 0、1.7 秒）。生成は 619 トークン / 709 秒 |
+| 思考モードの文章 | アウトライン → 本文 → 推敲（置換 0 件）、約 6 分 |
+| 自動モードの検索 | 「ROG Xbox Ally X と Steam Deck OLED の違いは？」→ ルータ（Qwen3-1.7B、新しい `kind`）が SEARCH、自動が「違い」で思考を選択。3 ラウンド、12 ページで `budget` 停止、食い違い（両方の出典番号）と未解決の下位問いを回答に付けた。約 16 分 |
+| 画像タブ SDXL（退行確認） | `t2i_basic`、タグ生成 → LM Studio の unload を確認 → KSampler、`outputs/` と ComfyUI の両方に保存、約 4.3 分 |
+| 画像タブ Chroma1-HD（退行確認） | `COMFY_MODEL_FAMILY=flux`、768×768（`CHROMA_MAX_PIXELS=589824`）、英語の説明文 → 生成・保存、約 15 分 |
+| UI（LAN アドレス `http://<LAN IP>:3000`、headless Edge） | チャットタブに「自動 / 速い / 思考」、送信の `config.configurable.mode` が選択どおり、回答下のモード表示、思考の折りたたみ。画像タブはモード切替なし・添付ありで変化なし |
+| 27B の生成速度 | 約 0.9 トークン/秒（Docker 停止、ComfyUI `/free` 後も同じ） |
+| メモリ | 27B ロード中の空き約 0.4GB、Docker Desktop の VM 約 1.5GB |
+
+確認中に見つけて直したもの: 承認後の実行が langgraph dev の BlockingError で止まる（`build_argv` の `resolve()`）、4096 を超える `max_tokens`、思考の予備枠が大きすぎて思考モードで思考しない、LM Studio の TTL と要求が重なったときの "Model is unloaded."、critic の「一部」が未回答に落ちる。
+
+### 13.5 残る制約
+
+- 他ホストの実機ブラウザからは確認していない（この端末から LAN アドレスに headless Edge で接続して確認した）。
+- `probe-bonsai.ps1` のやり直しは、Ternary-Bonsai-2-27B を読み込んだところでメモリ不足のため中断された（Ternary-Bonsai-8B は新しい批評の契約に合格）。`tools/bonsai/rank.json` は前回のまま。ルータは実際の検索で新しい契約どおりに動いた。
+- 27B が遅いため、思考モードのコードと長い文章は 1 回 10 分以上かかる。1 回の呼び出しで出せるのは約 1000 トークン。
