@@ -430,7 +430,7 @@ async def _check_models(client: ComfyClient, settings: Settings, family: str, te
     values.update({k: v for k, v in settings.model_overrides(family).items() if k in values})
     values["ckpt_name"] = settings.ckpt_for(family) or values["ckpt_name"]
     if family != FLUX and "chroma" in values["ckpt_name"].lower():
-        raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=chroma "
+        raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=flux "
                             "も設定して LangGraph を再起動してください")
     missing = []
     for slot, path in model_slots(entry).items():

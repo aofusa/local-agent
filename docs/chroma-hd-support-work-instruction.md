@@ -551,7 +551,7 @@ BF16 の `chroma_v10HD.safetensors` を `weight_dtype=fp8_e4m3fn` で読む最�
 | 2 | UNET が Chroma1-HD、T5、`ae.safetensors` | 実機で確認。ComfyUI ログ「loaded chroma_v10HD.safetensors (fp8_e4m3fn) + t5xxl_fp8_e4m3fn.safetensors (chroma) + ae.safetensors」（変換済み fp8 を使用） |
 | 3 | positive にタグ列が無い | 実機で確認（英語 3〜4 文。例「An anthropomorphic dragon man with blue scales looks back over his shoulder on the Kobe harbor at dusk, full body view. …」）。タグ列が返ったときは応答に警告 |
 | 4 | negative が空でない、CFG 3.0〜4.0 | 実機で確認（cfg 3.5、euler / beta、negative は既定の英語 1 行） |
-| 5 | 別ホストで画像表示、`127.0.0.1:8188` への要求なし | LAN アドレス `http://192.168.11.41:2024` 経由でスレッドの最終メッセージが text + image ブロックであること、UI のビルドが `192.168.11.41:2024` を向くことを確認。画像は base64 で返し ComfyUI の URL は出さない。別ホストのブラウザでの目視は未実施 |
+| 5 | 別ホストで画像表示、`127.0.0.1:8188` への要求なし | LAN アドレス `http://<LAN IP>:2024` 経由でスレッドの最終メッセージが text + image ブロックであること、UI のビルドが `<LAN IP>:2024` を向くことを確認。画像は base64 で返し ComfyUI の URL は出さない。別ホストのブラウザでの目視は未実施 |
 | 6 | モデル名を変えると欠落ファイル名を返す | テストで確認（`test_missing_chroma_file_is_named_without_fallback`） |
 | 7 | 参照画像付きは生成せず理由を返す | テストで確認（`test_chroma_pose_reference_is_refused`） |
 | 8 | 同じ seed とプロンプトで履歴パラメータが一致 | テストで確認（`test_chroma_same_plan_gives_same_prompt`）。seed は `seed 1234` で指定できる |
