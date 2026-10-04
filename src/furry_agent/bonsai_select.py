@@ -74,13 +74,14 @@ class Rank:
         return cls(raw.get("models") or {}, raw.get("order") or {}, True)
 
     def passed(self, model_id: str, task: str) -> bool:
-        if not self.present:
-            return True
+        """False only for a model the probe ran on this task and that failed; unprobed models are allowed."""
         entry = self.models.get(model_id) or {}
         tasks = entry.get("tasks") or {}
-        if task == "worker" and "tool_ok" in entry and task not in tasks:
-            return bool(entry["tool_ok"])  # design doc key
-        return bool(tasks.get(task))
+        if task in tasks:
+            return bool(tasks[task])
+        if task == "worker" and "tool_ok" in entry:
+            return bool(entry["tool_ok"])  # the design doc's key
+        return True
 
     def mem_mb(self, spec: ModelSpec) -> int:
         measured = (self.models.get(spec.id) or {}).get("mem_mb") or (self.models.get(spec.id) or {}).get("rss_mb")

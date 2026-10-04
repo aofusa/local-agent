@@ -54,7 +54,7 @@ class Plan(BaseModel):
 
 class Claim(BaseModel):
     claim: str = Field(min_length=1)
-    quote: str = ""
+    quote: str = Field(min_length=1)
 
 
 class Card(BaseModel):
@@ -102,7 +102,8 @@ async def ask_json(client, messages: list[dict], schema: type[T], *, max_tokens:
     """Ask for JSON, validate it, and retry the same call once when it does not validate."""
     for attempt in (1, 2):
         try:
-            reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature, json_mode=True)
+            reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature, json_mode=True,
+                                      json_schema=schema.model_json_schema())
         except LLMError as exc:
             log.warning("%s: model call failed (attempt %d): %s", schema.__name__, attempt, exc)
             return None

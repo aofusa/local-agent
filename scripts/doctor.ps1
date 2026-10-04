@@ -1,6 +1,7 @@
 ﻿<#
 .SYNOPSIS
-  Check that LM Studio, ComfyUI, LangGraph and agent-chat-ui are configured and reachable.
+  Check that LM Studio, ComfyUI, Tor, the PrismML llama.cpp fork, LangGraph and agent-chat-ui are configured
+  and reachable. The chat tab's search checks are warnings: the image tab works without them.
   Exit code 1 when a required check fails.
 #>
 param(
@@ -102,12 +103,52 @@ Check "checkpoint $ckptName" {
     "found"
 }
 
+Write-Step "チャットタブの検索（Tor / PrismML llama.cpp / Bonsai）"
+Check "Tor SOCKS 127.0.0.1:9050" {
+    $addr = Assert-LoopbackOnly 9050
+    $socks = Get-DotEnvValue "TOR_SOCKS_URL" "socks5h://127.0.0.1:9050"
+    if (-not $socks.StartsWith("socks5h://")) { throw "TOR_SOCKS_URL は socks5h:// にしてください（DNS 漏れ）" }
+    $addr
+} -Optional
+Check "PrismML llama-server (BONSAI_LLAMA_SERVER)" {
+    $exe = Get-DotEnvValue "BONSAI_LLAMA_SERVER"
+    if (-not $exe -or -not (Test-Path $exe)) { throw "未導入（scripts\setup-llamacpp.ps1）" }
+    $version = (Invoke-Native $exe --version | Where-Object { $_ -match "version" } | Select-Object -First 1)
+    $vulkan = Invoke-Native $exe --list-devices | Where-Object { $_ -match "Vulkan" } | Select-Object -First 1
+    if (-not $vulkan) { throw "Vulkan デバイスが見えません: $version" }
+    "$($version.Trim()) / $($vulkan.Trim())"
+} -Optional
+Check "search models (BONSAI_MODELS_DIR)" {
+    $dir = Get-DotEnvValue "BONSAI_MODELS_DIR" (Join-Path (Get-RepoRoot) "tools\models")
+    $catalog = Read-JsonFile (Join-Path (Get-RepoRoot) "config\search_models.json")
+    $models = @(ConvertTo-ObjectArray $catalog.models)
+    $present = @($models | Where-Object { (Test-Path (Join-Path $dir $_.file)) -and (Get-Item (Join-Path $dir $_.file)).Length -eq [int64]$_.size })
+    $absent = @($models | Where-Object { $_ -notin $present } | ForEach-Object { $_.id })
+    if (-not $present) { throw "1 つもありません（scripts\setup-search-models.ps1）" }
+    if ($absent) { throw "$($present.Count)/$($models.Count)。無い: $($absent -join ', ')（自動選択から外れます）" }
+    "$($present.Count)/$($models.Count)"
+} -Optional
+Check "probe rank (tools\bonsai\rank.json)" {
+    $rankPath = Get-DotEnvValue "BONSAI_RANK" (Join-Path (Get-RepoRoot) "tools\bonsai\rank.json")
+    if (-not [IO.Path]::IsPathRooted($rankPath)) { $rankPath = Join-Path (Get-RepoRoot) $rankPath }
+    if (-not (Test-Path $rankPath)) { throw "未検証（scripts\probe-bonsai.ps1。無くても既定の順で動きます）" }
+    $rank = Read-JsonFile $rankPath
+    ($rank.order.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value)[0])" }) -join " "
+} -Optional
+Check "no orphan llama-server" {
+    $orphans = @(Get-Process llama-server -ErrorAction SilentlyContinue)
+    if ($orphans) { throw "残っています: PID $($orphans.Id -join ', ')（検索中でなければ Stop-Process で止めてください）" }
+    "none"
+} -Optional
+
 Write-Step "LangGraph / agent-chat-ui"
 $lan = Get-LanIPv4
-Check "LangGraph graph 'agent' on :$LangGraphPort" {
+Check "LangGraph graphs 'agent' (image) and 'chat' on :$LangGraphPort" {
     $assistants = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$LangGraphPort/assistants/search" `
         -ContentType "application/json" -Body "{}" -TimeoutSec 10
-    if (-not ((ConvertTo-ObjectArray $assistants) | Where-Object { $_.graph_id -eq "agent" })) { throw "graph_id=agent がありません" }
+    $ids = @((ConvertTo-ObjectArray $assistants) | ForEach-Object { $_.graph_id })
+    $absent = @("agent", "chat") | Where-Object { $_ -notin $ids }
+    if ($absent) { throw "graph_id がありません: $($absent -join ', ')（LangGraph を再起動）" }
     "listening on $((Get-ListenAddresses $LangGraphPort) -join ', ')"
 }
 Check "agent-chat-ui on http://${lan}:$UIPort" {

@@ -105,7 +105,8 @@ class OpenAICompatClient:
 
     async def chat(self, messages: list[dict], *, max_tokens: int = 1024, temperature: float = 0.4,
                    tools: list[dict] | None = None, tool_choice: str | None = None,
-                   json_mode: bool = False, timeout_s: float | None = None) -> ChatReply:
+                   json_mode: bool = False, json_schema: dict | None = None,
+                   timeout_s: float | None = None) -> ChatReply:
         body: dict = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": False}
         if self.model:
             body["model"] = self.model
@@ -117,7 +118,11 @@ class OpenAICompatClient:
             body["tools"] = tools
             if tool_choice:
                 body["tool_choice"] = tool_choice
-        if json_mode:
+        if json_schema:
+            # Grammar-constrained output (llama-server and LM Studio both accept OpenAI's json_schema format).
+            body["response_format"] = {"type": "json_schema",
+                                       "json_schema": {"name": "reply", "strict": True, "schema": json_schema}}
+        elif json_mode:
             body["response_format"] = {"type": "json_object"}
         started = time.monotonic()
         try:

@@ -95,3 +95,12 @@ def test_available_models_checks_size(tmp_path):
 
 def test_free_memory_is_positive():
     assert free_memory_mb() > 0
+
+
+def test_unprobed_models_are_allowed_failed_ones_are_not(tmp_path):
+    rank_file = tmp_path / "rank.json"
+    rank_file.write_text(json.dumps({"models": {"ternary-8b": {"tasks": {"worker": False}}, "bonsai-8b": {"tool_ok": False}}}),
+                         encoding="utf-8")
+    rank = Rank.load(rank_file)
+    assert not rank.passed("ternary-8b", "worker") and not rank.passed("bonsai-8b", "worker")
+    assert rank.passed("qwen3.5-4b-heretic", "worker")
