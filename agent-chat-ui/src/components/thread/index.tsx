@@ -39,6 +39,7 @@ import {
 } from "../ui/tooltip";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
+import { CHAT_GRAPH, ModeTabs, useActiveTab } from "./mode-tabs";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -162,6 +163,8 @@ export function Thread() {
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  // local-agent: the chat tab takes text only (attachments belong to the image tab).
+  const isChatTab = useActiveTab() === CHAT_GRAPH;
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -350,6 +353,7 @@ export function Thread() {
                   </Button>
                 )}
               </div>
+              <ModeTabs />
               <div className="absolute top-2 right-4 flex items-center">
                 <OpenGitHubRepo />
               </div>
@@ -395,6 +399,8 @@ export function Thread() {
                 </motion.button>
                 <ConnectedHost apiUrl={stream.apiUrl} />
               </div>
+
+              <ModeTabs className="absolute left-1/2 -translate-x-1/2 max-md:hidden" />
 
               <div className="flex items-center gap-4">
                 <div className="flex items-center">
@@ -506,7 +512,11 @@ export function Thread() {
                             form?.requestSubmit();
                           }
                         }}
-                        placeholder="Type your message..."
+                        placeholder={
+                          isChatTab
+                            ? "メッセージ（「/search」や「調べて」で Tor 経由の検索）"
+                            : "描きたい内容を日本語で（画像は 4 枚まで添付できます）"
+                        }
                         className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
                       />
 
@@ -528,7 +538,10 @@ export function Thread() {
                         </div>
                         <Label
                           htmlFor="file-input"
-                          className="flex cursor-pointer items-center gap-2"
+                          className={cn(
+                            "flex cursor-pointer items-center gap-2",
+                            isChatTab && "hidden",
+                          )}
                         >
                           <Plus className="size-5 text-gray-600" />
                           <span className="text-sm text-gray-600">
