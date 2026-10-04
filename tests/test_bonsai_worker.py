@@ -32,6 +32,11 @@ def test_command_line_is_loopback_vulkan_and_thinking_off():
     assert cmd[cmd.index("-ngl") + 1] == "99" and "-fa" in cmd
     assert cmd[cmd.index("--cache-ram") + 1] == "0"
     assert "-fa" not in LlamaServer("x", Path("m"), 1, ngl=0).command()
+    # A random API key per process, also sent by its client.
+    server = LlamaServer("x", Path("m"), 1)
+    key = server.command()[server.command().index("--api-key") + 1]
+    assert len(key) >= 24 and key != LlamaServer("x", Path("m"), 1).api_key
+    assert server.client().api_key == key
 
 
 async def test_start_and_stop_leave_no_pid_and_free_port():

@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -105,6 +106,9 @@ class LlamaServer:
     logs_dir: Path | None = None
     process: subprocess.Popen | None = field(default=None, repr=False)
     boot_s: float = 0.0
+    # Per-process key: the server listens on loopback with CORS open, so a web page in a local browser could
+    # otherwise reach it while a search runs. /health stays public.
+    api_key: str = field(default_factory=lambda: secrets.token_urlsafe(24), repr=False)
 
     @property
     def base_url(self) -> str:
@@ -117,7 +121,7 @@ class LlamaServer:
     def command(self) -> list[str]:
         cmd = [self.exe, "-m", str(self.model_path), "--host", HOST, "--port", str(self.port),
                "-c", str(self.ctx), "-np", "1", "-ngl", str(self.ngl), "--no-webui", "--jinja",
-               "--reasoning", "off", "--cache-ram", "0"]
+               "--reasoning", "off", "--cache-ram", "0", "--api-key", self.api_key]
         if self.ngl > 0:
             cmd += ["-fa", "on"]  # PTQ1_0 needs flash attention for its Hadamard transform
         if self.logs_dir:
@@ -125,7 +129,7 @@ class LlamaServer:
         return cmd
 
     def client(self, timeout_s: float = 120.0) -> OpenAICompatClient:
-        return OpenAICompatClient(self.base_url, timeout_s=timeout_s)
+        return OpenAICompatClient(self.base_url, timeout_s=timeout_s, api_key=self.api_key)
 
     async def start(self, timeout_s: float = 120.0) -> float:
         # File and socket checks run in a thread: langgraph dev fails runs that block the event loop.
