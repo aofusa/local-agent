@@ -18,6 +18,7 @@ import {
   Link2,
   PenLine,
   ShieldCheck,
+  Workflow,
 } from "lucide-react";
 
 type Hit = { title: string; url: string };
@@ -432,7 +433,7 @@ export function ThinkingView({ thoughts }: { thoughts: Thought[] }) {
 // --- writing / code steps -----------------------------------------------------------------------------
 
 export type TaskTrace = {
-  kind: "write" | "code";
+  kind: "write" | "code" | "control";
   steps?: { title: string; body: string }[];
   artifact_dir?: string;
   image?: string;
@@ -440,6 +441,8 @@ export type TaskTrace = {
   chapters?: number;
   chapter_index?: number;
   chars?: number;
+  step?: number;
+  max_steps?: number;
 };
 
 export function isTaskTrace(value: unknown): value is TaskTrace {
@@ -447,7 +450,8 @@ export function isTaskTrace(value: unknown): value is TaskTrace {
     !!value &&
     typeof value === "object" &&
     ((value as TaskTrace).kind === "write" ||
-      (value as TaskTrace).kind === "code")
+      (value as TaskTrace).kind === "code" ||
+      (value as TaskTrace).kind === "control")
   );
 }
 
@@ -455,18 +459,25 @@ export function TaskTraceView({ trace }: { trace: TaskTrace }) {
   const [open, setOpen] = useState(false);
   const steps = trace.steps ?? [];
   if (!steps.length) return null;
-  const Icon = trace.kind === "code" ? Code2 : PenLine;
-  const summary =
+  const Icon =
     trace.kind === "code"
-      ? [trace.image, trace.artifact_dir].filter(Boolean).join(" · ")
-      : [
-          trace.chapters
-            ? `${Math.min(trace.chapter_index ?? 0, trace.chapters)} / ${trace.chapters} 章`
-            : null,
-          trace.chars ? `${trace.chars} 字` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ");
+      ? Code2
+      : trace.kind === "control"
+        ? Workflow
+        : PenLine;
+  const summary =
+    trace.kind === "control"
+      ? `${trace.step ?? 0} / ${trace.max_steps ?? "?"} 手`
+      : trace.kind === "code"
+        ? [trace.image, trace.artifact_dir].filter(Boolean).join(" · ")
+        : [
+            trace.chapters
+              ? `${Math.min(trace.chapter_index ?? 0, trace.chapters)} / ${trace.chapters} 章`
+              : null,
+            trace.chars ? `${trace.chars} 字` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
   return (
     <div className="bg-muted/40 w-full rounded-xl border text-sm">
       <button
@@ -481,7 +492,11 @@ export function TaskTraceView({ trace }: { trace: TaskTrace }) {
         )}
         <Icon className="size-4" />
         <span className="text-foreground font-medium">
-          {trace.kind === "code" ? "コードの手順" : "執筆の手順"}
+          {trace.kind === "code"
+            ? "コードの手順"
+            : trace.kind === "control"
+              ? "自律の手順"
+              : "執筆の手順"}
         </span>
         <span className="truncate">{summary}</span>
       </button>
