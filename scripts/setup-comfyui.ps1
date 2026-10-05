@@ -149,7 +149,8 @@ if (Test-Path $link) {
 
 Write-Step "モデルの置き場"
 $yaml = Join-Path $dir "extra_model_paths.yaml"
-$existing = @($ModelsDir | Where-Object { $_ } | ForEach-Object {
+# "a,b" arrives as one string through powershell -File: split on , and ; as well.
+$existing = @($ModelsDir | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object {
     if (-not (Test-Path $_)) { throw "-ModelsDir が見つかりません: $_" }
     (Resolve-Path $_).Path
 })

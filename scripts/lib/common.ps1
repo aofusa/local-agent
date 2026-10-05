@@ -200,6 +200,8 @@ function Save-ComfyLayout($Layout) {
     Set-DotEnvValue "COMFYUI_EXTRA_MODEL_PATHS" $Layout.ExtraModelPaths
     Set-DotEnvValue "COMFYUI_INPUT_DIR" $Layout.InputDir
     Set-DotEnvValue "COMFYUI_OUTPUT_DIR" $Layout.OutputDir
+    # Comfy Desktop's data folder (before v0.11.0); no longer read.
+    if (Get-DotEnvValue "COMFYUI_BASE_DIR") { Set-DotEnvValue "COMFYUI_BASE_DIR" "" }
 }
 
 function Get-ComfyServerArgs($Layout, [int]$Port = 8188) {

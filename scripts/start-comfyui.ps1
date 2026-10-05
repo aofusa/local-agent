@@ -16,4 +16,8 @@ $extra = Get-DotEnvValue "COMFYUI_EXTRA_ARGS" ""
 if ($extra) { $arguments += ($extra -split "\s+" | Where-Object { $_ }) }
 Write-Host "ComfyUI: $($layout.Python) $($arguments -join ' ')"
 Set-Location $layout.MainDir
+# Japanese Windows defaults to cp932: a custom node printing other characters (LM Connect's Turkish messages)
+# would fail to import when the output is redirected.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 & $layout.Python @arguments
