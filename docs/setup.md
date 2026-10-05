@@ -40,12 +40,12 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ### モデル
 
-- **LLM**（Huihui Qwen3.8 27B Abliterated の Q4_K_S と mmproj、約 16.5GB）は `setup-llm.ps1` が Hugging Face から取得します。
-  すでに手元にある場合は `-SourceModel <GGUF のパス>` で指定すると、ダウンロードせずにハードリンクします（同じフォルダの `mmproj-model-bf16.gguf` も使います）。
+- **LLM**（Huihui Qwen3.8 27B Abliterated）は `setup-llm.ps1` が用意します。指定は要りません（下の「モデルの探し方」）。
+  LM Studio のモデルフォルダに IQ3_M（以前のこのプロジェクトが作ったもの）があればそれを使い、無ければ Q4_K_S と mmproj（約 16.5GB）を取得して IQ3_M に再量子化します。
 - **チェックポイント** **Yiff in Hell – VANTABLACK**（`yiffInHell_yihVANTABLACK.safetensors`、Illustrious 系 SDXL）は
   [Civitai](https://civitai.com/models/1570986) 等から入手します。次のどれかで ComfyUI に渡します。
   - セットアップ後に `tools\comfyui\models\checkpoints` に置く
-  - 既存の ComfyUI のモデルフォルダがあれば、`setup.ps1 -ModelsDir <models フォルダ>` でそのまま読ませる（コピーしません）
+  - 以前の ComfyUI（Comfy Desktop、`Documents\ComfyUI\models`）のモデルフォルダにあれば、セットアップが自動で取り込む（ハードリンク）。ほかの場所なら `-ModelsDir <models フォルダ>`
   - `-CheckpointUrl <URL>` でダウンロードする
   別のファイル名やモデルを使う場合は、`.env` の `CKPT_NAME` を変更します。
 - （任意）**Chroma1-HD** を使う場合は、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) の拡散モデル
@@ -72,10 +72,10 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | オプション | 説明 |
 |---|---|
 | `-OpenFirewall` | TCP 2024 / 3000 の受信を Private プロファイルで許可（UAC が出ます） |
-| `-ModelsDir <path>[,<path>]` | 既存のモデルフォルダ（`checkpoints\`、`loras\` などを含むフォルダ）を ComfyUI にそのまま読ませる |
+| `-ModelsDir <path>[,<path>]` | 自動では探さない場所にあるモデルフォルダ（`checkpoints\`、`loras\` などを含むフォルダ）。使うモデルを `tools\comfyui\models` に取り込む |
 | `-CheckpointUrl <URL>` | チェックポイント（`CKPT_NAME`）をダウンロードする |
 | `-Torch auto`（既定） / `rocm` / `cuda` / `cpu` | ComfyUI の PyTorch。auto は GPU の名前から選ぶ（Radeon → ROCm、NVIDIA → CUDA、ほか → CPU） |
-| `-SourceModel <GGUF>` | LLM の元ファイルを手元のファイルから使う（ハードリンク） |
+| `-SourceModel <GGUF>` | 自動では探さない場所にある LLM のファイルを使う（ハードリンク） |
 | `-Quant IQ3_M`（既定） / `none` | LLM を再量子化するか（下の「メモリと LLM の量子化」） |
 | `-GpuOffload 0.45`（既定） | LLM の層のうち GPU に置く割合（0〜1） |
 | `-SkipLLM` / `-SkipComfyUI` | どちらかの設定を飛ばす |
@@ -118,7 +118,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | 設定 | 内容 | 置き場（git 管理外） |
 |---|---|---|
 | llama.cpp | PrismML fork の Windows Vulkan 版（`config\search_models.json` に固定した版）を取得し、SHA-256 を照合する。`--list-devices` で Vulkan デバイスを確認し、`LLM_SERVER` と `BONSAI_LLAMA_SERVER` を保存する。`-FromSource` なら `prism` ブランチを Vulkan でビルドする（Visual Studio の C++、CMake、Ninja、Vulkan SDK が必要） | `tools\llama-prism` |
-| 元のモデル | `config\llm_model.json` の GGUF（Q4_K_S）と mmproj を Hugging Face から取得し、固定した SHA-256 と照合する（`-SourceModel` なら手元のファイルをハードリンク） | `tools\models\llm` |
+| 元のモデル | `config\llm_model.json` の GGUF（Q4_K_S）と mmproj。LM Studio のフォルダ、Hugging Face のキャッシュ、`-SourceModel` にあればハードリンクし、無ければ `hf download` で Hugging Face のキャッシュに取得してハードリンクする。固定した SHA-256 と照合する | `tools\models\llm` |
 | 再量子化 | `-Quant IQ3_M` のとき、同じ build の `llama-quantize` で `…-IQ3_M.gguf` を作る（20〜30 分）。元ファイルは残す | `tools\models\llm` |
 | プリセット | ルータの設定。context 4096、GPU に置く層（GGUF の層数 × `-GpuOffload`）、flash attention、並列 1、mmap で読み込み、**thinking 無効**、temperature 0.4、repeat penalty 1.1（LM Studio の既定と同じ）、アイドル 300 秒で sleep（メモリを返す。eject の保険） | `tools\llm\models.ini` |
 | `.env` | `LLM_SERVER`、`LLM_PRESET`、`LLM_PORT`、`LLM_URL`、`LLM_MODEL`（プリセットのモデル名 `qwen3.8-27b-abliterated`）、`LLM_CONTEXT`。ワークフローの接続先と違えば `workflows\` を再生成する | `.env`、`workflows\*.json` |
@@ -131,14 +131,14 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | Python | `tools\comfyui\.venv`（uv で Python 3.12）。PyTorch は `-Torch` に従う（Radeon は AMD の ROCm 7.2 Windows 版 `repo.radeon.com`、NVIDIA は CUDA 12.8、ほかは CPU）。続けて ComfyUI の `requirements.txt` |
 | LM_Connect | [eedali/LM_Connect](https://github.com/eedali/LM_Connect) を `custom_nodes` に clone（検証済みコミットに固定）。依存は requests / Pillow / numpy のみ。**llama-cpp-python は入れません**（ComfyUI 内で GGUF を動かさない）。プロンプトと Vision のノードを、ルータの OpenAI 互換クライアントとして使う |
 | furry_ja | `custom_nodes\furry_ja` → このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション（eject、ckpt、split など） |
-| モデルの置き場 | `tools\comfyui\models`。`-ModelsDir` を付けると、そのフォルダを `tools\comfyui\extra_model_paths.yaml` に書いて、そのまま読む |
+| モデルの置き場 | `tools\comfyui\models` だけ（外部フォルダの参照はしない）。使うモデル（`CKPT_NAME`、`LORAS` / `CHROMA_LORAS`、参照画像用、Chroma 用）を以前の ComfyUI のモデルフォルダと `-ModelsDir` から取り込む（下の「モデルの探し方」） |
 | `.env` | `COMFYUI_MAIN_DIR`、`COMFYUI_PYTHON`、`COMFYUI_CUSTOM_NODES_DIR`、`COMFYUI_MODELS_DIR`、`COMFYUI_EXTRA_MODEL_PATHS` |
 | チェックポイント | `CKPT_NAME` のファイルがあるか確認（`-CheckpointUrl` なら取得） |
 
 **参照画像用のノードとモデル**（`scripts\setup-comfyui-refs.ps1`。`setup.ps1 -SkipReferenceModels` で省略可）
 
 テキストだけの生成と、修正する元画像 1 枚の img2img はこれが無くても動きます。画風・ポーズ・キャラクターの参照に使います。
-ComfyUI が読むフォルダ（`-ModelsDir` を含む）に同じファイルがあれば取得しません。
+`tools\comfyui\models`、以前の ComfyUI のモデルフォルダ、Hugging Face のキャッシュのどこかに同じファイルがあれば取得しません。
 
 | 対象 | 内容 |
 |---|---|
@@ -159,6 +159,18 @@ ComfyUI が読むフォルダ（`-ModelsDir` を含む）に同じファイル�
 | `probe-bonsai.ps1` | 各モデルを 1 回ずつ起動し、タスクごとに短いテストで検証する。起動時間・メモリ・生成速度・合否を記録する | `tools\bonsai\rank.json` |
 
 検索モデルは llama.cpp（`setup-llamacpp.ps1` と同じ build）で、検索のあいだだけ起動します。27B のルータには入れません。
+
+## モデルの探し方（指定は不要）
+
+セットアップは、使うモデルを次の順で探します。見つかったものはハードリンク（別のドライブならコピー）で `tools\` の下に置くので、元の場所を消しても動き続け、同じドライブならディスクも増えません。どこにも無いものだけをダウンロードします。何度実行しても、取得済みのものは取得しません。
+
+| モデル | 探す場所（この順） | 無いとき |
+|---|---|---|
+| 27B（IQ3_M と mmproj） | `tools\models\llm` → LM Studio のモデルフォルダ（`%USERPROFILE%\.lmstudio\models`、または LM Studio の設定のダウンロード先）→ `-SourceModel` | 元の Q4_K_S を下の Hugging Face の手順で取得して再量子化 |
+| Hugging Face のファイル（27B の元ファイルと mmproj、検索モデル、参照画像用、Chroma の T5 と VAE） | 置き場所 → Hugging Face のキャッシュ（`HF_HUB_CACHE`、`HF_HOME\hub`、`%USERPROFILE%\.cache\huggingface\hub` の順。リポジトリとパスで探し、無ければ同じ SHA-256 の blob を全リポジトリから探す） | `hf download` でキャッシュに取得してからハードリンク（`hf` が無ければ uv で huggingface_hub の `hf` を動かす。`HF_TOKEN` などの設定もそのまま効く）。`hf` を動かせないときだけ直接ダウンロード |
+| ComfyUI のモデル（チェックポイント、LoRA、Chroma の拡散モデル、ControlNet など） | `tools\comfyui\models` → 以前の ComfyUI のモデルフォルダ（Comfy Desktop のモデルの置き場、`%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\models`、`Documents\ComfyUI\models`）→ `-ModelsDir` | Hugging Face にあるものは上の手順で取得。チェックポイントと LoRA は手で置く（`-CheckpointUrl` も可） |
+
+`hf download` で先に取得しておいたモデルも、セットアップが取得したモデルも、同じ Hugging Face のキャッシュに 1 つだけ置かれます。再量子化した IQ3_M は SHA-256 を固定していて（`config\llm_model.json` の `quantized`）、取り込んだときと作ったときに照合します。
 
 ## 手動で設定する場合
 

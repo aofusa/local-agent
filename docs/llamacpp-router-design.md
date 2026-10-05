@@ -68,7 +68,8 @@ Qwen3.8 27B（`qwen35` アーキテクチャ）と mmproj を読み込め、ル�
 | `setup-llm.ps1`（新規。`setup-lmstudio.ps1` を置き換え） | `config\llm_model.json` に固定した元の GGUF と mmproj を Hugging Face から `tools\models\llm` に取得し SHA-256 を照合（`-SourceModel` で手元のファイルをハードリンク）。`llama-quantize` で IQ3_M に再量子化。GGUF のヘッダ（`scripts\gguf_info.py`）から層数を読み、GPU に載せる層数を決めてプリセット `tools\llm\models.ini` を書く。`LLM_*` を `.env` に保存し、ワークフローを作り直す |
 | `start-llm.ps1`（新規） | `llama-server --models-preset ... --models-max 1 --host 127.0.0.1 --port 8080` |
 | `setup-comfyui.ps1`（書き直し） | ComfyUI を検証済みのコミット（v0.38.0-32、`e9027f2b`）で `tools\comfyui` に clone し、専用の Python 3.12 venv を作り、GPU に合う PyTorch（Radeon は AMD の ROCm 7.2 Windows 版、NVIDIA は CUDA 12.8、ほかは CPU）と requirements を入れる。LM Connect と furry_ja を `custom_nodes` に入れる。`-ModelsDir` で既存のモデルフォルダを `extra_model_paths.yaml` 経由でそのまま読む。Comfy Desktop の検出と起動引数の書き換えはやめた |
-| `setup-comfyui-refs.ps1` / `setup-comfyui-chroma.ps1` | ComfyUI が読むフォルダのどこかに同名のモデルがあれば取得しない |
+| `setup-comfyui-refs.ps1` / `setup-comfyui-chroma.ps1` | `tools\comfyui\models` か以前の ComfyUI のモデルフォルダに同名のモデルがあれば取り込み、無ければ Hugging Face のキャッシュ経由で取得する |
+| モデルの置き場（v0.11.0 の追加） | 指定なしで動くように、既にある場所を自動で探す: 27B は LM Studio のモデルフォルダ、ComfyUI のモデルは Comfy Desktop / `Documents\ComfyUI\models`、Hugging Face のファイルは `hf download` と同じキャッシュ（リポジトリのパス、または SHA-256 の blob）。見つけたものは `tools\` へハードリンクし、外部フォルダの参照（`extra_model_paths.yaml`）はやめた。取得も `hf download` でキャッシュに入れてからリンクするので、同じモデルを二重に取得しない。再量子化した IQ3_M の SHA-256 も固定した |
 | `start-all.ps1` / `doctor.ps1` | ルータを起動する / ルータの待受（ループバックのみ）、プリセット、モデルの画像入力、ワークフローの接続先を確認する |
 
 ### 2.5 Docker（チャットタブのコード実行）

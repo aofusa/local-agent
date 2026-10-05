@@ -179,7 +179,7 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 
 ## 置く場所
 
-プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と llama.cpp は、セットアップが `tools/comfyui`（検証済みコミット、専用の Python 3.12 venv と GPU に合う PyTorch）と `tools/llama-prism` に導入する（git 管理外）。カスタムノードの導入先は `tools/comfyui/custom_nodes/`、モデルは `tools/comfyui/models/` と、`-ModelsDir` で指定した既存のフォルダ（`extra_model_paths.yaml`）である。パスは `.env`（`COMFYUI_*`、`LLM_*`。git 管理外）に保存する。
+プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と llama.cpp は、セットアップが `tools/comfyui`（検証済みコミット、専用の Python 3.12 venv と GPU に合う PyTorch）と `tools/llama-prism` に導入する（git 管理外）。カスタムノードの導入先は `tools/comfyui/custom_nodes/`、モデルは `tools/comfyui/models/` だけである（外部フォルダは参照しない）。セットアップは指定なしで、この端末に既にあるモデル（LM Studio・以前の ComfyUI のモデルフォルダ、`hf download` の Hugging Face キャッシュ）を探して `tools/` へハードリンクし、無いものだけを Hugging Face のキャッシュ経由（`hf download`）で取得する（`docs/setup.md`「モデルの探し方」）。同じモデルを二重に取得しない。パスは `.env`（`COMFYUI_*`、`LLM_*`。git 管理外）に保存する。
 
 実装時の配置は次とする。
 

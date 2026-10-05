@@ -52,7 +52,7 @@ cd local-agent
 - LangGraph の Python 環境と agent-chat-ui の依存、ファイアウォール（`-OpenFirewall`、Private のみ）
 
 チェックポイント（`yiffInHell_yihVANTABLACK.safetensors`、[Civitai](https://civitai.com/models/1570986)）は利用者が入手して `tools\comfyui\models\checkpoints` に置きます。
-既存の ComfyUI のモデルフォルダがあれば `-ModelsDir <models フォルダ>` でそのまま使えます。コード実行を使う場合は `.\scripts\setup-sandbox.ps1` も実行します。
+モデルの置き場を指定する必要はありません。セットアップは、この PC にすでにあるモデル（以前の ComfyUI・Comfy Desktop・LM Studio のモデルフォルダ、`hf download` の Hugging Face キャッシュ）を探して `tools\` に取り込み（ハードリンク）、無いものだけを Hugging Face のキャッシュ経由で取得します。同じモデルを二重にダウンロードしません。コード実行を使う場合は `.\scripts\setup-sandbox.ps1` も実行します。
 オプションと各スクリプトの内容は [docs/setup.md](docs/setup.md) にあります。
 
 ## 実行
