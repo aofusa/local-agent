@@ -1,5 +1,7 @@
 # チャット制御ループ（自律ツール選択）設計書
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 状態: 実装済み（v0.7.0、末尾の §16 に実装記録）
 対象: `aofusa/local-agent` のチャットグラフ `chat`
 目的: チャット内容から、実装済みの検索・執筆・コード・画像引き渡しを自分で選び、結果を見て次の手を決める。Grok / Claude のエージェントループの縮小版。

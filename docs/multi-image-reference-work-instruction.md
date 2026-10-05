@@ -1,5 +1,7 @@
 # 作業指示書: 複数参照画像による画風・構図・キャラクター指定
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 - 文書ID: WI-IMG-MULTI-REF-001
 - 版: 1.0
 - 作成日: 2026-10-04

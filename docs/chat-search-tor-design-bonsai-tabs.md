@@ -1,11 +1,13 @@
 # チャットタブと Tor 経由検索（Bonsai ワーカー）設計書
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 - 対象: [aofusa/local-image-gen-agent](https://github.com/aofusa/local-image-gen-agent)
 - 文書種別: 改修設計（実装前）。`chat-search-tor-design.md` 0.2 のコピーに、タブ分割と Bonsai ワーカーを上書きした別版
 - 版: 0.3-bonsai（2026-10-04）
 - 元文書: `chat-search-tor-design.md` 0.2。本書は元文書を置き換えない
 - 前提コミット: 調査時点の `main`（`langgraph.json` の `graphs.agent` → `src/furry_agent/graph.py:graph`）
-- 関連仕様: `AGENTS.md`、`docs/lmstudio-comfyui-workflow-design.md`
+- 関連仕様: `AGENTS.md`、`docs/llm-comfyui-workflow-design.md`
 - 入力にした実機方針: PrismML Bonsai を常駐させず、検索のときだけ PrismML fork の llama.cpp で起動し、完了でプロセスを落とす。協調の形は Grok のマルチエージェント（角度ごとの並列調査と、リーダー 1 回の統合）に合わせ、swarm の制御移譲には合わせない
 
 ## 1. 結論

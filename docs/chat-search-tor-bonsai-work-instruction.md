@@ -1,5 +1,7 @@
 # チャットタブと Tor 経由検索（Bonsai）実装記録
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 - 対象設計書: `docs/chat-search-tor-design-bonsai-tabs.md`（0.3-bonsai）
 - 版: v0.4.0（2026-10-04）
 - 実機: ROG Xbox Ally X（AMD Ryzen AI Z2 Extreme、Radeon 890M、共有メモリ 24GB、Windows 11）

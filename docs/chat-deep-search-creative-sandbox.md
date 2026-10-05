@@ -1,5 +1,7 @@
 # チャットタブ拡張 設計書・作業指示書
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 対象リポジトリ: https://github.com/aofusa/local-image-gen-agent
 文書の位置づけ: 実装担当（人または AI）へ渡す設計兼作業指示。本書の方針・制約・分岐・定数は省略せず実装に反映する。
 作成日: 2026-10-04
