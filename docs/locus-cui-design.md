@@ -1,6 +1,6 @@
 # locus — ローカル作業ディレクトリ向け CUI エージェント 設計書
 
-> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。README の詳細（セットアップ、使い方、設定、構成、トラブル）も v0.11.0 から `docs/setup.md`・`usage.md`・`configuration.md`・`architecture.md`・`troubleshooting.md` に移った。
 
 - 状態: 実装済み（v0.7.0。コマンド名は cirka。末尾の §17 に実装記録）
 - 日付: 2026-10-05

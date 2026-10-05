@@ -132,7 +132,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | LM_Connect | [eedali/LM_Connect](https://github.com/eedali/LM_Connect) を `custom_nodes` に clone（検証済みコミットに固定）。依存は requests / Pillow / numpy のみ。**llama-cpp-python は入れません**（ComfyUI 内で GGUF を動かさない）。プロンプトと Vision のノードを、ルータの OpenAI 互換クライアントとして使う |
 | furry_ja | `custom_nodes\furry_ja` → このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション（eject、ckpt、split など） |
 | モデルの置き場 | `tools\comfyui\models` だけ（外部フォルダの参照はしない）。使うモデル（`CKPT_NAME`、`LORAS` / `CHROMA_LORAS`、参照画像用、Chroma 用）を以前の ComfyUI のモデルフォルダと `-ModelsDir` から取り込む（下の「モデルの探し方」） |
-| `.env` | `COMFYUI_MAIN_DIR`、`COMFYUI_PYTHON`、`COMFYUI_CUSTOM_NODES_DIR`、`COMFYUI_MODELS_DIR`、`COMFYUI_EXTRA_MODEL_PATHS` |
+| `.env` | `COMFYUI_MAIN_DIR`、`COMFYUI_PYTHON`、`COMFYUI_CUSTOM_NODES_DIR`、`COMFYUI_MODELS_DIR`（以前の版が書いた `COMFYUI_EXTRA_MODEL_PATHS` と `extra_model_paths.yaml` は空にして削除する） |
 | チェックポイント | `CKPT_NAME` のファイルがあるか確認（`-CheckpointUrl` なら取得） |
 
 **参照画像用のノードとモデル**（`scripts\setup-comfyui-refs.ps1`。`setup.ps1 -SkipReferenceModels` で省略可）
@@ -155,7 +155,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | スクリプト | 内容 | 置き場（git 管理外） |
 |---|---|---|
 | `setup-tor.ps1` | Tor Expert Bundle の最新安定版を取得し、配布元の `sha256sums-signed-build.txt` で SHA-256 を照合する。`TOR_EXE` を `.env` へ保存する。設定は `tools\tor\torrc`（SOCKS は `127.0.0.1:9050` のみ） | `tools\tor\bin`、データは `tools\tor\data` |
-| `setup-search-models.ps1` | 検索モデル 8 つ（約 20GB）を Hugging Face から取得し、カタログの SHA-256 と照合する（中断しても再開できる）。`BONSAI_MODELS_DIR` を保存する | `tools\models` |
+| `setup-search-models.ps1` | 検索モデル 8 つ（約 20GB）を Hugging Face のキャッシュ経由で取得し（`hf download` で取得済みなら取得しない）、カタログの SHA-256 と照合する（中断しても再開できる）。`BONSAI_MODELS_DIR` を保存する | `tools\models` |
 | `probe-bonsai.ps1` | 各モデルを 1 回ずつ起動し、タスクごとに短いテストで検証する。起動時間・メモリ・生成速度・合否を記録する | `tools\bonsai\rank.json` |
 
 検索モデルは llama.cpp（`setup-llamacpp.ps1` と同じ build）で、検索のあいだだけ起動します。27B のルータには入れません。

@@ -1,6 +1,6 @@
 # チャットタブと Tor 経由検索（Bonsai）実装記録
 
-> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。README の詳細（セットアップ、使い方、設定、構成、トラブル）も v0.11.0 から `docs/setup.md`・`usage.md`・`configuration.md`・`architecture.md`・`troubleshooting.md` に移った。
 
 - 対象設計書: `docs/chat-search-tor-design-bonsai-tabs.md`（0.3-bonsai）
 - 版: v0.4.0（2026-10-04）

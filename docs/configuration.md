@@ -17,6 +17,8 @@
 | `LLM_CONTEXT` | `4096` | 27B の context（プリセットの `ctx-size`）。1 回の呼び出しの量（回答 + 思考）をこの範囲に収める |
 | `COMFYUI_MAIN_DIR` ほか `COMFYUI_*` | セットアップが設定 | `start-comfyui.ps1` が使う ComfyUI（`tools\comfyui`）、その Python、モデルの置き場、`extra_model_paths.yaml` |
 | `COMFYUI_EXTRA_ARGS` | 空 | ComfyUI の追加引数 |
+| `COMFYUI_EXTRA_MODEL_PATHS` | 空 | ComfyUI に別のモデルフォルダを読ませる YAML（手で設定したときだけ使う。v0.11.0 からセットアップは書かず、モデルを `tools\comfyui\models` に取り込む） |
+| `HF_HUB_CACHE` / `HF_HOME` / `HF_TOKEN` | 空（Hugging Face の既定） | セットアップが使う Hugging Face のキャッシュの場所と認証。`hf download` と同じ値を読むので、取得したモデルを共有する（[setup.md › モデルの探し方](setup.md#モデルの探し方指定は不要)）。`.env` ではなく環境変数で設定する |
 
 27B の読み込み方（GPU に置く層、量子化、context）を変えるときは、`.\scripts\setup-llm.ps1 -GpuOffload 0.6` のように再実行し、ルータ（`start-llm.ps1`）を再起動します。
 

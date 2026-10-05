@@ -22,6 +22,7 @@
 | [huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF](https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF) | LLM（Q4_K_S と mmproj。IQ3_M に再量子化して使う） | `setup-llm.ps1`（`tools\models\llm`） | 配布ページで確認 |
 | [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI) | ComfyUI 本体 | `setup-comfyui.ps1`（`tools\comfyui`） | GPL-3.0 |
 | [PyTorch](https://pytorch.org/)（AMD の ROCm 版 [repo.radeon.com](https://repo.radeon.com/rocm/windows/)、または CUDA / CPU 版） | ComfyUI の Python 環境 | `setup-comfyui.ps1` | BSD-3-Clause（ROCm の各ライブラリはそれぞれのライセンス） |
+| [huggingface_hub](https://github.com/huggingface/huggingface_hub)（`hf` コマンド） | Hugging Face のキャッシュへの取得（`hf` が無ければ uv が一時的に用意する） | 各 setup スクリプト | Apache-2.0 |
 | [Tor Expert Bundle](https://www.torproject.org/download/tor/) | tor.exe（チャットタブの検索） | `setup-tor.ps1`（`tools\tor`） | BSD-3-Clause |
 | [PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp) | llama-server（Vulkan。27B のルータと検索モデルの実行）、llama-quantize | `setup-llamacpp.ps1`（`tools\llama-prism`） | MIT |
 | [prism-ml/Bonsai-8B-gguf](https://huggingface.co/prism-ml/Bonsai-8B-gguf)、[Ternary-Bonsai-8B-gguf](https://huggingface.co/prism-ml/Ternary-Bonsai-8B-gguf)、[Bonsai-4B-gguf](https://huggingface.co/prism-ml/Bonsai-4B-gguf)、[Ternary-Bonsai-2-27B-gguf](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) | 検索モデル | `setup-search-models.ps1`（`tools\models`） | Apache-2.0 |

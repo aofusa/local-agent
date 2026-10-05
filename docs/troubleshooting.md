@@ -26,7 +26,9 @@
 | 「Chroma1-HD のモデルファイルが ComfyUI に見つかりません」 | `setup-comfyui-chroma.ps1` を実行。拡散モデルは手動で `models\diffusion_models` か `models\checkpoints` に置く |
 | 「… は Chroma1-HD のモデルです」 | `CKPT_NAME` だけを Chroma にした。`COMFY_MODEL_FAMILY=flux` も設定して LangGraph を再起動する |
 | Chroma で「ポーズ ControlNet 未対応」などと返る | Chroma 経路は元画像 1 枚の img2img だけ対応。ポーズ・画風の参照は `COMFY_MODEL_FAMILY=sdxl` で使う |
-| 「LoRA が ComfyUI に見つかりません」 | `.env` の `LORAS` の名前を `models\loras` のファイル名に合わせる |
+| 「LoRA が ComfyUI に見つかりません」 | `.env` の `LORAS` の名前を `tools\comfyui\models\loras` のファイル名に合わせる。ファイルを置いたら `setup-comfyui.ps1` を再実行しなくても読める |
+| `setup-comfyui.ps1` で「… がありません」（チェックポイント・LoRA） | `tools\comfyui\models\<checkpoints / loras>` に置く。以前の ComfyUI のフォルダ（Comfy Desktop、`Documents\ComfyUI\models`）以外にあるなら `-ModelsDir <そのフォルダ>` で取り込む |
+| 「hf download で取得できませんでした」 | ネットワークか Hugging Face の認証。ゲート付きのモデルは `hf auth login` か環境変数 `HF_TOKEN`。取得できないときは直接ダウンロードに切り替わる |
 | 参照画像を使った 2 回目以降の画像が単色やノイズになる | ComfyUI が `--cache-none` なしで起動している。`doctor.ps1` で確認し、`start-comfyui.ps1` で起動し直す |
 | キャラクター参照で色が焼ける・ギラつく | キャラクターの強度を下げる（0.6 前後） |
 | 画像の役割が思ったものにならない | 添付時に役割を選ぶ。または `1枚目のキャラ` `2枚目のポーズ` のように序数で書く |

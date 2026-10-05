@@ -51,7 +51,7 @@ $RocmWheels = @(
 
 Write-Step "前提ツール（git / uv）"
 foreach ($tool in "git", "uv") {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool が見つかりません（README の「必要なもの」）" }
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool が見つかりません（README の「動作環境」）" }
 }
 Write-Ok "ok"
 

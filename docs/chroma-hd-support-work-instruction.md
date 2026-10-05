@@ -1,6 +1,6 @@
 # Chroma HD 対応 作業指示書
 
-> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。README の詳細（セットアップ、使い方、設定、構成、トラブル）も v0.11.0 から `docs/setup.md`・`usage.md`・`configuration.md`・`architecture.md`・`troubleshooting.md` に移った。
 
 対象: 既存の LangGraph + ComfyUI + LM Studio 画像生成アプリへ、Flux.1 由来の Chroma1-HD を追加する。
 読者: 実装を担当する別の AI、または実装者。

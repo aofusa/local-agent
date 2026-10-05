@@ -31,6 +31,7 @@
 | `docs/claim-verification-design.md` | 検索の回答を主張単位で出典と照らす段（抽出・判定・統合・監査・削除）。末尾に実装記録 |
 | `docs/autonomous-controller-design.md` | チャットタブの自律モード（思考モードの複合依頼で、27B が検索・文章・コード・画像案内を選び直す制御ループ）。末尾に実装記録 |
 | `docs/locus-cui-design.md` | CUI `cirka`（設計書の作業名は locus）と、そのモデルゲート `POST /coder/turn`。末尾に実装記録 |
+| `docs/setup.md` / `usage.md` / `configuration.md` / `architecture.md` / `troubleshooting.md` / `third-party-licenses.md` | 利用者向けの詳細（v0.11.0 で README から分けた）。セットアップとモデルの探し方、使い方、`.env`、構成と UI の変更点とログ、トラブルと既知の制約、取得物のライセンス。README は概要・動作環境・インストール・実行・ライセンスだけにする |
 
 ComfyUI と LLM サーバの呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
 
@@ -99,7 +100,7 @@ ComfyUI は `--listen 127.0.0.1 --port 8188` のままにする。llama.cpp の�
 
 他ホストのブラウザが UI を開くとき、UI が接続する LangGraph の URL は、そのブラウザから到達できるこの端末のアドレスにする。UI をこの端末で動かしていても、他ホスト向けの接続先を `localhost` のままにすると、相手のブラウザは自分自身へ接続しにいく。グラフ id は `agent` とし、agent-chat-ui の既定 `NEXT_PUBLIC_ASSISTANT_ID` と揃える。
 
-開発サーバは、他ホストから届く待受で起動する。例として LangGraph は `langgraph dev --host 0.0.0.0 --port 2024`、UI もホスト `0.0.0.0` で起動する。認証方式は未確定である。利用者が決めるまで認証を独自に足さない。公開範囲と起動コマンドは、実装時に README へ書く。
+開発サーバは、他ホストから届く待受で起動する。例として LangGraph は `langgraph dev --host 0.0.0.0 --port 2024`、UI もホスト `0.0.0.0` で起動する。認証方式は未確定である。利用者が決めるまで認証を独自に足さない。公開範囲と起動コマンドは README（最小限）と `docs/usage.md`（詳細）に書く。
 
 LAN に出すのは開発用の到達であり、LangSmith へのクラウドデプロイやクラウド API へのフォールバックを意味しない。
 
@@ -241,7 +242,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を `docs/architecture.md`（UI の変更点）と README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
@@ -267,14 +268,14 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 
 設計書 §6 の完了条件を、その順で満たす。呼び出し元は設計書に書かれた薄いフロントではなく LangGraph である。各段が終わるまで次へ進まない。
 
-1. `http://127.0.0.1:8080/v1/models`（llama.cpp のルータ）と `http://127.0.0.1:8188/system_stats` を確認する。応答が無いときは起動手順を README に書き、起動できないことだけを理由にリポジトリ内の実装を放棄しない。起動そのものをエージェントが勝手に広範囲へ変更しない。
-2. ComfyUI の既存インストールへ `eedali/LM_Connect` を導入し、再起動後にノード一覧へ出ることを確認する。ローカル GGUF バックエンドは使わない。CUDA 版 llama-cpp-python は入れない。フォールバック条件は設計書 §3.2 に従う。
+1. `http://127.0.0.1:8080/v1/models`（llama.cpp のルータ）と `http://127.0.0.1:8188/system_stats` を確認する。応答が無いときは起動手順を README と `docs/usage.md` に書き、起動できないことだけを理由にリポジトリ内の実装を放棄しない。起動そのものをエージェントが勝手に広範囲へ変更しない。
+2. セットアップ（`scripts/setup-comfyui.ps1`）が `tools/comfyui` に入れた ComfyUI へ `eedali/LM_Connect` を導入し、再起動後にノード一覧へ出ることを確認する。ローカル GGUF バックエンドは使わない。CUDA 版 llama-cpp-python は入れない。フォールバック条件は設計書 §3.2 に従う。
 3. `workflows/furry_ja_api.json` と `workflows/furry_ja.json`、`prompts/system_furry_tags.txt` を作る。
 4. LangGraph のグラフを作り、テキストだけで 1 枚生成できることを確認する。ログに、eject が成功したことと、KSampler 開始時にルータのモデルが unloaded であることを残す。
 5. 生成画像が `outputs/` と ComfyUI の Save Image の両方に残り、グラフの応答として UI に出ることを確認する。
 6. agent-chat-ui をこのリポジトリで起動し、他ホストから日本語 1 文を送って UI 上に静止画が返ることを確認する。
 7. 参照画像 1 枚の img2img を確認する。
-8. VHS があるときだけ動画フレーム経路を足す。無いときは README に「未導入のため対象外」と書く。
+8. VHS があるときだけ動画フレーム経路を足す。無いときは `docs/troubleshooting.md`（既知の対象外）に「未導入のため対象外」と書く。
 
 ## 受け入れ条件
 
@@ -315,7 +316,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 
 実装時に決めたもの:
 
-- ComfyUI と llama.cpp は `tools/` に自前で導入する（v0.11.0、利用者の指定）。ComfyUI は Comfy-Org/ComfyUI の検証済みコミット（v0.38.0-32、`e9027f2b`）、PyTorch は Radeon なら AMD の ROCm 7.2 Windows 版（`repo.radeon.com`）、NVIDIA なら CUDA 12.8、ほかは CPU。パスは `.env` に保存する。
+- ComfyUI と llama.cpp は `tools/` に自前で導入する（v0.11.0、利用者の指定）。モデルの置き場は指定なしで決まる: 既にある場所（LM Studio・以前の ComfyUI のモデルフォルダ、Hugging Face のキャッシュ）から `tools/` へハードリンクし、Hugging Face のファイルは `hf download`（無ければ uv 経由の huggingface_hub）でキャッシュに取得してからリンクする（同じモデルを二重に取得しない。`scripts/lib/common.ps1` の `Import-ComfyModel` / `Get-HfFile`）。再量子化した IQ3_M の SHA-256 は `config/llm_model.json` に固定し、この端末では変更前の LM Studio のファイルと一致した。ComfyUI は Comfy-Org/ComfyUI の検証済みコミット（v0.38.0-32、`e9027f2b`）、PyTorch は Radeon なら AMD の ROCm 7.2 Windows 版（`repo.radeon.com`）、NVIDIA なら CUDA 12.8、ほかは CPU。パスは `.env` に保存する。
 - チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（`CKPT_NAME`）。
 - agent-chat-ui に返す画像は `{"type": "image", "mimeType": "image/png", "data": <base64>}`。在庫の UI は AI メッセージの画像を描画しないため、`ai.tsx` に最小限の変更を加えた。
 - 参照画像の役割と強度は、画像ブロックの `metadata.role` / `metadata.strength` で送る。UI には添付ごとの役割セレクトと強度欄を加えた。役割の確認は在庫の HITL 表示（承認 / 編集 / 却下）を使う。

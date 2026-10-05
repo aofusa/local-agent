@@ -1,6 +1,6 @@
 # チャットタブと Tor 経由検索（Bonsai ワーカー）設計書
 
-> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。README の詳細（セットアップ、使い方、設定、構成、トラブル）も v0.11.0 から `docs/setup.md`・`usage.md`・`configuration.md`・`architecture.md`・`troubleshooting.md` に移った。
 
 - 対象: [aofusa/local-image-gen-agent](https://github.com/aofusa/local-image-gen-agent)
 - 文書種別: 改修設計（実装前）。`chat-search-tor-design.md` 0.2 のコピーに、タブ分割と Bonsai ワーカーを上書きした別版
