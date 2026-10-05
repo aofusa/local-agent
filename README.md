@@ -18,13 +18,13 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 検索の回答は、主張ごとに出典の抜粋と突き合わせ、支持された主張だけで書き、最後に文ごとに監査して支持されない文を削除します。
 「調べてから手順書にして」のように道具を順に使う依頼は、思考モード（または自動）で **自律モード** になり、27B が検索・文章・コード・画像タブ案内を結果を見ながら選び直します（最大 3 手。「4. 使い方 › 自律モード」）。
 
-端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で実行します（既定の auto モードは確認なし。push や再帰的な削除など危険な操作だけ確認します）。画面は Claude Code に倣った形で、`docs/logo` のロゴを端末用の絵にして表示します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
+端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux。ソースは `client/`）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で実行します（既定の auto モードは確認なし。push や再帰的な削除など危険な操作だけ確認します）。画面は Claude Code に倣った形で、`docs/logo` のロゴを端末用の絵にして表示します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
-仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）、[docs/claim-verification-design.md](docs/claim-verification-design.md)（主張単位の検証。末尾に実装記録）
+仕様: [AGENTS.md](AGENTS.md)（全体・UI・待受）、[docs/lmstudio-comfyui-workflow-design.md](docs/lmstudio-comfyui-workflow-design.md)（ComfyUI と LM Studio の連携）、[docs/multi-image-reference-work-instruction.md](docs/multi-image-reference-work-instruction.md)（複数参照画像。調査結果と設計との差分を含む）、[docs/chroma-hd-support-work-instruction.md](docs/chroma-hd-support-work-instruction.md)（Chroma1-HD。事前確認の結果と設計との差分を含む）、[docs/chat-search-tor-design-bonsai-tabs.md](docs/chat-search-tor-design-bonsai-tabs.md) と [docs/chat-search-tor-bonsai-work-instruction.md](docs/chat-search-tor-bonsai-work-instruction.md)（タブと Tor 経由検索。実装記録と実測を含む）、[docs/chat-deep-search-creative-sandbox.md](docs/chat-deep-search-creative-sandbox.md)（深い検索、文章、コードと Docker、速い / 思考 / 自動。実装記録と実測を含む）、[docs/claim-verification-design.md](docs/claim-verification-design.md)（主張単位の検証。末尾に実装記録）、[docs/autonomous-controller-design.md](docs/autonomous-controller-design.md)（チャットタブの自律モード。末尾に実装記録）、[docs/locus-cui-design.md](docs/locus-cui-design.md)（CUI cirka と `/coder/turn`。設計時の作業名は locus。末尾に実装記録）
 
 ```
 他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
@@ -76,6 +76,7 @@ winget install OpenJS.NodeJS.LTS      # Node.js 20 以上
 ```
 
 インストール後に PowerShell を開き直し、`git --version`、`uv --version`、`node --version` が通ることを確認してください。
+CUI の cirka を自分でビルドする場合だけ、Rust も入れます（`winget install Rustlang.Rustup`。ビルド済みの zip を使うなら不要）。
 Python は uv が自動で用意します。pnpm は `npx` 経由で使うので別途インストール不要です。
 
 スクリプトの実行を許可します（現在のユーザーのみ）。
@@ -237,6 +238,8 @@ LM Studio を起動したうえで:
 表示される `http://<LAN IP>:3000` を他ホストのブラウザで開きます。
 Deployment URL / Assistant ID の入力画面は出ません（ビルド時に設定済み）。
 初回の UI 起動時は agent-chat-ui のビルドに数分かかります。
+
+CUI の cirka 向けの `POST /coder/turn` は LangGraph（`:2024`）と一緒に起動します（別の起動は要りません）。cirka を使う PC では `cirka config set host http://<LAN IP>:2024` と `cirka status` で接続を確かめます（「4. 使い方 › CUI（cirka）」）。
 
 個別に起動する場合（それぞれ別の PowerShell で）:
 
@@ -499,16 +502,16 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
 
 ### CUI（cirka）
 
-`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
+`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)。ソースはクライアント側の CUI として `client/` にあり、できる実行ファイルの名前が `cirka` です）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
 
 #### ビルドと配布
 
 Rust 1.85 以上が要ります。Windows / macOS / Linux の各 OS で同じソースからビルドします。
 
 ```powershell
-.\scripts\build-cirka.ps1            # cirka\target\release\cirka.exe を作り、dist\cirka-<版>-<OS>-<CPU>.zip にまとめる
+.\scripts\build-cirka.ps1            # client\target\release\cirka.exe を作り、dist\cirka-<版>-<OS>-<CPU>.zip にまとめる
 # または
-cd cirka; cargo build --release      # macOS / Linux も同じ
+cd client; cargo build --release     # macOS / Linux も同じ（target/release/cirka）
 ```
 
 できた `cirka`（`cirka.exe`）を PATH の通った場所に置きます。単一の実行ファイルで、ほかに要るものはありません（grep もファイル検索も内蔵）。
@@ -564,7 +567,7 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 
 画面（Claude Code に倣った形）:
 
-- 起動すると枠の中にロゴ（`docs/logo/cirka-icon.jpg` の鷹と円と「式」の札、`cirka-logo.jpg` の「cirka」と赤い点）と、作業ディレクトリ・接続先・モデルを出します。ロゴは端末で描けないので、`scripts/gen_cirka_art.py` が画像から作った小さなビットマップ（`cirka/src/art_data.rs`）を半角ブロック（▀ ▄ █）で描きます。色は 24 ビット色が使える端末（Windows Terminal、`COLORTERM=truecolor` など）ではロゴの赤そのもの、ほかは端末の赤です。端末の幅と高さに合わせて大小を選び、狭いときは文字だけにします。
+- 起動すると枠の中にロゴ（`docs/logo/cirka-icon.jpg` の鷹と円と「式」の札、`cirka-logo.jpg` の「cirka」と赤い点）と、作業ディレクトリ・接続先・モデルを出します。ロゴは端末で描けないので、`scripts/gen_cirka_art.py` が画像から作った小さなビットマップ（`client/src/art_data.rs`）を半角ブロック（▀ ▄ █）で描きます。色は 24 ビット色が使える端末（Windows Terminal、`COLORTERM=truecolor` など）ではロゴの赤そのもの、ほかは端末の赤です。端末の幅と高さに合わせて大小を選び、狭いときは文字だけにします。
 - 入力は枠付きの欄で、Enter で送信、Shift+Enter / Alt+Enter / 行末の `\` で改行、↑↓ で履歴、Tab でコマンド補完、Ctrl-C で入力を消す（空なら 2 回で終了）。貼り付けた複数行はそのまま入ります。
 - 応答は `⏺` で始まるブロックとして流れ、ツール呼び出しは `⏺ Read(src/main.rs)` のように 1 行、結果は `⎿` の下に短く出ます。編集は色付きの差分（行番号付き）、タスク一覧は ☐ / ◼ / ☒ で出します。モデルの応答待ちとツールの実行中は、経過秒数付きのスピナーが回ります（Ctrl-C で中断）。
 
@@ -658,7 +661,7 @@ OS・画面表示・ComfyUI の常駐分と合わせると物理メモリに収�
 
 ```
 AGENTS.md / docs/                     仕様
-langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph
+langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph、http.app -> coder_app.py:app（/coder/turn）
 src/furry_agent/chat_graph.py         チャットタブのグラフ（ingest → route → chat | plan → search → filter → read → critique → synthesize）
 src/furry_agent/chat_models.py        チャットタブの llama-server（reader、代理リーダー）の起動と停止、外部依存の差し替え口
 src/furry_agent/claim_verify.py       主張の突き合わせ: EvidenceCard / Claim、門（字面・数値・固有名詞）、文の分割と削除。モデルなし
@@ -666,9 +669,9 @@ src/furry_agent/claim_nodes.py        主張の抽出 → 判定 → （統合�
 src/furry_agent/control_nodes.py      自律モード（controller → 道具の流れ → controller_record → finish）。判断の JSON、予算、重複の禁止
 src/furry_agent/coder_gate.py         cirka 向けの POST /coder/turn（LM Studio の tool calling を SSE で返す。ツールは実行しない）。coder_app.py が langgraph.json の http.app
 prompts/chat/controller.txt           自律モードの判断の system prompt
-cirka/                                CUI（Rust）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs（許可と auto の確認一覧）、context.rs、session.rs、tui.rs（画面）、art.rs / art_data.rs（ロゴの絵）
-docs/logo/                            cirka のロゴ（cirka-icon.jpg、cirka-logo.jpg、cirka-design.jpg）
-scripts/gen_cirka_art.py              docs/logo の画像から cirka のロゴの絵（cirka/src/art_data.rs）を作る
+client/                               クライアント側の CUI（Rust。実行ファイル名 cirka）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs（許可と auto の確認一覧）、context.rs、session.rs、tui.rs（画面）、art.rs / art_data.rs（ロゴの絵）
+docs/logo/                            cirka のロゴ（cirka-icon / cirka-logo / cirka-design の JPG と、icon / logo / image の SVG）
+scripts/gen_cirka_art.py              docs/logo の JPG から cirka のロゴの絵（client/src/art_data.rs）を作る
 scripts/build-cirka.ps1               cirka のリリースビルドと zip（dist/）
 src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
 src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定
@@ -776,6 +779,8 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
   `KSampler started ... LM Studio unloaded at checkpoint load=[True]`、`eject verified`、保存先。
 - ComfyUI のコンソール: `[LM Connect] Eject sonucu`、`[furry_ja] split mode=json|fallback`、
   `[furry_ja] LM Studio verified unloaded before checkpoint/KSampler`。
+- `/coder/turn`（cirka）: LangGraph のコンソールに `coder turn mode=… messages=… tools=… calls=… finish=… tokens=… seconds=…` だけを出します（会話やファイルの中身は残しません）。
+- cirka: 利用者の PC の `%LOCALAPPDATA%\cirka\sessions`（macOS / Linux は `~/.local/share/cirka/sessions`）にセッションを JSON Lines で残します（ツールの結果を含む。`/forget` で削除）。
 
 ## 9. 開発
 
@@ -783,7 +788,8 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 uv sync
 uv run pytest                                  # Python と PowerShell スクリプトのテスト（Docker 実機のテストは Docker 起動中だけ）
 uv run python scripts\build_workflows.py       # prompts\ を変えたら workflows\ を再生成
-cd cirka; cargo test                           # cirka（CUI）のテスト。ホストは立てない
+cd client; cargo test                          # cirka（CUI）のテスト。ホストは立てない
+uv run python scripts\gen_cirka_art.py         # docs\logo を変えたら cirka のロゴの絵を再生成
 ```
 
 `.ps1` は UTF-8（BOM 付き）で保存してください。Windows PowerShell 5.1 は BOM の無いファイルを ANSI として読み、日本語を含む行で構文エラーになります（テストで確認しています）。
@@ -820,6 +826,12 @@ cd cirka; cargo test                           # cirka（CUI）のテスト。�
 | 参照画像を送っても説明が空 | mmproj がモデルと同じフォルダにあるか確認 |
 | `missing tensor 'blk.64...'` でロードできない | LM Studio のランタイムが古い。`lms runtime update --all` |
 | `langgraph dev` が `UnicodeDecodeError: 'cp932'` で落ちる | `start-langgraph.ps1` から起動する（`PYTHONUTF8=1` を設定します） |
+| cirka「ホストに届きません」 | `cirka status` で確認。`cirka config set host http://<LAN IP>:2024`（`localhost` は cirka を動かす PC 自身のこと）。ホスト側で `open-firewall.ps1` を実行し、LangGraph が起動しているか確認 |
+| cirka「ホストに /coder/turn がありません」 | ホストの local-agent が v0.7.0 より古い。更新して LangGraph を再起動する |
+| cirka が「… の処理を待っています」のまま進まない | 画像タブやチャットタブが共有ロックを使っている。終われば自動で進む（最大 600 秒） |
+| cirka「文脈が溢れました」 | `/compact` で会話を要約するか、依頼を小さく区切る（ホストの 27B は context 4096） |
+| cirka のロゴや枠が崩れる・色が出ない | Windows Terminal など UTF-8 と 24 ビット色の使える端末で開く。色を消すなら `NO_COLOR=1`。端末が狭いと文字だけのロゴになる |
+| cirka の auto で確認メニューが出る | git push や再帰的な削除など、取り返しのつかない操作だけは auto でも確認する。毎回聞かれたくなければ「はい、以後このセッションでは確認しない」を選ぶ |
 
 ## 調整の記録（参照画像）
 
@@ -845,6 +857,8 @@ cd cirka; cargo test                           # cirka（CUI）のテスト。�
 - コードの実行は Docker Desktop（Linux エンジン）だけです。Windows コンテナ、WSL 直接、ホストでの実行はしません。コンテナ内からネットワークは使えず（依存の取得だけ例外）、1 回 60 秒・2GB までです。GUI、サーバの常駐、標準入力を使うプログラムは動きません。
 - 思考トークンは LM Studio の 27B だけです。代理リーダー（Ternary-Bonsai-2-27B）は `--reasoning off` のまま動かすので、代理で統合した回答には思考の折りたたみが出ません。
 - 検索モデルは PrismML の llama.cpp fork の Vulkan 版だけで動かします（Q1_0 / PQ2_0 / PTQ1_0 は素の llama.cpp や LM Studio では動かないため）。ROCm 版は使いません。
+- チャットタブの自律モードは、この端末では思考モードの検索 1 回で時間の上限（20 分）に近づくため、検索のあとで次の道具に進まずに終わることが多いです。
+- cirka: ホストの 27B は context 4096・1 ターン数分です。ツールの結果は窓に合わせて切り詰めます。`bash` は OS のサンドボックスなしで cirka を動かした PC の上で動き、既定の auto では確認なしで実行します（危険な操作の一覧だけ確認）。信頼できないリポジトリでは `/default` か `/plan` で使ってください。実行中の中断は Ctrl-C（Esc ではありません）。ロゴの絵は JPG から作っており、SVG はまだ使っていません。
 
 ## ライセンス
 

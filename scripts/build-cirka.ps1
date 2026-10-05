@@ -1,5 +1,6 @@
-﻿# Build the cirka CUI (cirka\) in release mode and pack it as dist\cirka-<version>-<os>-<arch>.zip.
-# Needs Rust 1.85 or later (https://rustup.rs). macOS / Linux: `cd cirka && cargo build --release`.
+﻿# Build the cirka CUI (the client-side CUI in client\) in release mode and pack it as
+# dist\cirka-<version>-<os>-<arch>.zip. Needs Rust 1.85 or later (https://rustup.rs).
+# macOS / Linux: `cd client && cargo build --release` (the binary is target/release/cirka).
 param(
     [switch]$NoZip
 )
@@ -8,14 +9,14 @@ Set-Location (Join-Path $PSScriptRoot "..")
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Write-Error "cargo が見つかりません。Rust（https://rustup.rs）を入れてください"
 }
-Push-Location cirka
+Push-Location client
 try {
     cargo build --release
     if ($LASTEXITCODE -ne 0) { throw "cargo build が失敗しました（終了コード $LASTEXITCODE）" }
 } finally {
     Pop-Location
 }
-$exe = Join-Path "cirka" "target\release\cirka.exe"
+$exe = Join-Path "client" "target\release\cirka.exe"
 if (-not (Test-Path $exe)) { throw "$exe がありません" }
 $version = (& $exe --version).Split(" ")[-1]
 Write-Host "built $exe ($version)"
