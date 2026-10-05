@@ -7,7 +7,7 @@
                    last word
     (synthesize)   chat_graph.synthesize writes from the supported and partial claims only
     claim_audit    the same process, last call: the final text split into sentences and judged again; then every
-                   llama-server is killed, LM Studio unloaded and the job lock released
+                   llama-server is killed, the LLM router unloaded and the job lock released
     claim_drop     no model: the sentences that lost their support are deleted (never rewritten), the answer
                    is formatted with its sources
 
@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from furry_agent import claim_verify as cv, search_agent as sa
 from furry_agent.bonsai_select import SelectionError
 from furry_agent.bonsai_worker import WorkerError
-from furry_agent.chat_common import (RESET, ChatState, _cleanup, _held, _lmstudio, _progress, _prompt, _settings,
+from furry_agent.chat_common import (RESET, ChatState, _cleanup, _held, _llm, _progress, _prompt, _settings,
                                      log)
 from furry_agent.chat_models import _leader_client
 from furry_agent.config import ChatSettings, env_int
@@ -136,7 +136,7 @@ async def _failed(state: ChatState, config: RunnableConfig, update: dict) -> dic
     FAIL_OPEN=1: keep the leader for the unaudited synthesis."""
     settings = _settings(config)
     if not settings.claim_fail_open:
-        await _cleanup(state.get("lock_token"), _lmstudio(config, settings), unload=True)
+        await _cleanup(state.get("lock_token"), _llm(config, settings), unload=True)
         update["lock_token"] = None
     view = {**state, **update}
     note = FAIL_TEXT.get(update["verify_error"], FAIL_TEXT["json"])
@@ -223,7 +223,7 @@ def _cited(text: str, evidence: list[dict]) -> list[str]:
 async def claim_audit(state: ChatState, config: RunnableConfig) -> dict:
     """The final text, sentence by sentence, against the same cards; then everything is freed (§5.7)."""
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     token = state.get("lock_token")
     search = dict(state["search"])
     evidence = [c for c in state.get("evidence") or [] if c != RESET]
@@ -250,10 +250,10 @@ async def claim_audit(state: ChatState, config: RunnableConfig) -> dict:
                         v.evidence_ids = _cited(claim["text"], evidence)
                 audit = cv.apply_verdicts(claims, cv.Verdicts(claims=list(got.values())), evidence)
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     # The audit is the last model call: every llama-server goes, the 27B is unloaded, the lock is released.
-    await _cleanup(token, lmstudio, unload=True)
+    await _cleanup(token, llm, unload=True)
     if error:
         # Over the time budget or broken JSON: keep the synthesis that was written from verified claims (§8).
         search["claim"] = {**(search.get("claim") or {}), "audit_skipped": error}

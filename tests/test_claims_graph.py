@@ -1,4 +1,4 @@
-"""Claim verification in the chat graph, with the fakes of test_chat_graph (no Tor, LM Studio, llama.cpp).
+"""Claim verification in the chat graph, with the fakes of test_chat_graph (no Tor, the LLM router, llama.cpp).
 
 docs/claim-verification-design.md §7.
 """

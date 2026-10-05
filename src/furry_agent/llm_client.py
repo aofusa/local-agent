@@ -1,8 +1,8 @@
-"""OpenAI-compatible chat client for the chat tab: LM Studio (127.0.0.1:1234) and the llama-server workers.
+"""OpenAI-compatible chat client for the chat tab: the llama.cpp router (127.0.0.1:8080) and the llama-server workers.
 
-The image graph never imports this module: on the image path only the ComfyUI workflow talks to LM Studio
-(AGENTS.md). The chat tab calls LM Studio directly for conversation, the search plan and the final answer,
-and unloads it through LM Studio's native REST API (/api/v1/models/unload) before Bonsai takes the memory.
+The image graph never imports this module: on the image path only the ComfyUI workflow talks to the router
+(AGENTS.md). The chat tab calls the router directly for conversation, the search plan and the final answer,
+and unloads the 27B through the router's model API (POST /models/unload) before Bonsai takes the memory.
 """
 
 from __future__ import annotations
@@ -177,16 +177,15 @@ class OpenAICompatClient:
         if self.model:
             body["model"] = self.model
         think = (not self.thinking_off) if thinking is None else thinking
-        # llama-server reads chat_template_kwargs; LM Studio applies the per-model "thinking off" default written
-        # by scripts/setup-lmstudio.ps1 and ignores unknown keys (thinking_body switches it on there).
+        # llama-server reads chat_template_kwargs; the router's preset defaults to thinking off (scripts/setup-llm.ps1),
+        # and the thoughts come back in reasoning_content (--reasoning-format deepseek), never in content.
         body["chat_template_kwargs"] = {"enable_thinking": think}
-        body.update(self.thinking_body(think))
         if tools:
             body["tools"] = tools
             if tool_choice:
                 body["tool_choice"] = tool_choice
         if json_schema:
-            # Grammar-constrained output (llama-server and LM Studio both accept OpenAI's json_schema format).
+            # Grammar-constrained output (llama-server accepts OpenAI's json_schema format).
             body["response_format"] = {"type": "json_schema",
                                        "json_schema": {"name": "reply", "strict": True, "schema": json_schema}}
         elif json_mode:
@@ -195,23 +194,17 @@ class OpenAICompatClient:
         started = time.monotonic()
         data: dict = {}
         message: dict = {}
-        for attempt in (1, 2):
-            try:
-                async with self._http(idle) as http:
-                    async with http.stream("POST", f"{self.base_url}/chat/completions", json=body) as response:
-                        if response.status_code >= 400:
-                            text = (await response.aread()).decode("utf-8", "replace")
-                            # LM Studio's idle TTL can unload the model just as a request arrives ("Model is
-                            # unloaded."): the same request once more makes it load again (JIT).
-                            if attempt == 1 and response.status_code == 400 and "Model is unloaded" in text:
-                                log.info("LM Studio unloaded the model while the request arrived; sending it again")
-                                continue
-                            raise LLMError(f"HTTP {response.status_code}: {text[:300]}")
-                        if "text/event-stream" not in response.headers.get("content-type", ""):
-                            # A server that ignores "stream": the whole JSON at once.
-                            data = json.loads(await response.aread())
-                            message = ((data.get("choices") or [{}])[0]).get("message") or {}
-                            break
+        try:
+            async with self._http(idle) as http:
+                async with http.stream("POST", f"{self.base_url}/chat/completions", json=body) as response:
+                    if response.status_code >= 400:
+                        text = (await response.aread()).decode("utf-8", "replace")
+                        raise LLMError(f"HTTP {response.status_code}: {text[:300]}")
+                    if "text/event-stream" not in response.headers.get("content-type", ""):
+                        # A server that ignores "stream": the whole JSON at once.
+                        data = json.loads(await response.aread())
+                        message = ((data.get("choices") or [{}])[0]).get("message") or {}
+                    else:
                         chunks = []
                         async for line in response.aiter_lines():
                             line = line.strip()
@@ -225,11 +218,10 @@ class OpenAICompatClient:
                             except json.JSONDecodeError:
                                 continue
                         message, data = _message_from_stream(chunks)
-                        break
-            except httpx.TimeoutException as exc:
-                raise LLMError(f"{idle:.0f} 秒間応答がありませんでした") from exc
-            except httpx.HTTPError as exc:
-                raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"{idle:.0f} 秒間応答がありませんでした") from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
         calls = []
         for call in message.get("tool_calls") or []:
             fn = call.get("function") or {}
@@ -242,22 +234,15 @@ class OpenAICompatClient:
                                           inline) if t)
         return ChatReply(content, calls, data, time.monotonic() - started, reasoning)
 
-    def thinking_body(self, think: bool) -> dict:
-        """Extra request fields that switch thinking on (server specific)."""
-        return {}
 
-
-class LMStudio(OpenAICompatClient):
-    """LM Studio's OpenAI-compatible endpoint plus its native REST API for the loaded-model state."""
-
-    def thinking_body(self, think: bool) -> dict:
-        # Measured with LM Studio 0.4 and the Qwen3.8 27B: chat_template_kwargs is ignored; reasoning_effort turns
-        # thinking on and the thoughts come back in message.reasoning (never in content).
-        return {"reasoning_effort": "medium"} if think else {}
+class LlamaRouter(OpenAICompatClient):
+    """llama-server in router mode (scripts/start-llm.ps1): the OpenAI-compatible endpoint, plus the router's model API
+    (GET /models with each model's status, POST /models/unload). A request names the model of the preset
+    (LLM_MODEL) and the router starts it on demand; unloading stops that child process, so its memory is free."""
 
     def native(self) -> str:
         parsed = urlparse(self.base_url)
-        return f"{parsed.scheme}://{parsed.netloc}/api/v1"
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     async def reachable(self) -> bool:
         try:
@@ -266,36 +251,48 @@ class LMStudio(OpenAICompatClient):
         except httpx.HTTPError:
             return False
 
-    async def loaded(self) -> list[tuple[str, str]]:
+    async def loaded(self) -> list[str]:
+        """Models whose child process exists (loaded, loading or still unloading)."""
         async with self._http(15) as http:
             response = await http.get(f"{self.native()}/models")
             response.raise_for_status()
             payload = response.json()
-        found = []
-        for entry in payload.get("models") or payload.get("data") or []:
-            if entry.get("type") not in (None, "llm", "vlm"):
-                continue
-            for inst in entry.get("loaded_instances") or []:
-                inst_id = inst.get("id") if isinstance(inst, dict) else inst
-                if inst_id:
-                    found.append((entry.get("key") or "?", inst_id))
-        return found
+        return resident_models(payload)
 
-    async def unload_all(self, retries: int = 3) -> list[str]:
-        """Unload every LLM and verify; raises LLMError if one is still resident."""
+    async def unload_all(self, wait_s: float = 60.0) -> list[str]:
+        """Unload every model and wait until the router reports none; raises LLMError if one is still resident."""
         import asyncio
 
         unloaded: list[str] = []
-        for attempt in range(retries + 1):
-            instances = await self.loaded()
-            if not instances:
-                log.info("LM Studio unloaded (forced=%s)", unloaded)
+        deadline = time.monotonic() + wait_s
+        asked: set[str] = set()
+        while True:
+            resident = await self.loaded()
+            if not resident:
+                log.info("LLM router: nothing loaded (unloaded=%s)", unloaded)
                 return unloaded
-            if attempt == retries:
+            if time.monotonic() > deadline:
                 break
             async with self._http(60) as http:
-                for _key, inst_id in instances:
-                    await http.post(f"{self.native()}/models/unload", json={"instance_id": inst_id})
-                    unloaded.append(inst_id)
+                for model in resident:
+                    if model in asked:
+                        continue
+                    await http.post(f"{self.native()}/models/unload", json={"model": model})
+                    asked.add(model)
+                    unloaded.append(model)
             await asyncio.sleep(1.0)
-        raise LLMError(f"LM Studio のモデルを unload できません: {[i for _, i in instances]}")
+        raise LLMError(f"LLM サーバのモデルを unload できません: {resident}")
+
+
+RESIDENT = ("loaded", "loading", "unloading", "sleeping")
+
+
+def resident_models(payload: dict) -> list[str]:
+    """Ids of the router's models that hold memory (``status.value`` other than unloaded / failed)."""
+    found = []
+    for entry in payload.get("data") or payload.get("models") or []:
+        status = entry.get("status") or {}
+        value = status.get("value") if isinstance(status, dict) else status
+        if value in RESIDENT and entry.get("id"):
+            found.append(entry["id"])
+    return found

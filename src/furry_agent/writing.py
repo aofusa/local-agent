@@ -1,6 +1,6 @@
 """The chat tab's writing branch: schemas and pure steps (docs/chat-deep-search-creative-sandbox.md §4).
 
-The writer is the LM Studio 27B, never a search model, and never the image prompts. The finished text is kept in
+The writer is the 27B (llama.cpp router), never a search model, and never the image prompts. The finished text is kept in
 ``artifact.draft`` (apart from the message text) so "続きを書いて" continues from the draft itself, not from
 whatever the chat history still holds. Revising sends the draft and the brief and gets back find/replace edits:
 the draft is never thrown away and rewritten.

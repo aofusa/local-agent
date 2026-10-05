@@ -1,4 +1,4 @@
-"""The chat tab graph end to end with fakes: no Tor, LM Studio, llama.cpp, ComfyUI or Docker needed."""
+"""The chat tab graph end to end with fakes: no Tor, the LLM router, llama.cpp, ComfyUI or Docker needed."""
 
 import json
 import re
@@ -158,9 +158,9 @@ def default_decision(user: str) -> dict:
     return {"action": "final", "answer": "最終回答です。", "reason": "材料が揃った"}
 
 
-class FakeLMStudio(FakeLLM):
+class FakeLlamaRouter(FakeLLM):
     def __init__(self, world, up=True):
-        super().__init__(world, "lmstudio")
+        super().__init__(world, "llm")
         self.up = up
         self.is_loaded = False
 
@@ -169,7 +169,7 @@ class FakeLMStudio(FakeLLM):
 
     async def chat(self, messages, **kw):
         self.is_loaded = True
-        self.world.events.append("lmstudio:chat")
+        self.world.events.append("llm:chat")
         return await super().chat(messages, **kw)
 
     async def loaded(self):
@@ -177,7 +177,7 @@ class FakeLMStudio(FakeLLM):
 
     async def unload_all(self):
         if self.is_loaded:
-            self.world.events.append("lmstudio:unload")
+            self.world.events.append("llm:unload")
         self.is_loaded = False
         return []
 
@@ -299,15 +299,15 @@ class World:
         self.controller_replies: list = []
 
 
-def _config(world, settings, lmstudio=None, comfy=None, mode=None, task=None, docker=None, thread="t"):
-    lm = lmstudio or FakeLMStudio(world)
+def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=None, thread="t"):
+    lm = llm or FakeLlamaRouter(world)
     world.lm = lm
 
     async def tor(_settings):
         world.events.append("tor")
         return "running"
 
-    conf = {"chat_settings": settings, "lmstudio": lm, "comfy_client": comfy or FakeComfy(),
+    conf = {"chat_settings": settings, "llm": lm, "comfy_client": comfy or FakeComfy(),
             "server_factory": lambda selection, port: FakeServer(world, selection, port),
             "search_factory": lambda tag: FakeSearchClient(world),
             "free_memory": lambda: world.free_mb - (13000 if lm.is_loaded else 0),
@@ -454,8 +454,8 @@ async def test_search_proxy_mode_unloads_27b_before_readers_and_cleans_up(models
     state, message = await _run("/search ROG Ally X", world, _settings(models_dir), mode="think")
     events = world.events
     # The 27B planned first, then was unloaded before any Bonsai started (it does not fit with the readers).
-    assert events[0] == "tor" and events[1] == "lmstudio:chat"
-    assert events.index("lmstudio:unload") < events.index("start:bonsai-4b")
+    assert events[0] == "tor" and events[1] == "llm:chat"
+    assert events.index("llm:unload") < events.index("start:bonsai-4b")
     assert ("web", "alpha") in world.searches and ("news", "beta") in world.searches
     assert world.started.count("ternary-8b") == 2  # two parallel readers
     assert world.started[-1] == "bonsai-2-27b-abliterated"  # proxy leader for critique + synthesis
@@ -479,10 +479,10 @@ async def test_search_resident_mode_keeps_27b_and_never_starts_large_bonsai(mode
     world = World(free_mb=60000)  # plenty of memory: the readers fit next to the 27B
     state, message = await _run("/search something", world, _settings(models_dir), mode="think")
     assert "bonsai-2-27b-abliterated" not in world.started and "bonsai-2-27b" not in world.started
-    assert world.synth == ["lmstudio"]
-    assert world.events[-1] == "lmstudio:unload"  # unloaded after the final answer
+    assert world.synth == ["llm"]
+    assert world.events[-1] == "llm:unload"  # unloaded after the final answer
     assert message.additional_kwargs["search_trace"]["mode"] == "resident"
-    # Thinking only on the LM Studio 27B, and only for the free-text answer (JSON calls stay off).
+    # Thinking only on the 27B (llama.cpp router), and only for the free-text answer (JSON calls stay off).
     synth_thinking = [t for t in world.thinking if "統合役" in t[1]]
     assert synth_thinking[-1][2] is True
     assert message.additional_kwargs["thinking"] == [{"stage": "統合", "text": "統合の思考"}]
@@ -607,9 +607,9 @@ async def test_plan_failure_falls_back_to_one_intent(models_dir):
 
 async def test_lm_studio_down_plans_with_local_proxy(models_dir):
     world = World()
-    lm = FakeLMStudio(world, up=False)
-    state, message = await _run("/search offline", world, _settings(models_dir), lmstudio=lm, mode="think")
-    assert "lmstudio:chat" not in world.events
+    lm = FakeLlamaRouter(world, up=False)
+    state, message = await _run("/search offline", world, _settings(models_dir), llm=lm, mode="think")
+    assert "llm:chat" not in world.events
     assert world.started[0] == "bonsai-2-27b-abliterated"  # planner = proxy leader, kept for synthesis
     assert world.started.count("bonsai-2-27b-abliterated") == 1
     assert world.synth == ["bonsai-2-27b-abliterated"]

@@ -10,10 +10,10 @@ session file is the history. Tools run on the machine where the CUI was started.
     event: token      {"text": "..."}
     event: tool_call  {"id": "call_1", "name": "grep", "arguments": "{...}"}   after the stream ended
     event: done       {"finish_reason": "tool_calls" | "stop" | "length", "usage": {...}}
-    event: error      {"message": "...", "code": "context_overflow" | "lmstudio" | "busy" | "bad_request"}
+    event: error      {"message": "...", "code": "context_overflow" | "llm" | "busy" | "bad_request"}
 
 The turn holds ``job_lock`` (tab "coder") like the chat tab, so it never runs next to an image generation or a
-search; it waits while the other tab works (the CUI shows the wait, it is not an error). LM Studio stays on
+search; it waits while the other tab works (the CUI shows the wait, it is not an error). The LLM router stays on
 loopback: only this process talks to it. Mounted on the LangGraph server through langgraph.json ``http.app``.
 """
 
@@ -37,7 +37,7 @@ from furry_agent import modes
 from furry_agent.chat_common import _image_tab_busy, prompt_tokens
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import job_lock
-from furry_agent.llm_client import LMStudio, idle_timeout
+from furry_agent.llm_client import LlamaRouter, idle_timeout
 from furry_agent.router import CHAT, Route as ChatRoute
 
 log = logging.getLogger("furry_agent.coder")
@@ -96,7 +96,7 @@ def openai_tools(tools: list[Any]) -> list[dict]:
 
 
 def clean_messages(messages: Any) -> list[dict]:
-    """The chat messages as LM Studio reads them; anything else is refused (never silently changed)."""
+    """The chat messages as the LLM router reads them; anything else is refused (never silently changed)."""
     if not isinstance(messages, list) or not messages:
         raise GateError("messages がありません")
     out = []
@@ -144,15 +144,15 @@ def parse_turn(body: Any) -> Turn:
                 min(max(temperature, 0.0), 1.5))
 
 
-def budget(turn: Turn, settings: ChatSettings, client: LMStudio) -> tuple[int, int]:
-    """(max_tokens, prompt estimate). The 27B runs with LMSTUDIO_CONTEXT (4096 on this machine): the prompt plus
+def budget(turn: Turn, settings: ChatSettings, client: LlamaRouter) -> tuple[int, int]:
+    """(max_tokens, prompt estimate). The 27B runs with LLM_CONTEXT (4096 on this machine): the prompt plus
     the tool schemas plus the reply must fit. There is no time cap: the stream has an idle timeout only."""
     estimate = prompt_tokens(turn.messages)
     if turn.tools:
         estimate += prompt_tokens([{"content": json.dumps(turn.tools, ensure_ascii=False)}])
-    room = settings.lmstudio_ctx - estimate - 48
+    room = settings.llm_ctx - estimate - 48
     if room < MIN_ROOM:
-        raise GateError(f"文脈が足りません（推定 {estimate} トークン、窓 {settings.lmstudio_ctx}）。会話を圧縮してください",
+        raise GateError(f"文脈が足りません（推定 {estimate} トークン、窓 {settings.llm_ctx}）。会話を圧縮してください",
                         "context_overflow")
     return min(turn.max_tokens, room), estimate
 
@@ -185,13 +185,13 @@ def apply_chunk(chunk: dict, out: Collected) -> tuple[str, str]:
     return text, thinking
 
 
-async def stream_lmstudio(client: LMStudio, turn: Turn, max_tokens: int, timeout_s: float,
+async def stream_llm(client: LlamaRouter, turn: Turn, max_tokens: int, timeout_s: float,
                           transport: httpx.AsyncBaseTransport | None = None) -> AsyncIterator[dict]:
     """The parsed chunks of one streamed Chat Completions call. A refused start (HTTP error) is retried once."""
     think = turn.mode == modes.THINK
     body: dict[str, Any] = {"messages": turn.messages, "max_tokens": max_tokens, "temperature": turn.temperature,
                             "stream": True, "stream_options": {"include_usage": True},
-                            "chat_template_kwargs": {"enable_thinking": think}, **client.thinking_body(think)}
+                            "chat_template_kwargs": {"enable_thinking": think}}
     if client.model:
         body["model"] = client.model
     if turn.tools:
@@ -207,9 +207,9 @@ async def stream_lmstudio(client: LMStudio, turn: Turn, max_tokens: int, timeout
                     if response.status_code >= 400:
                         detail = (await response.aread()).decode("utf-8", "replace")[:300]
                         if attempt == 1:
-                            log.info("coder turn: LM Studio refused (HTTP %s); once more", response.status_code)
+                            log.info("coder turn: the LLM router refused (HTTP %s); once more", response.status_code)
                             continue
-                        raise GateError(f"LM Studio が拒否しました（HTTP {response.status_code}: {detail}）", "lmstudio")
+                        raise GateError(f"LLM サーバ（llama.cpp）が拒否しました（HTTP {response.status_code}: {detail}）", "llm")
                     async for line in response.aiter_lines():
                         line = line.strip()
                         if not line.startswith("data:"):
@@ -223,9 +223,9 @@ async def stream_lmstudio(client: LMStudio, turn: Turn, max_tokens: int, timeout
                             continue
                     return
             except httpx.TimeoutException as exc:
-                raise GateError(f"LM Studio が {timeout_s:.0f} 秒間応答しませんでした", "lmstudio") from exc
+                raise GateError(f"LLM サーバ（llama.cpp）が {timeout_s:.0f} 秒間応答しませんでした", "llm") from exc
             except httpx.HTTPError as exc:
-                raise GateError(f"LM Studio に接続できません: {exc!r}", "lmstudio") from exc
+                raise GateError(f"LLM サーバ（llama.cpp）に接続できません: {exc!r}", "llm") from exc
 
 
 async def _acquire(settings: ChatSettings, comfy_config: dict | None) -> AsyncIterator[str | dict]:
@@ -254,11 +254,11 @@ async def _acquire(settings: ChatSettings, comfy_config: dict | None) -> AsyncIt
         await asyncio.sleep(0.5)
 
 
-async def run_turn(turn: Turn, settings: ChatSettings, *, client: LMStudio | None = None,
+async def run_turn(turn: Turn, settings: ChatSettings, *, client: LlamaRouter | None = None,
                    transport: httpx.AsyncBaseTransport | None = None,
                    comfy_config: dict | None = None) -> AsyncIterator[bytes]:
     """The SSE body of one turn. Tool calls are sent only after the stream ended (a broken stream sends none)."""
-    client = client or LMStudio(settings.lmstudio_url, settings.lmstudio_model, settings.idle_timeout_s)
+    client = client or LlamaRouter(settings.llm_url, settings.llm_model, settings.idle_timeout_s)
     token = None
     started = time.monotonic()
     try:
@@ -269,7 +269,7 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LMStudio | Non
             else:
                 yield sse("status", item)
         out = Collected()
-        async for chunk in stream_lmstudio(client, turn, max_tokens, settings.idle_timeout_s, transport):
+        async for chunk in stream_llm(client, turn, max_tokens, settings.idle_timeout_s, transport):
             job_lock.renew(token)
             text, thinking = apply_chunk(chunk, out)
             if thinking:
@@ -313,7 +313,7 @@ async def turn_endpoint(request: Request):
     except GateError as exc:
         return JSONResponse({"error": str(exc), "code": exc.code}, status_code=400)
     state = request.app.state
-    stream = run_turn(turn, settings, client=getattr(state, "lmstudio", None),
+    stream = run_turn(turn, settings, client=getattr(state, "llm", None),
                       transport=getattr(state, "transport", None), comfy_config=getattr(state, "comfy_config", None))
     return StreamingResponse(stream, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -321,9 +321,11 @@ async def turn_endpoint(request: Request):
 
 async def health_endpoint(request: Request):
     settings = _settings(request)
-    client = getattr(request.app.state, "lmstudio", None) or LMStudio(settings.lmstudio_url, settings.lmstudio_model, 5)
-    return JSONResponse({"ok": True, "gate": "coder", "version": 1, "lmstudio": await client.reachable(),
-                         "model": settings.lmstudio_model, "context": settings.lmstudio_ctx,
+    client = getattr(request.app.state, "llm", None) or LlamaRouter(settings.llm_url, settings.llm_model, 5)
+    reachable = await client.reachable()
+    # "lmstudio" is the same flag under its name before v0.11.0 (cirka 0.3 and older read it).
+    return JSONResponse({"ok": True, "gate": "coder", "version": 1, "llm": reachable, "lmstudio": reachable,
+                         "model": settings.llm_model, "context": settings.llm_ctx,
                          "busy": job_lock.holder, "graphs": ["agent", "chat"]})
 
 

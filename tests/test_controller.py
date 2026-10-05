@@ -1,5 +1,5 @@
 """The chat tab's control loop (docs/autonomous-controller-design.md §13), with the fakes of test_chat_graph:
-no Tor, LM Studio, llama.cpp, ComfyUI or Docker."""
+no Tor, the LLM router, llama.cpp, ComfyUI or Docker."""
 
 import json
 from dataclasses import replace
@@ -189,12 +189,12 @@ async def test_failed_search_is_recorded_and_the_controller_answers(models_dir):
 
 
 async def test_lm_studio_down_decides_with_the_proxy_and_stops_it(models_dir):
-    from test_chat_graph import FakeLMStudio
+    from test_chat_graph import FakeLlamaRouter
 
     world = World()
     world.controller_replies = [_final("代理で答えました。")]
-    lm = FakeLMStudio(world, up=False)
-    state, message = await _run("Rust の最新版を調べてから要点を教えて", world, _settings(models_dir), lmstudio=lm,
+    lm = FakeLlamaRouter(world, up=False)
+    state, message = await _run("Rust の最新版を調べてから要点を教えて", world, _settings(models_dir), llm=lm,
                                 mode="think")
     assert message.content == "代理で答えました。"
     assert world.started == ["bonsai-2-27b-abliterated"] and world.live == set()

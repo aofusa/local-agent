@@ -1,6 +1,6 @@
 """State and helpers shared by the chat tab's nodes (chat_graph, write_nodes, code_nodes).
 
-Dependencies can be replaced through ``config["configurable"]`` for tests (chat_settings, lmstudio, server_factory,
+Dependencies can be replaced through ``config["configurable"]`` for tests (chat_settings, llm, server_factory,
 search_factory, free_memory, ensure_tor, comfy_client, sandbox_runner).
 """
 
@@ -24,7 +24,7 @@ from furry_agent.bonsai_select import Selection
 from furry_agent.comfy_client import ComfyClient
 from furry_agent.config import ChatSettings, env_float, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
-from furry_agent.llm_client import LMStudio
+from furry_agent.llm_client import LlamaRouter
 from furry_agent.modes import THINK
 
 log = logging.getLogger("furry_agent.chat")
@@ -102,8 +102,8 @@ def _settings(config: RunnableConfig | None) -> ChatSettings:
     return _conf(config).get("chat_settings") or ChatSettings.from_env()
 
 
-def _lmstudio(config: RunnableConfig | None, settings: ChatSettings) -> LMStudio:
-    return _conf(config).get("lmstudio") or LMStudio(settings.lmstudio_url, settings.lmstudio_model,
+def _llm(config: RunnableConfig | None, settings: ChatSettings) -> LlamaRouter:
+    return _conf(config).get("llm") or LlamaRouter(settings.llm_url, settings.llm_model,
                                                      settings.idle_timeout_s)
 
 
@@ -237,8 +237,8 @@ def _fail(state: ChatState, exc: Exception | str, stage: str | None = None, trac
     return {"messages": [message], "error": str(exc), "lock_token": None}
 
 
-async def _cleanup(token: str | None, lmstudio: LMStudio | None = None, unload: bool = False) -> None:
-    """Kill every llama-server (the proxy leader included), optionally unload LM Studio, release the lock."""
+async def _cleanup(token: str | None, llm: LlamaRouter | None = None, unload: bool = False) -> None:
+    """Kill every llama-server (the proxy leader included), optionally unload the LLM router, release the lock."""
     try:
         leader = _leaders.pop(token, None) if token else None
         if leader is not None:
@@ -246,11 +246,11 @@ async def _cleanup(token: str | None, lmstudio: LMStudio | None = None, unload: 
         left = await bonsai_worker.kill_all()
         if left:
             log.info("stopped llama-server pids=%s", left)
-        if unload and lmstudio is not None:
+        if unload and llm is not None:
             try:
-                await lmstudio.unload_all()
-            except Exception as exc:  # LM Studio down: nothing is loaded there anyway
-                log.warning("LM Studio unload failed: %s", exc)
+                await llm.unload_all()
+            except Exception as exc:  # the LLM router down: nothing is loaded there anyway
+                log.warning("the LLM router unload failed: %s", exc)
     finally:
         if bonsai_worker.live_pids():
             log.error("llama-server still alive after cleanup: %s", bonsai_worker.live_pids())
@@ -366,12 +366,12 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
                context: int | None = None) -> tuple[Any, list[dict]]:
     """One free-text model call that fits the model's context window.
 
-    LM Studio loads the 27B with LMSTUDIO_CONTEXT tokens (4096 from scripts/setup-lmstudio.ps1: more does not fit
+    the LLM router loads the 27B with LLM_CONTEXT tokens (4096 from scripts/setup-llm.ps1: more does not fit
     this machine's memory), and thinking tokens count against max_tokens. Thinking is used only in think mode
     and only when the window still leaves ``answer_min`` tokens plus a thinking budget; when the thoughts used
     everything and no answer came, the call is made once more without thinking (the thoughts are kept).
     """
-    window = context or settings.lmstudio_ctx
+    window = context or settings.llm_ctx
     want_think = thinking and _is_think(state)
     messages = fit_messages(messages, window - answer_min - (THINK_RESERVE if want_think else 0) - 48)
     room = capped(settings, client, max(256, window - prompt_tokens(messages) - 48))

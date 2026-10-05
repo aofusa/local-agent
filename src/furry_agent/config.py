@@ -139,10 +139,10 @@ def _path(name: str, default: Path) -> Path:
 class ChatSettings:
     """Chat tab settings (design doc §5.9). The image tab never reads these."""
 
-    lmstudio_url: str = "http://127.0.0.1:1234/v1"
-    lmstudio_model: str = ""
-    # Context window of the LM Studio 27B (scripts/setup-lmstudio.ps1 loads it with 4096: more does not fit).
-    lmstudio_ctx: int = 4096
+    llm_url: str = "http://127.0.0.1:8080/v1"
+    llm_model: str = ""
+    # Context window of the 27B (llama.cpp router) (scripts/setup-llm.ps1 loads it with 4096: more does not fit).
+    llm_ctx: int = 4096
     # No response for this long ends a model call or a wait (AGENT_IDLE_TIMEOUT_S, 20 minutes). Model calls stream,
     # so every token counts as a response; a call that keeps producing tokens is never cut off.
     idle_timeout_s: float = IDLE_TIMEOUT_DEFAULT_S
@@ -175,7 +175,7 @@ class ChatSettings:
     sandbox_user: str = "10001:10001"
     code_dir: Path = REPO_ROOT / "artifacts" / "code"
     sandbox_wait_s: float | None = None
-    search_planner: str = "lmstudio"
+    search_planner: str = "llm"
     search_filter: bool = True
     search_critique: bool = True
     auto_route: bool = True
@@ -229,10 +229,12 @@ class ChatSettings:
         if not socks.startswith("socks5h://"):
             # socks5:// resolves names locally and leaks DNS outside Tor (design doc §5.7).
             raise ValueError(f"TOR_SOCKS_URL は socks5h:// で指定してください（現在 {socks}）")
+        planner = os.environ.get("SEARCH_PLANNER", "").strip().lower() or "llm"
+        planner = "llm" if planner == "lmstudio" else planner  # the value before v0.11.0
         return cls(
-            lmstudio_url=os.environ.get("LMSTUDIO_URL", "").strip() or "http://127.0.0.1:1234/v1",
-            lmstudio_model=os.environ.get("LMSTUDIO_MODEL", "").strip(),
-            lmstudio_ctx=_int("LMSTUDIO_CONTEXT", 4096, 1024, 262144),
+            llm_url=os.environ.get("LLM_URL", "").strip() or "http://127.0.0.1:8080/v1",
+            llm_model=os.environ.get("LLM_MODEL", "").strip(),
+            llm_ctx=_int("LLM_CONTEXT", 4096, 1024, 262144),
             idle_timeout_s=idle_timeout_from_env(),
             history_turns=_int("CHAT_HISTORY_TURNS", 12, 1, 100),
             tor_socks_url=socks,
@@ -255,9 +257,9 @@ class ChatSettings:
             sandbox_user=os.environ.get("SANDBOX_USER", "").strip() or "10001:10001",
             code_dir=_path("SANDBOX_CODE_DIR", REPO_ROOT / "artifacts" / "code"),
             sandbox_wait_s=_optional_float("SANDBOX_WAIT_S"),
-            # lmstudio = the Qwen3.8 27B plans first and is unloaded when the readers do not fit next to it;
-            # local = the Ternary-Bonsai-2-27B proxy plans too (LM Studio is not loaded for a search at all).
-            search_planner=(os.environ.get("SEARCH_PLANNER", "").strip().lower() or "lmstudio"),
+            # llm = the Qwen3.8 27B plans first and is unloaded when the readers do not fit next to it;
+            # local = the Ternary-Bonsai-2-27B proxy plans too (the LLM router is not loaded for a search at all).
+            search_planner=planner,
             search_filter=os.environ.get("SEARCH_FILTER", "1").strip() != "0",
             search_critique=os.environ.get("SEARCH_CRITIQUE", "1").strip() != "0",
             auto_route=os.environ.get("SEARCH_AUTO_ROUTE", "1").strip() != "0",
