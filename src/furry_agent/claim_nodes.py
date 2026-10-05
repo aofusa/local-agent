@@ -125,8 +125,8 @@ async def _call(state: ChatState, config: RunnableConfig, search: dict, stage: s
     claim["spent"] = round(float(claim.get("spent", 0.0)) + seconds, 1)
     claim.setdefault("seconds", {})[stage] = round(seconds, 1)
     search["claim"] = claim
-    log.info("%s: %s seconds=%.1f spent=%.1f/%.0f", stage, error or "ok", seconds, claim["spent"],
-             settings.claim_timeout_s)
+    log.info("%s: %s seconds=%.1f spent=%.1f budget=%s", stage, error or "ok", seconds, claim["spent"],
+             f"{settings.claim_timeout_s:.0f}" if settings.claim_timeout_s > 0 else "none")
     return value, error
 
 
