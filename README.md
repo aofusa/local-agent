@@ -527,7 +527,7 @@ cirka config show                                # 実際に使われる値と�
 cirka status                                     # ホストに届くか、モデルと文脈の大きさ
 ```
 
-優先順位は「既定 < ユーザー設定 < プロジェクト設定 < 環境変数（`CIRKA_HOST` ほか） < コマンドライン（`--host`）」です。実行中は `/host http://… [--save]` で切り替えられます。そのほかのキー: `mode`（fast / think / auto）、`permission`（auto / default / accept-edits / plan / bypass。既定は auto）、`shell`（auto / pwsh / powershell / cmd / bash / sh）、`max_turns`、`locale`、`auth_header`（`Name: value`。認証方式は未確定なので既定は空。ヘッダを付ける差し込み口だけです）、`idle_timeout_s` / `search_timeout_s` / `image_timeout_s`。
+優先順位は「既定 < ユーザー設定 < プロジェクト設定 < 環境変数（`CIRKA_HOST` ほか） < コマンドライン（`--host`）」です。実行中は `/host http://… [--save]` で切り替えられます。そのほかのキー: `mode`（fast / think / auto）、`permission`（auto / default / accept-edits / plan / bypass。既定は auto）、`shell`（auto / pwsh / powershell / cmd / bash / sh）、`max_turns`、`locale`、`auth_header`（`Name: value`。認証方式は未確定なので既定は空。ヘッダを付ける差し込み口だけです）、`idle_timeout_s`（何も返ってこない時間の上限、既定 1200 秒。検索と画像生成もこれで待つ）。
 
 #### 使い方
 
