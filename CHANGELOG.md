@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.9.0 — 「何も返ってこない時間」だけのタイムアウト、cirka の README
+
+- タイムアウトを見直した: 何も返ってこない時間が `AGENT_IDLE_TIMEOUT_S`（`.env`、既定 1200 秒 = 20 分）続いたときだけ打ち切り、何かが返ってきている限り、全体にかかる時間では打ち切らない。
+  - LM Studio と llama-server への呼び出しはすべてストリームで受け取り、トークン（思考トークンを含む）が届くたびに計り直す。時間で `max_tokens` を削るのもやめた（context だけで決める）。
+  - 画像タブ: ComfyUI の待ちはその prompt の進捗イベント（サンプラーの 1 ステップごとを含む）で計り直す。遅い GPU の Chroma1-HD も最後まで待つ。ComfyUI の LM Connect ノードの read timeout にも同じ値を入れる。
+  - llama-server の起動は `/health` の応答（読み込み中の 503 を含む）がある限り待つ。
+  - もう片方のタブの処理や ComfyUI のキューは、相手が動いているあいだ待つ（すぐ「実行中です」と断らない）。止まった相手のロックは 15 分の期限で外れる。
+  - 思考モードの検索全体・主張の検証・自律モード・reader 1 体の時間の予算は既定で無しにした（`SEARCH_WALL_CLOCK_S`、`CLAIM_TIMEOUT_S`、`CONTROLLER_WALL_CLOCK_S`、`SEARCH_TOTAL_TIMEOUT_S` を設定したときだけ掛かる）。量はラウンド・ページ・手数で決まる。
+  - 1 件を諦めて先へ進むための短い上限（Tor 経由の HTTP リクエスト 30 秒、Tor の起動 90 秒、状態確認）と、コンテナ実行の 60 秒は残した。
+  - `COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は廃止（`AGENT_IDLE_TIMEOUT_S` にまとめた）。
+- cirka 0.3.0: 設定 `idle_timeout_s`（既定 1200 秒、`CIRKA_IDLE_TIMEOUT_S` でも指定可）で同じ考え方にした。モデルの応答、ホストの検索・画像生成はデータが届いている限り待つ。`bash` は出力が途切れた時間で止める（モデルはそれより短い `timeout_s` を指定できる）。`search_timeout_s` / `image_timeout_s` は廃止。
+- `client/README.md`（cirka の説明: ビルド、接続先、使い方、許可モード、画面とキー、設定、タイムアウト、ファイルの置き場、注意、トラブルシューティング、開発）を追加した。
+
 ## v0.8.1 — CUI のディレクトリ名とドキュメント
 
 - CUI のソースのディレクトリを `cirka/` から `client/` に変えた（cirka は固有名詞なので、クライアント側のアプリであることが分かる汎用的な名前にした）。コマンド名 `cirka`、設定とデータの置き場（`%APPDATA%\cirka`、`.cirka/`）、`scripts/build-cirka.ps1`、`scripts/gen_cirka_art.py` はそのまま。ビルドは `cd client; cargo build --release`。
