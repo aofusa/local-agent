@@ -43,7 +43,7 @@ pub async fn web_search(ctx: &ToolCtx, args: &Value, ui: &mut dyn Frontend) -> T
     let cancelled = move || cancel.load(std::sync::atomic::Ordering::SeqCst);
     let mut on_progress = progress(ui);
     let result = host
-        .run_graph("chat", json!(query), configurable, Duration::from_secs(ctx.config.search_timeout_s), &mut on_progress, &cancelled)
+        .run_graph("chat", json!(query), configurable, Duration::from_secs(ctx.config.idle_timeout_s), &mut on_progress, &cancelled)
         .await;
     match result {
         Ok(GraphResult { error: Some(e), .. }) => ToolOutput::err(format!("ホストの検索が失敗しました: {e}")),
@@ -120,7 +120,7 @@ pub async fn image_generate(ctx: &ToolCtx, args: &Value, ui: &mut dyn Frontend) 
     let cancelled = move || cancel.load(std::sync::atomic::Ordering::SeqCst);
     let result = {
         let mut on_progress = progress(ui);
-        host.run_graph("agent", Value::Array(content), json!({}), Duration::from_secs(ctx.config.image_timeout_s),
+        host.run_graph("agent", Value::Array(content), json!({}), Duration::from_secs(ctx.config.idle_timeout_s),
                        &mut on_progress, &cancelled)
             .await
     };

@@ -75,7 +75,7 @@ pub fn schemas(remote: bool) -> Vec<Value> {
         json!({"name": "write_file", "description": "Create a file, or replace a file you have read.",
                "parameters": {"type": "object", "properties": {"path": s("string"), "content": s("string")},
                               "required": ["path", "content"]}}),
-        json!({"name": "bash", "description": "Run a shell command in the workspace (build, test, git).",
+        json!({"name": "bash", "description": "Run a shell command in the workspace (build, test, git). timeout_s: seconds without any output before it is stopped.",
                "parameters": {"type": "object", "properties": {"command": s("string"), "timeout_s": s("integer"), "cwd": s("string")},
                               "required": ["command"]}}),
         json!({"name": "todo_write", "description": "Replace the task list. status: pending|in_progress|done|blocked.",
