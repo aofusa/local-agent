@@ -178,6 +178,15 @@ class ChatSettings:
     doc_timeout_s: float = 600.0
     # auto: rules when every chunk fits in DOC_MAX_CHUNKS, the LM Studio 27B otherwise; lmstudio; rules.
     doc_planner: str = "auto"
+    # Control loop (docs/autonomous-controller-design.md §10): tools run per compound think request, and the
+    # wall clock of the whole loop (0 = SEARCH_WALL_CLOCK_S; never more than that).
+    controller_max_steps: int = 3
+    controller_wall_clock_s: float = 0.0
+
+    @property
+    def controller_budget_s(self) -> float:
+        limit = self.controller_wall_clock_s or self.search_wall_clock_s
+        return min(limit, self.search_wall_clock_s)
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
@@ -242,4 +251,6 @@ class ChatSettings:
             doc_max_chunks=_int("DOC_MAX_CHUNKS", 12, 1, 12),
             doc_timeout_s=_float("DOC_TIMEOUT_S", 600.0),
             doc_planner=(os.environ.get("DOC_PLANNER", "").strip().lower() or "auto"),
+            controller_max_steps=_int("CONTROLLER_MAX_STEPS", 3, 1, 4),
+            controller_wall_clock_s=_float("CONTROLLER_WALL_CLOCK_S", 0.0),
         )

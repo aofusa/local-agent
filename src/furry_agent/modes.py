@@ -69,13 +69,16 @@ def requested_mode(value) -> str:
 
 
 def auto_mode(route: Route, *, has_draft: bool = False, draft_status: str = "",
-              router_deep: bool | None = None) -> tuple[str, str]:
-    """(fast | think, reason) for one request."""
+              router_deep: bool | None = None, compound: bool = False) -> tuple[str, str]:
+    """(fast | think, reason) for one request. ``compound``: several tools in turn (router.is_compound); only
+    think mode runs the control loop (docs/autonomous-controller-design.md §4)."""
     text = route.text or ""
     if _ASK_FAST.search(text):
         return FAST, "手短な回答の指定"
     if _ASK_THINK.search(text):
         return THINK, "じっくり考える指定"
+    if compound:
+        return THINK, "複数の道具を順に使う依頼"
     if route.kind == SEARCH:
         if len(route.urls) > 1:
             return THINK, "複数の URL"

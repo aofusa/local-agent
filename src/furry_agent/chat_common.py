@@ -74,6 +74,21 @@ class ChatState(MessagesState):
     doc_files: list[dict]
     doc_chunks: list[dict]
     doc_waves: int
+    # The control loop (docs/autonomous-controller-design.md §6): active, steps, trace, decision, answer ...
+    control: dict[str, Any]
+
+
+CONTROL_RECORD = "controller_record"
+
+
+def controlled(state) -> bool:
+    """This run is the control loop: the end of a tool goes back to controller_record instead of END."""
+    return bool((state.get("control") or {}).get("active"))
+
+
+def end_or_record(state) -> str:
+    """END for the single-tool paths; controller_record when the control loop called the tool (§5.2)."""
+    return CONTROL_RECORD if controlled(state) else "__end__"
 
 
 class StageError(RuntimeError):
