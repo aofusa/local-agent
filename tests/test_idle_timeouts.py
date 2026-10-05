@@ -236,3 +236,45 @@ _real_sleep = asyncio.sleep
 
 async def _fast_sleep(seconds, *a, **k):
     await _real_sleep(0)
+
+
+# --- budgets restored after the time cap was removed -----------------------------------------------------------
+
+
+async def test_writing_budgets_are_back_to_their_design_values(monkeypatch):
+    # Outline 1500 and revise 1200 tokens (lowered to 1200 / 800 only to fit the old 20-minute cap); the draft keeps
+    # 1200 tokens for the answer when deciding whether to think.
+    import test_chat_graph as g
+    from furry_agent import chat_common as cc, write_nodes
+
+    sizes = {}
+    real = g.FakeLLM.chat
+
+    async def recording(self, messages, tools=None, **kw):
+        system = g._system(messages)
+        for key, label in (("書く前の設計", "outline"), ("差分だけ直します", "revise")):
+            if key in system:
+                sizes[label] = kw.get("max_tokens")
+        return await real(self, messages, tools=tools, **kw)
+
+    monkeypatch.setattr(g.FakeLLM, "chat", recording)
+    answer_mins = []
+    real_ask = cc._ask
+
+    async def ask(*a, **kw):
+        answer_mins.append((kw.get("stage"), kw.get("answer_min")))
+        return await real_ask(*a, **kw)
+
+    monkeypatch.setattr(write_nodes, "_ask", ask)
+    import pathlib
+    import tempfile
+
+    models = pathlib.Path(tempfile.mkdtemp())
+    exe = models / "llama-server.exe"
+    exe.write_bytes(b"")
+    settings = g.replace(g.ChatSettings(), llama_server=str(exe), models_dir=models, logs_dir=models / "logs",
+                         job_lock_timeout_s=0.2, claim_verify=False)
+    world = g.World()
+    await g._run("猫の短編小説を書いて", world, settings, mode="think")
+    assert sizes == {"outline": 1500, "revise": 1200}
+    assert ("本文", 1200) in answer_mins

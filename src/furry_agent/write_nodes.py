@@ -88,7 +88,7 @@ async def write_brief(state: ChatState, config: RunnableConfig) -> dict:
         async with _held(token):
             parsed = await sa.ask_json(lmstudio, [
                 {"role": "system", "content": await _prompt(settings, "system_write_outline.txt")},
-                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, lmstudio, 1200),
+                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, lmstudio, 1500),
                 temperature=0.2)
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
@@ -132,7 +132,7 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
             reply, thoughts = await _ask(state, settings, lmstudio,
                                          [{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
                                           {"role": "user", "content": user}],
-                                         base=DRAFT_TOKENS, answer_min=800, temperature=0.7, stage="本文")
+                                         base=DRAFT_TOKENS, answer_min=1200, temperature=0.7, stage="本文")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -181,7 +181,7 @@ async def write_revise(state: ChatState, config: RunnableConfig) -> dict:
             revision = await sa.ask_json(lmstudio, [
                 {"role": "system", "content": await _prompt(settings, "system_write_revise.txt")},
                 {"role": "user", "content": writing.revise_input(artifact, piece)}],
-                writing.Revision, max_tokens=capped(settings, lmstudio, 800), temperature=0.2)
+                writing.Revision, max_tokens=capped(settings, lmstudio, 1200), temperature=0.2)
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise

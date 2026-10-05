@@ -89,7 +89,7 @@ async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSett
     try:
         token = await _lock(state, config, settings)
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=800,
+            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=1200,
                                          temperature=0.2, stage="修正" if fix else "コード")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
