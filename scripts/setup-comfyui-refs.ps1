@@ -47,14 +47,15 @@ function Install-CustomNode([string]$Name, [string]$Url, [string]$Commit) {
     $dir
 }
 
-function Get-Model([string]$Url, [string]$Path) {
-    # A models\<folder>\<name> that any folder ComfyUI reads already has is used in place.
+function Get-Model([string]$Repo, [string]$File, [string]$Path) {
+    # A models\<folder>\<name> already in tools\comfyui\models, or in the model folders of an earlier ComfyUI on this
+    # machine (hard-linked in), is not downloaded again.
     if ($Path.StartsWith($ModelsDir)) {
         $relative = $Path.Substring($ModelsDir.TrimEnd('\').Length + 1)
-        $found = Find-ComfyModel $layout (Split-Path $relative) (Split-Path -Leaf $relative)
+        $found = Import-ComfyModel $layout @(Split-Path $relative) (Split-Path -Leaf $relative) (Get-KnownModelDirs)
         if ($found) { Write-Ok "exists: $found"; return }
     }
-    Save-Download $Url $Path
+    Get-HfFile $Repo $File $Path   # through the Hugging Face cache (shared with `hf download`)
 }
 
 Write-Step "カスタムノード（IP-Adapter / ControlNet 前処理）"
@@ -69,17 +70,16 @@ if ($LASTEXITCODE -ne 0) { throw "依存のインストールに失敗しまし�
 Write-Ok "installed"
 
 Write-Step "モデル（$ModelsDir）"
-$hf = "https://huggingface.co"
-Get-Model "$hf/xinsir/controlnet-union-sdxl-1.0/resolve/main/diffusion_pytorch_model_promax.safetensors" `
+Get-Model "xinsir/controlnet-union-sdxl-1.0" "diffusion_pytorch_model_promax.safetensors" `
     (Join-Path $ModelsDir "controlnet\controlnet-union-sdxl-1.0-promax.safetensors")
-Get-Model "$hf/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors" `
+Get-Model "h94/IP-Adapter" "sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors" `
     (Join-Path $ModelsDir "ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors")
-Get-Model "$hf/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors" `
+Get-Model "h94/IP-Adapter" "models/image_encoder/model.safetensors" `
     (Join-Path $ModelsDir "clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
 $ckpts = Join-Path $aux "ckpts"
-Get-Model "$hf/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx" `
+Get-Model "yzd-v/DWPose" "dw-ll_ucoco_384.onnx" `
     (Join-Path $ckpts "yzd-v\DWPose\dw-ll_ucoco_384.onnx")
-Get-Model "$hf/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth" `
+Get-Model "depth-anything/Depth-Anything-V2-Small" "depth_anything_v2_vits.pth" `
     (Join-Path $ckpts "depth-anything\Depth-Anything-V2-Small\depth_anything_v2_vits.pth")
 
 Write-Step "完了。ComfyUI を再起動してください（.\scripts\start-comfyui.ps1）"

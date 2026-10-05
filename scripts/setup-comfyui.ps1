@@ -9,15 +9,17 @@
   3. Install eedali/LM_Connect (pinned commit) into custom_nodes. It is used only as an OpenAI-compatible client of
      the llama.cpp router; llama-cpp-python is NOT installed: no GGUF runs inside ComfyUI.
   4. Link custom_nodes\furry_ja to this repository's comfyui_nodes\furry_ja (directory junction).
-  5. -ModelsDir: folders that already hold ComfyUI models (checkpoints\, loras\, ...) are read in place through
-     tools\comfyui\extra_model_paths.yaml. Otherwise models go to tools\comfyui\models.
-     -CheckpointUrl downloads the checkpoint (CKPT_NAME) into models\checkpoints.
+  5. Models live in tools\comfyui\models only. The files this project uses (the checkpoint CKPT_NAME, the LoRAs in
+     LORAS / CHROMA_LORAS, the reference-image and Chroma models) are looked for in the model folders an earlier
+     ComfyUI on this machine has (Comfy Desktop, Documents\ComfyUI\models) and in -ModelsDir, and hard-linked into
+     tools\comfyui\models (copied across drives). Nothing has to be passed: a later run finds them in place.
+     -CheckpointUrl downloads the checkpoint when no folder has it.
   6. Save the paths to .env (COMFYUI_*), read by start-comfyui.ps1 and the other setup scripts.
   Start or restart ComfyUI afterwards with .\scripts\start-comfyui.ps1 (127.0.0.1:8188, --cache-none).
 
 .EXAMPLE
   .\scripts\setup-comfyui.ps1
-  .\scripts\setup-comfyui.ps1 -ModelsDir D:\ComfyUI\models
+  .\scripts\setup-comfyui.ps1 -ModelsDir D:\ComfyUI\models        # another folder to import the models from
   .\scripts\setup-comfyui.ps1 -Torch cpu -CheckpointUrl https://example.invalid/yiffInHell.safetensors
 #>
 param(
@@ -147,34 +149,56 @@ if (Test-Path $link) {
     Write-Ok "linked -> $target"
 }
 
-Write-Step "モデルの置き場"
-$yaml = Join-Path $dir "extra_model_paths.yaml"
+Write-Step "モデル（$($layout.ModelsDir)）"
 # "a,b" arrives as one string through powershell -File: split on , and ; as well.
-$existing = @($ModelsDir | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object {
+$sources = @($ModelsDir | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object {
     if (-not (Test-Path $_)) { throw "-ModelsDir が見つかりません: $_" }
     (Resolve-Path $_).Path
 })
-if ($existing) {
-    Write-TextFile $yaml (ConvertTo-ComfyExtraModelPathsYaml $existing)
-    $layout.ExtraModelPaths = $yaml
-    Write-Ok "extra_model_paths.yaml: $($existing -join '; ')"
-} elseif (Test-Path $yaml) {
-    $layout.ExtraModelPaths = $yaml   # kept from an earlier run
-    Write-Ok "extra_model_paths.yaml (kept)"
+# An extra_model_paths.yaml of an earlier version: its folders are import sources now, and the file is retired so
+# that ComfyUI reads tools\comfyui\models only.
+$yaml = Join-Path $dir "extra_model_paths.yaml"
+if (Test-Path $yaml) {
+    foreach ($line in Get-Content $yaml) { if ($line -match "base_path:\s*'?([^']+)'?\s*$") { $sources += $Matches[1].Trim() } }
 }
-Write-Ok "models: $($layout.ModelsDir)"
+$sources = @(($sources + (Get-KnownModelDirs)) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+if ($sources) { Write-Ok "取り込み元: $($sources -join '; ')" }
+
+$ckpt = if ($CkptName) { $CkptName } else { Get-DotEnvValue "CKPT_NAME" "yiffInHell_yihVANTABLACK.safetensors" }
+$chromaUnet = Get-DotEnvValue "CHROMA_UNET_NAME" "chroma_v10HD.safetensors"
+$chromaStem = [IO.Path]::GetFileNameWithoutExtension($chromaUnet)
+$wanted = @(
+    @{ Folders = @("checkpoints", "diffusion_models", "unet"); Name = $ckpt; Required = $true },
+    @{ Folders = @("controlnet"); Name = "controlnet-union-sdxl-1.0-promax.safetensors" },
+    @{ Folders = @("ipadapter"); Name = "ip-adapter-plus_sdxl_vit-h.safetensors" },
+    @{ Folders = @("clip_vision"); Name = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors" },
+    @{ Folders = @("diffusion_models", "checkpoints", "unet"); Name = $chromaUnet },
+    @{ Folders = @("diffusion_models"); Name = "$($chromaStem)_fp8_e4m3fn.safetensors" },
+    @{ Folders = @("text_encoders", "clip"); Name = (Get-DotEnvValue "CHROMA_TEXT_ENCODER" "t5xxl_fp8_e4m3fn.safetensors") },
+    @{ Folders = @("vae"); Name = (Get-DotEnvValue "CHROMA_VAE" "ae.safetensors") }
+)
+foreach ($entry in (@(Get-DotEnvValue "LORAS" "") + @(Get-DotEnvValue "CHROMA_LORAS" "")) -split '[,;]') {
+    $name = ($entry.Trim() -split ':')[0].Trim()
+    if (-not $name) { continue }
+    $file = Resolve-LoraName $name (@($layout.ModelsDir) + $sources)
+    if ($file) { $wanted += @{ Folders = @("loras"); Name = $file; Required = $true } }
+    else { Write-Warn2 "LoRA $name がありません。$($layout.ModelsDir)\loras に置いてください" }
+}
+foreach ($item in $wanted) {
+    $path = Import-ComfyModel $layout $item.Folders $item.Name $sources
+    if ($path) { Write-Ok "$($item.Name) ($path)" }
+    elseif ($item.Required -and $item.Name -eq $ckpt -and $CheckpointUrl) {
+        $path = Join-Path $layout.ModelsDir "checkpoints\$ckpt"
+        Save-Download $CheckpointUrl $path
+    }
+    elseif ($item.Required) {
+        Write-Warn2 "$($item.Name) がありません。$($layout.ModelsDir)\$($item.Folders[0]) に置いてください（-CheckpointUrl で取得もできます）"
+    }
+}
+if (Test-Path $yaml) { Remove-Item $yaml; Write-Ok "extra_model_paths.yaml をやめました（モデルは tools\comfyui\models に取り込み済み）" }
+$layout.ExtraModelPaths = ""
 Save-ComfyLayout $layout
 Write-Ok ".env の COMFYUI_* を更新しました"
-
-Write-Step "チェックポイント"
-if (-not $CkptName) { $CkptName = Get-DotEnvValue "CKPT_NAME" "yiffInHell_yihVANTABLACK.safetensors" }
-$found = Find-ComfyModel $layout "checkpoints" $CkptName
-if (-not $found -and $CheckpointUrl) {
-    $found = Join-Path $layout.ModelsDir "checkpoints\$CkptName"
-    Save-Download $CheckpointUrl $found
-}
-if ($found) { Write-Ok "$CkptName ($found)" }
-else { Write-Warn2 "$CkptName がありません。$($layout.ModelsDir)\checkpoints に置くか、-ModelsDir / -CheckpointUrl を指定してください。" }
 
 Write-Host ""
 Write-Host "ComfyUI を起動（再起動）してください: .\scripts\start-comfyui.ps1" -ForegroundColor Cyan

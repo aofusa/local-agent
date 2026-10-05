@@ -252,6 +252,75 @@ function Find-ComfyModel($Layout, [string]$Folder, [string]$Name) {
     $null
 }
 
+function Get-KnownModelDirs {
+    # Model folders an earlier ComfyUI on this machine may already have: Comfy Desktop (its instance model paths and
+    # shared folder) and a ComfyUI in Documents. setup-comfyui.ps1 imports the files it needs from them.
+    $dirs = @()
+    $yamls = Join-Path $env:APPDATA "Comfy Desktop\instance-model-paths"
+    if (Test-Path $yamls) {
+        foreach ($yaml in Get-ChildItem $yamls -Filter "*.yaml" -ErrorAction SilentlyContinue) {
+            foreach ($line in Get-Content $yaml.FullName) {
+                if ($line -match "base_path:\s*'?([^']+)'?\s*$") { $dirs += $Matches[1].Trim() }
+            }
+        }
+    }
+    if ($env:LOCALAPPDATA) { $dirs += Join-Path $env:LOCALAPPDATA "Comfy-Desktop\ComfyUI-Shared\models" }
+    if ($env:USERPROFILE) { $dirs += Join-Path $env:USERPROFILE "Documents\ComfyUI\models" }
+    @($dirs | Where-Object { $_ -and (Test-Path $_) } | ForEach-Object { (Resolve-Path $_).Path } | Select-Object -Unique)
+}
+
+function Import-ComfyModel($Layout, [string[]]$Folders, [string]$Name, [string[]]$From) {
+    # <models>\<folder>\<Name> for the first folder that has it: kept when ComfyUI's own models folder has it, else
+    # hard-linked (a copy across drives) from the first of $From that has it, so tools\comfyui\models needs nothing
+    # outside the repository. Returns the path, or $null when no folder has the file.
+    foreach ($folder in $Folders) {
+        $target = Join-Path (Join-Path $Layout.ModelsDir $folder) $Name
+        if ((Test-Path $target) -and (Get-Item $target).Length -gt 0) { return $target }
+    }
+    foreach ($dir in $From) {
+        foreach ($folder in $Folders) {
+            $source = Join-Path (Join-Path $dir $folder) $Name
+            if ((Test-Path $source) -and (Get-Item $source).Length -gt 0) {
+                $target = Join-Path (Join-Path $Layout.ModelsDir $folder) $Name
+                New-FileLink $target $source
+                return $target
+            }
+        }
+    }
+    $null
+}
+
+function Resolve-LoraName([string]$Name, [string[]]$Dirs) {
+    # The file of a LORAS entry ("name" with or without extension, any case) under <dir>\loras, as a relative path.
+    $Name = $Name.Trim().Replace("/", "\")
+    foreach ($dir in $Dirs) {
+        $root = Join-Path $dir "loras"
+        if (-not (Test-Path $root)) { continue }
+        foreach ($candidate in @($Name, "$Name.safetensors", "$Name.ckpt", "$Name.pt")) {
+            $path = Join-Path $root $candidate
+            if (Test-Path $path -PathType Leaf) {
+                # The file's own spelling (Get-Item echoes the spelling it was given).
+                $item = Get-ChildItem -LiteralPath (Split-Path $path) -File | Where-Object { $_.Name -eq (Split-Path -Leaf $path) } | Select-Object -First 1
+                return $item.FullName.Substring($root.TrimEnd('\').Length + 1)
+            }
+        }
+    }
+    $null
+}
+
+function Get-LmStudioModelsDir {
+    # LM Studio's download folder (settings.json downloadsFolder, else %USERPROFILE%\.lmstudio\models), when it exists:
+    # setup-llm.ps1 takes the 27B from there instead of downloading it again.
+    $lmHome = Join-Path $env:USERPROFILE ".lmstudio"
+    $settings = Join-Path $lmHome "settings.json"
+    $dir = Join-Path $lmHome "models"
+    if (Test-Path $settings) {
+        try { $folder = (Read-JsonFile $settings).downloadsFolder; if ($folder) { $dir = $folder } } catch {}
+    }
+    if (Test-Path $dir) { return $dir }
+    $null
+}
+
 function Get-TorchVariant([string[]]$GpuNames) {
     # PyTorch build for ComfyUI: CUDA for NVIDIA, AMD's ROCm (Windows) wheels for Radeon, else CPU.
     if ($GpuNames | Where-Object { $_ -match "NVIDIA" }) { return "cuda" }
@@ -288,4 +357,87 @@ function New-FileLink([string]$Path, [string]$Target) {
     New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
     try { New-Item -ItemType HardLink -Path $Path -Target $Target -ErrorAction Stop | Out-Null }
     catch { Copy-Item $Target $Path }
+}
+
+# --- Hugging Face cache ----------------------------------------------------------------
+# Files from Hugging Face go through its standard cache (the one `hf download` uses: HF_HUB_CACHE, else HF_HOME\hub,
+# else %USERPROFILE%\.cache\huggingface\hub) and are hard-linked from there into tools\. A model that `hf download`
+# or another app already fetched is not downloaded again, and what this setup fetches is there for them too.
+
+function Get-HfCacheDir {
+    if ($env:HF_HUB_CACHE) { return $env:HF_HUB_CACHE }
+    if ($env:HF_HOME) { return (Join-Path $env:HF_HOME "hub") }
+    Join-Path $env:USERPROFILE ".cache\huggingface\hub"
+}
+
+function Resolve-LinkTarget([string]$Path) {
+    # The file a symbolic link points to (the cache's snapshots\<rev>\<file> -> ..\..\blobs\<sha256>), else $Path.
+    $item = Get-Item -LiteralPath $Path -Force
+    for ($i = 0; $i -lt 8 -and $item.LinkType -eq "SymbolicLink"; $i++) {
+        $target = @($item.Target)[0]
+        if (-not [IO.Path]::IsPathRooted($target)) { $target = [IO.Path]::GetFullPath((Join-Path (Split-Path $item.FullName) $target)) }
+        $item = Get-Item -LiteralPath $target -Force
+    }
+    $item.FullName
+}
+
+function Find-HfCachedFile([string]$Repo, [string]$File, [string]$Sha256 = "", [int64]$Size = 0) {
+    # <cache>\models--<org>--<name>\snapshots\<rev>\<File>, else (with $Sha256) a blob of that hash in any repository
+    # of the cache (LFS blobs are named by their SHA-256). $Size, when given, must match.
+    $cache = Get-HfCacheDir
+    if (-not (Test-Path $cache)) { return $null }
+    $snapshots = Join-Path $cache ("models--" + $Repo.Replace("/", "--") + "\snapshots")
+    if (Test-Path $snapshots) {
+        foreach ($rev in Get-ChildItem $snapshots -Directory -ErrorAction SilentlyContinue) {
+            $candidate = Join-Path $rev.FullName $File.Replace("/", "\")
+            if (-not (Test-Path $candidate)) { continue }
+            $real = Resolve-LinkTarget $candidate
+            if ((Test-Path $real) -and (-not $Size -or (Get-Item $real).Length -eq $Size)) { return $real }
+        }
+    }
+    if ($Sha256) {
+        foreach ($repoDir in Get-ChildItem $cache -Directory -Filter "models--*" -ErrorAction SilentlyContinue) {
+            $blob = Join-Path $repoDir.FullName "blobs\$Sha256"
+            if ((Test-Path $blob) -and (-not $Size -or (Get-Item $blob).Length -eq $Size)) { return $blob }
+        }
+    }
+    $null
+}
+
+function Get-HfCli {
+    # `hf` (huggingface_hub) when installed, else huggingface_hub's hf run through uv (a prerequisite of this repo).
+    $hf = Get-Command hf -ErrorAction SilentlyContinue | Select-Object -First 1
+    # The leading comma keeps a one-item array an array (PowerShell unrolls it on return otherwise).
+    if ($hf) { return ,@($hf.Source) }
+    if (Get-Command uv -ErrorAction SilentlyContinue) { return ,@("uv", "tool", "run", "--from", "huggingface_hub", "hf") }
+    $null
+}
+
+function Get-HfFile([string]$Repo, [string]$File, [string]$Dest, [string]$Sha256 = "", [int64]$Size = 0) {
+    # $Dest from the Hugging Face cache: already there -> hard link; else `hf download` into the cache -> hard link;
+    # curl straight to $Dest only when the hf CLI cannot be run. The caller checks the SHA-256.
+    if ((Test-Path $Dest) -and (Get-Item $Dest).Length -gt 0 -and (-not $Size -or (Get-Item $Dest).Length -eq $Size)) {
+        Write-Ok "exists: $Dest"; return
+    }
+    $cached = Find-HfCachedFile $Repo $File $Sha256 $Size
+    if (-not $cached) {
+        $cli = Get-HfCli
+        if ($cli) {
+            Write-Host "    hf download $Repo $File（Hugging Face のキャッシュ $(Get-HfCacheDir) へ）"
+            $exe = $cli[0]
+            $rest = @($cli | Select-Object -Skip 1) + @("download", $Repo, $File)
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"   # the progress bar goes to stderr: shown, not treated as an error
+            try { & $exe @rest | Out-Host } finally { $ErrorActionPreference = $previous }
+            $cached = Find-HfCachedFile $Repo $File $Sha256 $Size
+            if (-not $cached) { Write-Warn2 "hf download で取得できませんでした（$Repo $File）。直接ダウンロードします" }
+        }
+    }
+    if ($cached) {
+        if (Test-Path $Dest) { Remove-Item -LiteralPath $Dest -Force }
+        New-FileLink $Dest $cached
+        Write-Ok "$Dest（Hugging Face のキャッシュ $cached）"
+        return
+    }
+    Save-Download "https://huggingface.co/$Repo/resolve/main/$File" $Dest
 }

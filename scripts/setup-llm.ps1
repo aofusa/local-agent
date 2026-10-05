@@ -7,10 +7,13 @@
   /coder/turn runs on llama-server in router mode (scripts\start-llm.ps1, 127.0.0.1 only). This script:
 
   1. Finds llama-server / llama-quantize (scripts\setup-llamacpp.ps1; run here when missing).
-  2. Gets the source GGUF and its mmproj (config\llm_model.json) into tools\models\llm: downloaded from Hugging Face
-     and checked against the pinned SHA-256, or hard-linked from -SourceModel (a GGUF already on this machine).
-  3. Requantizes it (default IQ3_M) with llama-quantize so it fits in ~24 GB of shared memory next to the OS.
-     -Quant none uses the source as it is.
+  2. Puts the model files (config\llm_model.json) into tools\models\llm. Files already on this machine are used first
+     and hard-linked in (no download): LM Studio's model folder (an earlier version of this project used LM Studio),
+     the Hugging Face cache (what `hf download` fetched) and -SourceModel. Otherwise the source GGUF and its mmproj are
+     fetched with `hf download` into the Hugging Face cache and linked from there. Every file is checked against its
+     pinned SHA-256.
+  3. Requantizes the source (default IQ3_M) with llama-quantize so it fits in ~24 GB of shared memory next to the
+     OS, unless the requantized file was found in step 2. -Quant none uses the source as it is.
   4. Writes the router preset tools\llm\models.ini: context, GPU layers (-GpuOffload share of the model's layers),
      flash attention, 1 slot, mmap loading, thinking off by default, idle sleep (frees the memory after
      sleep_idle_s seconds without a request).
@@ -67,28 +70,52 @@ $source = Join-Path $modelDir $spec.file
 $mmproj = Join-Path $modelDir $spec.mmproj.file
 $stem = [IO.Path]::GetFileNameWithoutExtension($spec.file) -replace "-(UD-)?(DW-)?Q\d.*$", ""
 $target = if ($Quant -eq "none") { $source } else { Join-Path $modelDir "$stem-$Quant.gguf" }
-$needSource = -not (Test-Path $target)
+$pinnedQuant = if ($Quant -ne "none" -and $spec.quantized) { $spec.quantized.$Quant } else { $null }
+$lmModels = Get-LmStudioModelsDir
+function Find-OnMachine([string]$Name, [int64]$Size) {
+    # A file of this name and size in LM Studio's model folder (where an earlier version of this project kept the 27B).
+    if (-not $lmModels) { return $null }
+    Get-ChildItem $lmModels -Recurse -File -Filter $Name -ErrorAction SilentlyContinue |
+        Where-Object { $_.Length -eq $Size } | Select-Object -First 1 -ExpandProperty FullName
+}
+function Add-Mmproj([string]$Folder) {
+    $sibling = Join-Path $Folder $spec.mmproj.file
+    if ((Test-Path $sibling) -and (Get-Item $sibling).Length -eq [int64]$spec.mmproj.size -and -not (Test-Path $mmproj)) {
+        New-FileLink $mmproj $sibling; Write-Ok "linked $mmproj"
+    }
+}
+$created = $false
 if ($SourceModel) {
     if (-not (Test-Path $SourceModel)) { throw "-SourceModel が見つかりません: $SourceModel" }
     $SourceModel = (Resolve-Path $SourceModel).Path
-    $sibling = Join-Path (Split-Path $SourceModel) $spec.mmproj.file
     if ((Split-Path -Leaf $SourceModel) -eq $spec.file) {
-        if ($needSource) { New-FileLink $source $SourceModel; Write-Ok "linked $source" }
-    } elseif ($needSource) {
+        if (-not (Test-Path $source)) { New-FileLink $source $SourceModel; Write-Ok "linked $source" }
+    } elseif (-not (Test-Path $target)) {
         # Another file (e.g. an already requantized one): linked into tools\models\llm and used as it is.
         $target = Join-Path $modelDir (Split-Path -Leaf $SourceModel)
         New-FileLink $target $SourceModel
-        $needSource = $false
         Write-Warn2 "$($spec.file) ではないため、再量子化せずにそのまま使います: $target"
     }
-    if ((Test-Path $sibling) -and -not (Test-Path $mmproj)) { New-FileLink $mmproj $sibling; Write-Ok "linked $mmproj" }
+    Add-Mmproj (Split-Path $SourceModel)
 }
-$hf = "https://huggingface.co/$($spec.repo)/resolve/main"
+if (-not (Test-Path $target) -and $pinnedQuant) {
+    $found = Find-OnMachine $pinnedQuant.file ([int64]$pinnedQuant.size)
+    if ($found) { New-FileLink $target $found; $created = $true; Write-Ok "linked $target（$found）"; Add-Mmproj (Split-Path $found) }
+}
+$needSource = -not (Test-Path $target)
+if ($needSource -and -not (Test-Path $source)) {
+    $found = Find-OnMachine $spec.file ([int64]$spec.size)
+    if ($found) { New-FileLink $source $found; Write-Ok "linked $source（$found）"; Add-Mmproj (Split-Path $found) }
+}
+if (-not (Test-Path $mmproj)) {
+    $found = Find-OnMachine $spec.mmproj.file ([int64]$spec.mmproj.size)
+    if ($found) { New-FileLink $mmproj $found; Write-Ok "linked $mmproj（$found）" }
+}
 if ($needSource) {
-    if (-not (Test-Path $source)) { Save-Download "$hf/$($spec.file)" $source }
+    if (-not (Test-Path $source)) { Get-HfFile $spec.repo $spec.file $source $spec.sha256 ([int64]$spec.size) }
     Test-Pinned $source $spec
 }
-if (-not (Test-Path $mmproj)) { Save-Download "$hf/$($spec.mmproj.file)" $mmproj }
+if (-not (Test-Path $mmproj)) { Get-HfFile $spec.repo $spec.mmproj.file $mmproj $spec.mmproj.sha256 ([int64]$spec.mmproj.size) }
 Test-Pinned $mmproj $spec.mmproj
 
 if ($Quant -ne "none" -and -not (Test-Path $target)) {
@@ -100,6 +127,12 @@ if ($Quant -ne "none" -and -not (Test-Path $target)) {
         Where-Object { $_ -match "model size|quant size|error|failed" } | ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $partial)) { throw "llama-quantize に失敗しました" }
     Move-Item -Force $partial $target
+    $created = $true
+}
+if ($created -and $pinnedQuant -and (Split-Path -Leaf $target) -eq $pinnedQuant.file) {
+    # The same source and llama-quantize give the same bytes; another build may differ slightly (warning only).
+    try { Test-Pinned $target $pinnedQuant }
+    catch { Write-Warn2 "$Quant のファイルが固定した版と一致しません（llama.cpp の版の違いなど）。そのまま使います: $($_.Exception.Message)" }
 }
 Write-Ok "model: $target"
 

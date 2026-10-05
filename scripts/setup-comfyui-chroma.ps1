@@ -29,26 +29,25 @@ $layout = Get-ComfyLayout
 if (-not $layout) { throw "ComfyUI の場所が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
 if (-not $ModelsDir) { $ModelsDir = $layout.ModelsDir }
 
-function Get-Model([string]$Url, [string]$Folder, [string]$Name) {
-    # Any folder ComfyUI reads (its own models, -ModelsDir of setup-comfyui.ps1) may already have it.
-    $found = Find-ComfyModel $layout $Folder $Name
+function Get-Model([string]$Repo, [string]$File, [string]$Folder, [string]$Name) {
+    # tools\comfyui\models, or the model folders of an earlier ComfyUI on this machine (hard-linked in), may have it.
+    $found = Import-ComfyModel $layout @($Folder) $Name (Get-KnownModelDirs)
     if ($found) { Write-Ok "exists: $found"; return }
-    Save-Download $Url (Join-Path $ModelsDir "$Folder\$Name")
+    Get-HfFile $Repo $File (Join-Path $ModelsDir "$Folder\$Name")   # through the Hugging Face cache
 }
 
 Write-Step "Chroma1-HD のテキストエンコーダと VAE（$ModelsDir）"
-$hf = "https://huggingface.co"
-Get-Model "$hf/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" "text_encoders" "t5xxl_fp8_e4m3fn.safetensors"
-Get-Model "$hf/lodestones/Chroma1-HD/resolve/main/vae/diffusion_pytorch_model.safetensors" "vae" "ae.safetensors"
+Get-Model "comfyanonymous/flux_text_encoders" "t5xxl_fp8_e4m3fn.safetensors" "text_encoders" "t5xxl_fp8_e4m3fn.safetensors"
+Get-Model "lodestones/Chroma1-HD" "vae/diffusion_pytorch_model.safetensors" "vae" "ae.safetensors"
 
 $unet = Get-DotEnvValue "CHROMA_UNET_NAME" "chroma_v10HD.safetensors"
-$found = @("diffusion_models", "unet", "checkpoints") | ForEach-Object { Find-ComfyModel $layout $_ $unet } | Where-Object { $_ }
+$found = Import-ComfyModel $layout @("diffusion_models", "unet", "checkpoints") $unet (Get-KnownModelDirs)
 if ($found) {
     $source = @($found)[0]
     Write-Ok "diffusion model: $source"
     $stem = [IO.Path]::GetFileNameWithoutExtension($unet)
     if (-not $NoConvert -and -not $stem.EndsWith("_fp8_e4m3fn")) {
-        $existing = Find-ComfyModel $layout "diffusion_models" "$($stem)_fp8_e4m3fn.safetensors"
+        $existing = Import-ComfyModel $layout @("diffusion_models") "$($stem)_fp8_e4m3fn.safetensors" (Get-KnownModelDirs)
         $target = Join-Path $ModelsDir "diffusion_models\$($stem)_fp8_e4m3fn.safetensors"
         if ($existing) { Write-Ok "exists: $existing" }
         else {

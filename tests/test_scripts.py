@@ -114,6 +114,86 @@ def test_llm_preset_ini_and_router_args(shell, tmp_path):
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+def test_known_model_dirs_and_import(shell, tmp_path):
+    """Models of an earlier ComfyUI (Comfy Desktop, Documents\\ComfyUI) are hard-linked into tools\\comfyui\\models."""
+    appdata, local, profile = tmp_path / "Roaming", tmp_path / "Local", tmp_path / "User"
+    shared = local / "Comfy-Desktop" / "ComfyUI-Shared" / "models"
+    docs = profile / "Documents" / "ComfyUI" / "models"
+    extra = tmp_path / "D" / "models"
+    (appdata / "Comfy Desktop" / "instance-model-paths").mkdir(parents=True)
+    (appdata / "Comfy Desktop" / "instance-model-paths" / "inst-1.yaml").write_text(
+        f"comfy.desktop_0:\n  base_path: '{extra}'\n  checkpoints: checkpoints/\n", encoding="utf-8")
+    for d in (shared, docs, extra):
+        d.mkdir(parents=True)
+    (docs / "checkpoints").mkdir()
+    (docs / "checkpoints" / "model.safetensors").write_bytes(b"ckpt")
+    (extra / "loras").mkdir()
+    (extra / "loras" / "Style A.safetensors").write_bytes(b"lora")
+    own = tmp_path / "comfy" / "models"
+    body = (f"$env:APPDATA = '{appdata}'; $env:LOCALAPPDATA = '{local}'; $env:USERPROFILE = '{profile}'; "
+            "$dirs = @(Get-KnownModelDirs); "
+            f"$l = New-ComfyLayout '{tmp_path / 'comfy'}' 'py' 'test'; "
+            "$ckpt = Import-ComfyModel $l @('checkpoints') 'model.safetensors' $dirs; "
+            "$lora = Resolve-LoraName 'style a' $dirs; "
+            "$lp = Import-ComfyModel $l @('loras') $lora $dirs; "
+            "$none = [string](Import-ComfyModel $l @('vae') 'ae.safetensors' $dirs); "
+            "[pscustomobject]@{ dirs = $dirs; ckpt = $ckpt; lora = $lora; lp = $lp; none = $none } | ConvertTo-Json -Compress")
+    result = json.loads(_run_ps(shell, body, tmp_path))
+    assert set(result["dirs"]) == {str(extra), str(shared), str(docs)}
+    assert result["ckpt"] == str(own / "checkpoints" / "model.safetensors")
+    assert (own / "checkpoints" / "model.safetensors").read_bytes() == b"ckpt"
+    assert result["lora"] == "Style A.safetensors"  # name without extension, any case
+    assert (own / "loras" / "Style A.safetensors").read_bytes() == b"lora"
+    assert result["none"] == ""
+    # Hard links: the import takes no extra disk space on the same drive.
+    assert (own / "checkpoints" / "model.safetensors").stat().st_nlink == 2
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_lm_studio_models_dir(shell, tmp_path):
+    profile = tmp_path / "User"
+    (profile / ".lmstudio" / "models").mkdir(parents=True)
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    body = f"$env:USERPROFILE = '{profile}'; Get-LmStudioModelsDir"
+    assert _run_ps(shell, body, tmp_path) == str(profile / ".lmstudio" / "models")
+    (profile / ".lmstudio" / "settings.json").write_text(json.dumps({"downloadsFolder": str(other)}), encoding="utf-8")
+    assert _run_ps(shell, body, tmp_path) == str(other)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_hf_cache_dir_follows_the_hf_variables(shell, tmp_path):
+    body = (f"$env:USERPROFILE = '{tmp_path}'; $env:HF_HOME = ''; $env:HF_HUB_CACHE = ''; $a = Get-HfCacheDir; "
+            f"$env:HF_HOME = '{tmp_path / 'hfhome'}'; $b = Get-HfCacheDir; "
+            f"$env:HF_HUB_CACHE = '{tmp_path / 'hub2'}'; $c = Get-HfCacheDir; @($a, $b, $c) -join '|'")
+    assert _run_ps(shell, body, tmp_path).split("|") == [
+        str(tmp_path / ".cache" / "huggingface" / "hub"), str(tmp_path / "hfhome" / "hub"), str(tmp_path / "hub2")]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_hf_cached_files_are_linked_not_downloaded(shell, tmp_path):
+    """A file `hf download` put in the cache (snapshot, or a blob named by its SHA-256 in another repository) is
+    hard-linked into place; nothing is fetched."""
+    hub = tmp_path / "hub"
+    snap = hub / "models--org--repo" / "snapshots" / "abc123" / "sub"
+    snap.mkdir(parents=True)
+    (snap / "model.gguf").write_bytes(b"weights")
+    blobs = hub / "models--mirror--other" / "blobs"
+    blobs.mkdir(parents=True)
+    sha = "ab" * 32
+    (blobs / sha).write_bytes(b"mirrored")
+    d1, d2 = tmp_path / "out" / "a.gguf", tmp_path / "out" / "b.gguf"
+    body = (f"$env:HF_HUB_CACHE = '{hub}'; "
+            "function Get-HfCli { $null }; function Save-Download { throw 'downloaded' }; "  # no network allowed
+            f"Get-HfFile 'org/repo' 'sub/model.gguf' '{d1}' '' 7 | Out-Null; "
+            f"Get-HfFile 'org/repo' 'missing.gguf' '{d2}' '{sha}' 8 | Out-Null; "
+            f"'missing=' + [string](Find-HfCachedFile 'org/repo' 'sub/model.gguf' '' 999)")
+    assert _run_ps(shell, body, tmp_path).splitlines()[-1] == "missing="  # a size that does not match is not taken
+    assert d1.read_bytes() == b"weights" and d1.stat().st_nlink == 2
+    assert d2.read_bytes() == b"mirrored" and d2.stat().st_nlink == 2
+
+
+@pytest.mark.parametrize("shell", SHELLS)
 def test_torch_variant_follows_the_gpu(shell, tmp_path):
     body = ("@((Get-TorchVariant @('AMD Radeon(TM) 890M Graphics', 'Parsec Virtual Display Adapter')), "
             "(Get-TorchVariant @('NVIDIA GeForce RTX 4090')), (Get-TorchVariant @('Microsoft Basic Display Adapter')), "
@@ -169,3 +249,10 @@ def test_no_lm_studio_left_in_scripts():
     lm = [str(p.relative_to(ROOT)) for p in SCRIPTS if "lms.exe" in p.read_text(encoding="utf-8-sig")
           or "setup-lmstudio" in p.read_text(encoding="utf-8-sig")]
     assert not lm and not (ROOT / "scripts" / "setup-lmstudio.ps1").exists()
+
+
+def test_llm_catalog_pins_the_requantized_file():
+    spec = json.loads((ROOT / "config" / "llm_model.json").read_text(encoding="utf-8"))
+    pinned = spec["quantized"][spec["quant"]]
+    assert len(pinned["sha256"]) == 64 and pinned["size"] > 0
+    assert pinned["file"].endswith(f"-{spec['quant']}.gguf")

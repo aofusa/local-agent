@@ -11,6 +11,13 @@
     "sha256": "c9a09064683620bea3d3bfed5d4462e1a97a7d2fff7e5045d6862a0a85eeb5b5"
   },
   "quant": "IQ3_M",
+  "quantized": {
+    "IQ3_M": {
+      "file": "Huihui-Qwen3.8-27B-abliterated-IQ3_M.gguf",
+      "size": 12768332704,
+      "sha256": "2554601c23a2bf30d9c7db83847ae3e5ecab2cd4d1fa394c1782d75f5b3595a4"
+    }
+  },
   "gpu_offload": 0.45,
   "context": 4096,
   "temperature": 0.4,
