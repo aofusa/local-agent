@@ -120,7 +120,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | llama.cpp | PrismML fork の Windows Vulkan 版（`config\search_models.json` に固定した版）を取得し、SHA-256 を照合する。`--list-devices` で Vulkan デバイスを確認し、`LLM_SERVER` と `BONSAI_LLAMA_SERVER` を保存する。`-FromSource` なら `prism` ブランチを Vulkan でビルドする（Visual Studio の C++、CMake、Ninja、Vulkan SDK が必要） | `tools\llama-prism` |
 | 元のモデル | `config\llm_model.json` の GGUF（Q4_K_S）と mmproj を Hugging Face から取得し、固定した SHA-256 と照合する（`-SourceModel` なら手元のファイルをハードリンク） | `tools\models\llm` |
 | 再量子化 | `-Quant IQ3_M` のとき、同じ build の `llama-quantize` で `…-IQ3_M.gguf` を作る（20〜30 分）。元ファイルは残す | `tools\models\llm` |
-| プリセット | ルータの設定。context 4096、GPU に置く層（GGUF の層数 × `-GpuOffload`）、flash attention、並列 1、mmap で読み込み、**thinking 無効**、temperature 0.4、アイドル 300 秒で sleep（メモリを返す。eject の保険） | `tools\llm\models.ini` |
+| プリセット | ルータの設定。context 4096、GPU に置く層（GGUF の層数 × `-GpuOffload`）、flash attention、並列 1、mmap で読み込み、**thinking 無効**、temperature 0.4、repeat penalty 1.1（LM Studio の既定と同じ）、アイドル 300 秒で sleep（メモリを返す。eject の保険） | `tools\llm\models.ini` |
 | `.env` | `LLM_SERVER`、`LLM_PRESET`、`LLM_PORT`、`LLM_URL`、`LLM_MODEL`（プリセットのモデル名 `qwen3.8-27b-abliterated`）、`LLM_CONTEXT`。ワークフローの接続先と違えば `workflows\` を再生成する | `.env`、`workflows\*.json` |
 
 **ComfyUI**（`scripts\setup-comfyui.ps1`）
@@ -181,6 +181,7 @@ ComfyUI が読むフォルダ（`-ModelsDir` を含む）に同じファイル�
   reasoning-format = deepseek
   reasoning = off
   temp = 0.4
+  repeat-penalty = 1.1
   sleep-idle-seconds = 300
   ```
 

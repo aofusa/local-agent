@@ -123,6 +123,9 @@ $settings = [ordered]@{
     "reasoning-format"   = "deepseek"
     "reasoning"          = "off"
     "temp"               = $spec.temperature
+    # LM Studio's default sampling had a repeat penalty of 1.1; without it the tag JSON could loop on the negative
+    # tags until max_tokens and come back unclosed (split fell back to the raw text).
+    "repeat-penalty"     = $spec.repeat_penalty
     "sleep-idle-seconds" = $spec.sleep_idle_s
 }
 $preset = Join-Path $root "tools\llm\models.ini"

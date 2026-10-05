@@ -39,7 +39,7 @@ FurryJaEjectLLM / ckpt ゲート / チャットタブ ── POST /models/unload
 | `GET /api/v1/models` の `loaded_instances` | `GET /models` の `status.value`（`loaded` / `loading` / `unloading` / `sleeping` を常駐とみなす） |
 | `POST /api/v1/models/unload {"instance_id"}` | `POST /models/unload {"model"}`。非同期なので、`GET /models` で常駐が無くなるまで待つ |
 | JIT TTL 300 秒（eject の保険） | プリセットの `sleep-idle-seconds = 300`（子が重みを手放す。実測 14GB → 0.2GB） |
-| モデル既定値（context 4096、GPU offload 0.45、flash attention、並列 1、thinking off、temperature 0.4） | プリセットの `ctx-size 4096`、`n-gpu-layers`（層数 × 0.45）、`flash-attn on`、`parallel 1`、`reasoning off`、`temp 0.4` |
+| モデル既定値（context 4096、GPU offload 0.45、flash attention、並列 1、thinking off、temperature 0.4） | プリセットの `ctx-size 4096`、`n-gpu-layers`（層数 × 0.45）、`flash-attn on`、`parallel 1`、`reasoning off`、`temp 0.4`、`repeat-penalty 1.1`（LM Studio の既定の繰り返し罰則。無いと下の実装記録のとおりタグの JSON が閉じなかった） |
 | 思考の切り替えは `reasoning_effort`（LM Studio は `chat_template_kwargs` を無視した） | `chat_template_kwargs.enable_thinking`。思考は `--reasoning-format deepseek` で `reasoning_content` に分かれる |
 | `lms runtime update`、LM Studio の GUI | `scripts/setup-llamacpp.ps1`（PrismML fork の Vulkan 版。検索モデルと同じ build） |
 
@@ -93,6 +93,7 @@ Qwen3.8 27B（`qwen35` アーキテクチャ）と mmproj を読み込め、ル�
 - **アイドル sleep**: `sleep-idle-seconds` を過ぎると状態が `sleeping` になり、子プロセスのメモリが 14GB から 0.2GB に減った。`sleeping` も常駐として扱い、unload の対象にする。
 - **一覧の余分な項目**: ルータの `/models` は Hugging Face のキャッシュにあるモデルも `unloaded` で並べる。常駐の判定には影響しない。
 - **GPU 層数**: Qwen3.8 27B の GGUF は `block_count` 65（うち 1 つは llama.cpp が使わない MTP 層）。64 層 × 0.45 = 29 層を GPU に置く（LM Studio の offload 0.45 と同じ）。
+- **繰り返し罰則**: llama-server の既定（repeat penalty 1.0）では、タグ生成で 27B が negative のタグを延々と並べ、`max_tokens`（320）で切れて JSON が閉じず、`split` が生文字列に落ちた（positive に JSON ごと入る）。LM Studio の既定と同じ `repeat-penalty = 1.1` をプリセットに入れた。
 - **ComfyUI**: Comfy Desktop が入れていたものと同じ ComfyUI のコミットと ROCm 版 PyTorch（`2.9.1+rocmsdk20260116`）を `tools\comfyui` に入れた。既存のモデルは `-ModelsDir` で読む。
 
 デグレ確認の結果は [CHANGELOG.md](../CHANGELOG.md) の v0.11.0 に記録する。

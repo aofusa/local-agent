@@ -14,6 +14,7 @@
   "gpu_offload": 0.45,
   "context": 4096,
   "temperature": 0.4,
+  "repeat_penalty": 1.1,
   "sleep_idle_s": 300,
   "port": 8080
 }
