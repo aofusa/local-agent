@@ -36,6 +36,6 @@ tools/bonsai/*
 !tools/bonsai/.gitkeep
 
 # cirka (Rust CUI): build output and images it saves in a workspace
-cirka/target/
+cui-client/target/
 cirka-outputs/
 dist/
