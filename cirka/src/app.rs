@@ -523,6 +523,7 @@ impl App {
                 Permission::AcceptEdits => "cirka[edits]> ",
                 Permission::Bypass => "cirka[bypass]> ",
                 Permission::Default => "cirka> ",
+                Permission::Auto => "cirka[auto]> ",
             };
             let prompt = if buffer.is_empty() { prompt } else { "... " };
             let painted = self.ui.paint(prompt, "bold");

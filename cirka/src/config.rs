@@ -51,6 +51,8 @@ impl Mode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permission {
+    /// The default: edits and commands run without asking; guarded commands (push, recursive delete ...) ask.
+    Auto,
     Default,
     AcceptEdits,
     Plan,
@@ -60,6 +62,7 @@ pub enum Permission {
 impl Permission {
     pub fn parse(s: &str) -> Option<Permission> {
         match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "auto" => Some(Permission::Auto),
             "default" => Some(Permission::Default),
             "accept-edits" | "acceptedits" => Some(Permission::AcceptEdits),
             "plan" => Some(Permission::Plan),
@@ -69,6 +72,7 @@ impl Permission {
     }
     pub fn as_str(self) -> &'static str {
         match self {
+            Permission::Auto => "auto",
             Permission::Default => "default",
             Permission::AcceptEdits => "accept-edits",
             Permission::Plan => "plan",
@@ -140,7 +144,7 @@ impl Default for Config {
         Config {
             host: DEFAULT_HOST.into(),
             mode: Mode::Auto,
-            permission: Permission::Default,
+            permission: Permission::Auto,
             shell: ShellKind::Auto,
             max_turns: 40,
             locale: "ja".into(),
@@ -211,7 +215,7 @@ impl Config {
         }
         if let Some(p) = &layer.permission {
             self.permission = Permission::parse(p)
-                .ok_or_else(|| ConfigError(format!("permission は default / accept-edits / plan / bypass です: {p}")))?;
+                .ok_or_else(|| ConfigError(format!("permission は auto / default / accept-edits / plan / bypass です: {p}")))?;
             used = true;
         }
         if let Some(s) = &layer.shell {

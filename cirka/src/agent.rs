@@ -247,11 +247,15 @@ impl<B: Brain> Agent<B> {
         if matches!(planned, Planned::Invalid(_)) {
             return Ok(()); // the tool reports its own error
         }
-        match self.policy.check(&call.name) {
+        let command = match planned {
+            Planned::Command { command, .. } => Some(command.as_str()),
+            _ => None,
+        };
+        match self.policy.check(&call.name, command) {
             Verdict::Allow => Ok(()),
             Verdict::Deny(why) => Err((ToolOutput::err(why), false)),
-            Verdict::Ask => {
-                let (title, detail) = match planned {
+            Verdict::Ask(why) => {
+                let (mut title, detail) = match planned {
                     Planned::FileChange { rel, diff, before, .. } => {
                         (format!("{} {rel}", if before.is_some() { "編集" } else { "作成" }), diff.clone())
                     }
@@ -261,6 +265,9 @@ impl<B: Brain> Agent<B> {
                     }
                     _ => (call.name.clone(), call.arguments.clone()),
                 };
+                if !why.is_empty() {
+                    title = format!("{title} — {why}");
+                }
                 match ui.approve(&ApprovalRequest { tool: call.name.clone(), title, detail }) {
                     Answer::Yes => Ok(()),
                     Answer::Always => {
@@ -444,6 +451,36 @@ mod tests {
         assert!(ui.approvals.is_empty());
         assert!(std::fs::read_to_string(dir.join("src/lib.rs")).unwrap().contains("a + b"));
         assert_eq!(a.tools.undo.len(), 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn auto_mode_edits_and_runs_without_asking() {
+        let (mut a, dir) = agent(vec![
+            tools_reply(vec![call("1", "read_file", r#"{"path":"src/lib.rs"}"#)]),
+            tools_reply(vec![call("2", "edit_file", r#"{"path":"src/lib.rs","old":"a - b","new":"a + b"}"#)]),
+            tools_reply(vec![call("3", "bash", r#"{"command":"echo checked"}"#)]),
+            text_reply("直して確認しました"),
+        ], Permission::Auto);
+        let mut ui = ScriptedUi::default();
+        assert_eq!(a.run("直して確認して", &mut ui).await, StopReason::Completed);
+        assert!(ui.approvals.is_empty());
+        assert!(std::fs::read_to_string(dir.join("src/lib.rs")).unwrap().contains("a + b"));
+        assert!(a.history[6].content.contains("checked"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn auto_mode_still_asks_before_a_guarded_command() {
+        let (mut a, dir) = agent(vec![
+            tools_reply(vec![call("1", "bash", r#"{"command":"git push origin main"}"#)]),
+            text_reply("やめました"),
+        ], Permission::Auto);
+        let mut ui = ScriptedUi { answers: vec![Answer::No], ..Default::default() };
+        a.run("push して", &mut ui).await;
+        assert_eq!(ui.approvals.len(), 1);
+        assert!(ui.approvals[0].title.contains("git push"));
+        assert!(a.history[2].content.contains("拒否"));
         std::fs::remove_dir_all(dir).ok();
     }
 
