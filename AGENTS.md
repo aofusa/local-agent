@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）、cirka の auto モード（既定）・Claude Code に倣った画面・`docs/logo` のロゴ（v0.8.0。ソースはクライアント側 CUI として `cui-client/`）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -57,6 +57,18 @@ ComfyUI が LLM を unload してから KSampler
         │
         ▼
 静止画をローカル保存し、LangGraph が画像の実体を UI へ返す
+```
+
+CUI の経路（`cui-client/`、コマンド名 `cirka`）は別の入口である。
+
+```
+利用者の端末の cirka（作業ディレクトリでツールを実行）
+        │  POST /coder/turn（1 ターンの推論）、/runs/stream（検索は graph chat、画像は graph agent）
+        ▼
+LangGraph サーバ（この端末。/coder/turn はツールを実行しない）
+        │  OpenAI 互換 API（tool calling）
+        ▼
+LM Studio Local Server  http://127.0.0.1:1234/v1
 ```
 
 三つのプロセスの分担は固定する。
@@ -145,7 +157,7 @@ Qwen3-0.6B-heretic は旧形式のルータの検証に落ちたため、フィ�
 
 ## CUI（cirka）とモデルゲート
 
-設計は `docs/locus-cui-design.md`（作業名 locus。コマンド名は `cirka` に確定）。変えてはいけない点だけここに置く。
+設計は `docs/locus-cui-design.md`（作業名 locus。コマンド名は `cirka` に確定）。ソースはクライアント側の CUI として `cui-client/`（Rust、単一バイナリ）に置く。ディレクトリ名は役割で付け、固有名の `cirka` は実行ファイル名、設定とデータの置き場（`cirka` / `.cirka`）、ロゴにだけ使う。変えてはいけない点だけここに置く。
 
 - エージェントループは cirka 側に置く。ツール（ファイルの一覧・検索・読み取り・編集・作成、シェル、タスク一覧、質問）は cirka を起動した端末のワークスペースの中だけで実行する。ホストはツールを実行しない。
 - ホストの `POST /coder/turn` は無状態の 1 ターン（SSE: status / thinking / token / tool_call / done / error）。会話やファイルの断片をスレッドやログに残さない（ログは件数と秒数だけ）。システムプロンプトを書き換えない。`job_lock` を握り、画像タブ・チャットタブと同時に LM Studio を使わない。LangGraph の `langgraph.json` の `http.app`（`src/furry_agent/coder_app.py`）で載せ、グラフは増やさない。
@@ -177,7 +189,7 @@ docs/multi-image-reference-work-instruction.md   複数参照画像の要件、�
 docs/chroma-hd-support-work-instruction.md       Chroma1-HD 系統の要件、設計、実装記録
 README.md                         事前準備、セットアップ、起動順、待受、UMA の注記、既知の対象外
 CHANGELOG.md                      版ごとの変更
-langgraph.json                    graphs.agent がグラフを指す
+langgraph.json                    graphs.agent がグラフを指す。http.app が /coder/turn（coder_app.py）
 src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント。
                                   チャットタブは chat_graph（ルーティングと検索）、write_nodes / code_nodes、chat_common、
                                   modes（速い / 思考 / 自動）、sandbox（Docker）、chat_models（llama-server の起動と停止）、
@@ -185,10 +197,12 @@ src/                              LangGraph のグラフ、役割推定（planne
                                   control_nodes（自律モード）、coder_gate / coder_app（cirka 向けの /coder/turn）
 docs/autonomous-controller-design.md            チャットタブの自律モード（制御ループ）の設計と実装記録
 docs/locus-cui-design.md                        CUI cirka とモデルゲートの設計と実装記録
-cirka/                            CUI（Rust、単一バイナリ）。cirka/target/ は git に含めない。tui.rs が Claude Code に倣った画面、
-                                  art.rs と art_data.rs（生成物）がロゴの端末用の絵
-docs/logo/                        cirka のロゴ（cirka-icon.jpg、cirka-logo.jpg、cirka-design.jpg）
-scripts/gen_cirka_art.py          docs/logo の画像から cirka/src/art_data.rs（半角ブロック用のビットマップ）を作る
+cui-client/                       クライアント側の CUI（Rust、単一バイナリ、実行ファイル名 cirka）。cui-client/target/ は git に
+                                  含めない。agent.rs がループ、tools/ がツール、policy.rs が許可、tui.rs が Claude Code に倣った
+                                  画面、art.rs と art_data.rs（生成物）がロゴの端末用の絵。テストは cargo test
+docs/logo/                        cirka のロゴ（cirka-icon / cirka-logo / cirka-design の JPG、icon / logo / image の SVG）
+scripts/gen_cirka_art.py          docs/logo の JPG から cui-client/src/art_data.rs（半角ブロック用のビットマップ）を作る
+scripts/build-cirka.ps1           cirka のリリースビルドと配布用の zip（dist/、git に含めない）
 docs/chat-deep-search-creative-sandbox.md       チャットタブの深い検索、文章、コード、モードの設計と実装記録
 docs/claim-verification-design.md               主張単位の検証の設計と実装記録
 comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
@@ -213,7 +227,7 @@ prompts/chat/controller.txt       自律モードの判断（道具の選択と�
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
 scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai、コード実行用は setup-sandbox
-tests/                            pytest
+tests/                            pytest（cirka のテストは cui-client/ の cargo test）
 agent-chat-ui/                    公式 UI。設定で接続する
 .env                              端末固有の設定。.env.example から作る。git に含めない
 outputs/                          生成画像の複製。git に含めない
@@ -283,6 +297,8 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - 設計書 §5 の薄い `frontend/`。
 - ComfyUI または LM Studio をループバック以外へ開くこと。
 - ノード ID、JSON 契約、unload 順の変更。
+- cirka のツールをホスト（LangGraph）で実行すること。cirka から LM Studio・ComfyUI・Tor へ直接つなぐこと。`/coder/turn` で会話やファイルの中身をスレッド・ストア・ログに残すこと。
+- cirka で、ワークスペースの外や秘密ファイル（`.env`、鍵、`credentials*` など）を扱うこと。auto モードの確認の一覧（`policy::guarded`）を利用者の指示なしに外すこと。bypass を既定にすること。
 
 ## 未確定
 
@@ -310,6 +326,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 - 自律モード（`docs/autonomous-controller-design.md` 末尾の実装記録）: 制御のノードは `control_nodes.py` に置き（write_nodes / code_nodes と同じ形）、Decision のスキーマもそこに置く。道具のメッセージはその id のまま残し、制御のメッセージには新しい id を振る（道具の出力を上書きしない）。文章のあとの最終回答は本文を繰り返さない。利用者が章の確認やコンテナ実行を却下したら、制御もそこで終える。
 - CUI の画面（v0.8.0）: Claude Code に倣い、ロゴ入りの枠、枠付きの入力欄と許可モードの行、`⏺` / `⎿` のブロック、差分、スピナー、矢印キーのメニュー。生のキー入力（raw mode）は入力欄とメニューのあいだだけ使い、出力は通常の行のまま（パイプや `-p` でも読める）。ロゴは画像のまま出せないので、`scripts/gen_cirka_art.py` が `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を小さなビットマップにし、▀ ▄ █ で描く（24 ビット色の端末ではロゴの赤 #D63A2F）。
+- CUI のディレクトリ名（v0.8.1、利用者の指定）: 固有名詞ではなく役割で `cui-client/` とした。コマンド名・設定・データの置き場・スクリプト名（`build-cirka.ps1`、`gen_cirka_art.py`）は `cirka` のまま。
 - CUI（`docs/locus-cui-design.md` 末尾の実装記録）: コマンド名は `cirka`。設定は `%APPDATA%\cirka\config.toml`（XDG）< `./.cirka/config.toml` < `CIRKA_HOST` など < `--host`。モデルゲートは素の `POST /coder/turn`（LangGraph のスレッドを使わない）で、`GET /coder/health` が文脈の大きさを返す。27B の tool calling は LM Studio のネイティブの解析で足りた（XML の自前解析は入れていない）。cirka は context 4096 に合わせ、ツールの説明を短くし、古い結果を 1 行に潰して収める。
 
 ## 作業規則
@@ -321,3 +338,4 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - モデルウェイト、API キー、`.env` の秘密をコミットしない。
 - 起動していない外部プロセスを、ドキュメントに書いたコマンドの範囲を超えて修復しない。
 - UI を変更した場合は、この端末で表示と送信を確認し、可能なら他ホストから同じ操作を確認する。他ホストから確認できなかった場合は、その旨を結果に書く。
+- cirka を変更した場合は `cui-client/` で `cargo test` と `cargo clippy` を通し、画面や入力に触れたときは実際の端末（Windows では ConPTY でもよい）で表示と入力を確認する。`docs/logo` を変えたら `scripts/gen_cirka_art.py` で絵を作り直す。

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.1 — CUI のディレクトリ名とドキュメント
+
+- CUI のソースのディレクトリを `cirka/` から `cui-client/` に変えた（cirka は固有名詞なので、クライアント側の CUI であることが分かる名前にした）。コマンド名 `cirka`、設定とデータの置き場（`%APPDATA%\cirka`、`.cirka/`）、`scripts/build-cirka.ps1`、`scripts/gen_cirka_art.py` はそのまま。ビルドは `cd cui-client; cargo build --release`。
+- `docs/logo` に SVG 版のロゴ（icon / logo / image）を加えた（端末の絵は引き続き JPG から作る）。
+- README と AGENTS.md を v0.7.0〜v0.8.0 の内容に合わせて見直した: 設計書へのリンク、cirka のビルドに要る Rust、`/coder/turn` の起動とログ、cirka のトラブルシューティングと制約、AGENTS.md の CUI 経路の図・配置・禁止事項・作業規則。
+
 ## v0.8.0 — cirka の auto モードと新しい画面、`/docs` の削除
 
 - cirka: 許可モード `auto` を足し、既定にした。編集とコマンドを確認なしで実行し、git push / reset --hard / clean -f、再帰的な削除、ダウンロードをそのまま実行、sudo、公開（npm / cargo publish）、ディスク・電源・レジストリの操作など、取り返しがつかないか外へ出るコマンドだけ確認する（`policy::guarded`）。`default` / `accept-edits` / `plan` / `bypass` はそのまま使える。Shift+Tab で auto → 確認 → 編集は自動 → plan を巡回する。
