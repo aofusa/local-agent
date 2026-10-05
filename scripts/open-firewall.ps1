@@ -1,5 +1,5 @@
 ﻿# Allow inbound TCP 2024 (LangGraph) and 3000 (agent-chat-ui) on the Private profile only.
-# ComfyUI (8188) and LM Studio (1234) stay loopback-only and are not opened.
+# ComfyUI (8188) and the LLM router (8080) stay loopback-only and are not opened.
 # Needs an elevated PowerShell.
 $ErrorActionPreference = "Stop"
 foreach ($rule in @(

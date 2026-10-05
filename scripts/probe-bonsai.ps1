@@ -5,8 +5,8 @@
 .DESCRIPTION
   Starts every downloaded model once on the PrismML llama-server and runs one short fixed test for each task it
   is listed for in config\search_models.json (route / plan / filter / worker / critique / synthesize). Records
-  boot time, memory, tokens/s and pass/fail. The chat tab only uses models that passed. Run it with LM Studio's
-  model unloaded and ComfyUI idle: the memory numbers are measured. Takes several minutes (the 27B models
+  boot time, memory, tokens/s and pass/fail. The chat tab only uses models that passed. Run it with the 27B
+  unloaded from the router and ComfyUI idle: the memory numbers are measured. Takes several minutes (the 27B models
   dominate). The rank file is machine-specific and git ignored.
 
 .EXAMPLE

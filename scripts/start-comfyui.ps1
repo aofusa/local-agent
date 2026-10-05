@@ -1,6 +1,5 @@
-﻿# Start the existing ComfyUI installation headless on 127.0.0.1:8188 (loopback only).
-# Paths come from .env (written by scripts\setup-comfyui.ps1) or are detected from Comfy Desktop.
-# Alternative: start the instance from Comfy Desktop after `setup-comfyui.ps1 -ConfigureComfyDesktop`.
+﻿# Start ComfyUI (tools\comfyui, installed by scripts\setup-comfyui.ps1) headless on 127.0.0.1:8188 (loopback only),
+# with --cache-none. Paths come from .env (COMFYUI_*).
 param(
     [int]$Port = 8188
 )

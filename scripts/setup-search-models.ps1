@@ -6,7 +6,7 @@
   Bonsai-8B, Ternary-Bonsai-8B, Bonsai-4B, Ternary-Bonsai-2-27B, Ternary-Bonsai-2-27B abliterated (PTQ1_0),
   Qwen3.5-4B-heretic Q4_K_M, Qwen3-1.7B-heretic and Qwen3-0.6B-heretic (config\search_models.json).
   About 20 GB in total. They are run only by the PrismML llama.cpp fork (scripts\setup-llamacpp.ps1);
-  they are not added to LM Studio or ComfyUI.
+  they are not added to the 27B's router preset or ComfyUI.
 
   Every download is checked against the SHA-256 in the catalog (Hugging Face's LFS hash) before it is used;
   -Verify re-checks files that are already there. The folder is saved to .env as BONSAI_MODELS_DIR

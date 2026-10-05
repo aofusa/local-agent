@@ -5,9 +5,10 @@
 .DESCRIPTION
   Needed for the multi-image role templates (style / pose / character). Text-only and plain img2img work without it.
   1. Clone cubiq/ComfyUI_IPAdapter_plus and Fannovel16/comfyui_controlnet_aux (pinned commits) into custom_nodes.
-  2. Install controlnet_aux's light dependencies into ComfyUI's python. torch / numpy are not changed;
+  2. Install controlnet_aux's light dependencies into ComfyUI's venv (tools\comfyui\.venv). torch / numpy are not changed;
      onnxruntime-gpu (CUDA only) and mediapipe are skipped: DWPose runs its ONNX model on the CPU via OpenCV.
-  3. Download the models once, so no node downloads anything at run time:
+  3. Download the models once (skipped when a folder ComfyUI reads already has them, e.g. -ModelsDir of
+     setup-comfyui.ps1), so no node downloads anything at run time:
        models\controlnet\controlnet-union-sdxl-1.0-promax.safetensors   (xinsir, openpose/depth/canny)
        models\ipadapter\ip-adapter-plus_sdxl_vit-h.safetensors            (h94)
        models\clip_vision\CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors     (h94 image encoder)
@@ -20,7 +21,7 @@
 param(
     [string]$IPAdapterCommit = "a0f451a5113cf9becb0847b92884cb10cbdec0ef",
     [string]$ControlNetAuxCommit = "0cd290477128d42cdc3e76a826a402d866e8c684",
-    [string]$ModelsDir = ""            # default: <ComfyUI base or main dir>\models
+    [string]$ModelsDir = ""            # default: tools\comfyui\models
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib\common.ps1")
@@ -28,10 +29,7 @@ Initialize-DotEnv | Out-Null
 
 $layout = Get-ComfyLayout
 if (-not $layout -or -not $layout.Python) { throw "ComfyUI の場所が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
-if (-not $ModelsDir) {
-    $root = if ($layout.BaseDir) { $layout.BaseDir } else { $layout.MainDir }
-    $ModelsDir = Join-Path $root "models"
-}
+if (-not $ModelsDir) { $ModelsDir = $layout.ModelsDir }
 
 function Install-CustomNode([string]$Name, [string]$Url, [string]$Commit) {
     $dir = Join-Path $layout.CustomNodesDir $Name
@@ -50,14 +48,13 @@ function Install-CustomNode([string]$Name, [string]$Url, [string]$Commit) {
 }
 
 function Get-Model([string]$Url, [string]$Path) {
-    if ((Test-Path $Path) -and (Get-Item $Path).Length -gt 0) { Write-Ok "exists: $Path"; return }
-    New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
-    $partial = "$Path.partial"
-    Write-Host "    downloading $Url"
-    Invoke-Native curl.exe -L --fail --retry 3 -C - -o $partial $Url | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "ダウンロードに失敗しました: $Url" }
-    Move-Item -Force $partial $Path
-    Write-Ok "saved: $Path"
+    # A models\<folder>\<name> that any folder ComfyUI reads already has is used in place.
+    if ($Path.StartsWith($ModelsDir)) {
+        $relative = $Path.Substring($ModelsDir.TrimEnd('\').Length + 1)
+        $found = Find-ComfyModel $layout (Split-Path $relative) (Split-Path -Leaf $relative)
+        if ($found) { Write-Ok "exists: $found"; return }
+    }
+    Save-Download $Url $Path
 }
 
 Write-Step "カスタムノード（IP-Adapter / ControlNet 前処理）"
@@ -67,7 +64,7 @@ $aux = Install-CustomNode "comfyui_controlnet_aux" "https://github.com/Fannovel1
 Write-Step "comfyui_controlnet_aux の依存（torch / numpy は変更しない）"
 $deps = @("opencv-python<5", "huggingface_hub", "scipy", "filelock", "einops", "pyyaml", "scikit-image",
           "python-dateutil", "omegaconf", "addict", "yacs", "trimesh", "rtree", "scikit-learn", "matplotlib")
-Invoke-Native $layout.Python -m pip install --disable-pip-version-check --quiet @deps | Write-Host
+Invoke-Native uv pip install --python $layout.Python @deps | Select-Object -Last 2 | Write-Host
 if ($LASTEXITCODE -ne 0) { throw "依存のインストールに失敗しました" }
 Write-Ok "installed"
 
