@@ -60,7 +60,7 @@ def summarize_prompt_error(body: dict) -> str:
 
 
 class ComfyClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout_s: float = 600.0):
+    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout_s: float = 1200.0):
         self.base_url = base_url.rstrip("/")
         self.ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
         self.timeout_s = timeout_s
@@ -120,9 +120,11 @@ class ComfyClient:
             return _queue_busy(r.json())
 
     async def wait_queue_idle(self, timeout_s: float | None = None, poll_s: float = 2.0) -> None:
-        deadline = time.monotonic() + (timeout_s or self.timeout_s)
+        """Wait until the queue is empty. The job in front is waited for while ComfyUI answers (that job has its
+        own idle timeout); ``timeout_s``, when given, bounds the wait. A ComfyUI that stops answering raises."""
+        deadline = time.monotonic() + timeout_s if timeout_s else None
         while await self.queue_busy():
-            if time.monotonic() > deadline:
+            if deadline is not None and time.monotonic() > deadline:
                 raise ComfyError("ComfyUI のキューが空きませんでした（前の生成が終わっていません）")
             await asyncio.sleep(poll_s)
 
@@ -171,13 +173,17 @@ class ComfyClient:
         until_node: str | None = None,
         deadline: float | None = None,
         on_event: Callable[[str, dict], None] | None = None,
+        idle_s: float | None = None,
     ) -> WaitResult:
         """Wait on /ws until ``until_node`` has executed or the prompt finished.
 
-        Raises ComfyError on execution errors or when the deadline (monotonic) passes.
-        History is polled as a fallback so events missed between connections are not lost.
+        ``idle_s`` (default: the client's timeout) is an idle timeout: every event of this prompt (executing,
+        progress of each sampler step, executed ...) restarts it, so a long run that keeps reporting is waited for.
+        ``deadline`` (monotonic), when given, is a hard limit as well. Raises ComfyError on execution errors and on
+        either limit. History is polled as a fallback so events missed between connections are not lost.
         """
-        deadline = deadline or (time.monotonic() + self.timeout_s)
+        idle_s = idle_s or self.timeout_s
+        last_event = time.monotonic()
         result = WaitResult(done=False)
 
         async def check_history() -> bool:
@@ -197,11 +203,13 @@ class ComfyClient:
             if await check_history():
                 return result
             while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise ComfyError("ComfyUI の完了待ちがタイムアウトしました（10 分）")
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    raise ComfyError("ComfyUI の完了待ちがタイムアウトしました")
+                if now - last_event >= idle_s:
+                    raise ComfyError(f"ComfyUI の完了待ちがタイムアウトしました（{idle_s:.0f} 秒間進捗がありません）")
                 try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=min(5.0, remaining))
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
                 except TimeoutError:
                     if await check_history():
                         return result
@@ -212,6 +220,8 @@ class ComfyClient:
                 kind, data = msg.get("type"), msg.get("data") or {}
                 if data.get("prompt_id") not in (None, prompt_id):
                     continue
+                if kind not in ("status", "progress_state") or data.get("prompt_id") == prompt_id:
+                    last_event = time.monotonic()  # this prompt reported progress
                 if kind not in ("status", "progress_state"):
                     if on_event:
                         on_event(kind, data)

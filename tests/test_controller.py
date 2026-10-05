@@ -143,7 +143,10 @@ async def test_wall_clock_ends_after_the_running_tool(models_dir):
 def test_wall_clock_never_exceeds_the_search_budget(models_dir):
     settings = _settings(models_dir, controller_wall_clock_s=99999.0, search_wall_clock_s=1200.0)
     assert cn.new_control(settings)["max_wall_clock_s"] == 1200.0
-    assert cn.new_control(_settings(models_dir))["max_wall_clock_s"] == 1200.0
+    assert cn.new_control(_settings(models_dir, controller_wall_clock_s=300.0))["max_wall_clock_s"] == 300.0
+    # No budget set (the default): the loop is bounded by its steps only, never by time.
+    unlimited = cn.new_control(_settings(models_dir))
+    assert unlimited["max_wall_clock_s"] == 0.0 and not cn.over_clock(unlimited, now=unlimited["started"] + 10**6)
 
 
 def test_after_synthesize_goes_to_the_record_only_in_the_loop():

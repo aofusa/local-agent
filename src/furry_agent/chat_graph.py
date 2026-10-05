@@ -49,7 +49,7 @@ from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, StageErro
                                      _fail, _final, _held, _history, _is_think, _last_human, _leaders, _ledgers,
                                      _lmstudio, _lock, _progress, _prompt, _settings, _text_of, controlled,
                                      end_or_record, log)
-from furry_agent.chat_models import (LARGE_BOOT_S, LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
+from furry_agent.chat_models import (LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
                                      _catalog, _ensure_tor, _free_mb, _leader, _leader_client, _run_model, _search_client,
                                      _server)
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
@@ -550,12 +550,14 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
     started = time.monotonic()
     question = search.get("goal") or search["question"]
     try:
-        # The budget covers every intent this reader handles; opening pages may use 60 % of each share so the
-        # card extraction always gets its turn.
+        # SEARCH_TOTAL_TIMEOUT_S (0 = none) is an optional budget over every intent this reader handles; opening
+        # pages may use 60 % of each share so the card extraction always gets its turn. Without it, only the idle
+        # timeout of each model call (AGENT_IDLE_TIMEOUT_S) and the page fetch timeouts apply.
         jobs_n = len(payload["jobs"])
-        async with asyncio.timeout(settings.search_total_timeout_s * jobs_n):
-            await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
-            llm = server.client(settings.worker_timeout_s)
+        budget = settings.search_total_timeout_s * jobs_n if settings.search_total_timeout_s > 0 else None
+        async with asyncio.timeout(budget):
+            await server.start(settings.idle_timeout_s)
+            llm = server.client(settings.idle_timeout_s)
 
             async def ask_cards(llm_client, messages):
                 return await sa.ask_json(llm_client, messages, sa.Cards, max_tokens=700, temperature=0.1)
@@ -568,7 +570,7 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
                 try:
                     out = await run_reader(intent, hits, llm, client, ledger,
                                            await _prompt(settings, "system_bonsai_worker.txt"), question, ask_cards,
-                                           browse_budget_s=settings.search_total_timeout_s * 0.6)
+                                           browse_budget_s=settings.search_total_timeout_s * 0.6)  # 0 = none
                     allowed = {h["url"] for h in hits}
                     found = sa.card_dicts(out["cards"], allowed) or sa.snippet_cards(hits)
                     sources = {h["url"]: f"{h.get('title', '')} {h.get('snippet', '')}" for h in hits}

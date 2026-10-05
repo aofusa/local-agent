@@ -56,6 +56,7 @@ class FakeComfy:
         self.types = node_types
         self.image = _png()
         self.preview = _png((0, 0, 0))
+        self.idle_waits: list = []
 
     async def wait_queue_idle(self, timeout_s=None):
         self.calls.append("wait_queue_idle")
@@ -91,7 +92,8 @@ class FakeComfy:
         self.submitted = prompt
         return "0b7e2f4a-1111-2222-3333-444455556666"
 
-    async def wait(self, prompt_id, client_id, until_node=None, deadline=None, on_event=None):
+    async def wait(self, prompt_id, client_id, until_node=None, deadline=None, on_event=None, idle_s=None):
+        self.idle_waits.append(idle_s)
         if self.fail_at == "cancel":
             raise asyncio.CancelledError
         if until_node == "split":
@@ -437,13 +439,20 @@ async def test_no_blocking_calls_in_event_loop(settings):
     assert not state.get("error")
 
 
-async def test_image_wait_gets_its_own_deadline(settings):
-    # The LLM phase can use most of the budget; the image wait restarts it.
-    import time
+async def test_waits_use_the_idle_timeout_not_a_deadline(settings):
+    # AGENT_IDLE_TIMEOUT_S: each wait restarts on every ComfyUI event; there is no deadline for the whole run.
+    fake = FakeComfy()
+    state = await _run("テスト", fake, settings)
+    assert _final_images(state)
+    assert fake.idle_waits and all(w == settings.timeout_s for w in fake.idle_waits)
+    assert "deadline" not in state["job"]
 
-    state = {"messages": [], "progress_id": "p", "job": {"prompt_id": "pid", "client_id": "c", "deadline": time.time() + 5}}
-    update = await graph_module.await_tags(state, _config(FakeComfy(), settings))
-    assert update["job"]["deadline"] - time.time() > 590
+
+async def test_lm_connect_read_timeout_follows_the_idle_timeout(settings):
+    fake = FakeComfy()
+    await _run("テスト", fake, settings)
+    backends = [n for n in fake.submitted.values() if n["class_type"] == "LMConnectLMStudioBackend"]
+    assert backends and all(n["inputs"]["read_timeout_seconds"] == int(settings.timeout_s) for n in backends)
 
 
 # --- flux (Chroma1-HD) family ---------------------------------------------------------------------------------

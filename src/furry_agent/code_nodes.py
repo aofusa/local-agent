@@ -259,10 +259,11 @@ def _after_confirm(state: ChatState) -> str:
 
 
 async def _wait_for_image_tab(config: RunnableConfig, settings: ChatSettings) -> bool:
-    """The container waits while the image tab generates (ComfyUI owns the memory then)."""
-    deadline = time.monotonic() + settings.sandbox_wait_s
+    """The container waits while the image tab generates (ComfyUI owns the memory then). The image run is waited
+    for as long as it works (it has its own idle timeout); SANDBOX_WAIT_S, when set, bounds the wait."""
+    deadline = time.monotonic() + settings.sandbox_wait_s if settings.sandbox_wait_s is not None else None
     while job_lock.holder == "image" or await _image_tab_busy(config, settings):
-        if time.monotonic() > deadline:
+        if deadline is not None and time.monotonic() > deadline:
             return False
         await asyncio.sleep(2.0)
     return True

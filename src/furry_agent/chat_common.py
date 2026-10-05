@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
@@ -102,7 +103,7 @@ def _settings(config: RunnableConfig | None) -> ChatSettings:
 
 def _lmstudio(config: RunnableConfig | None, settings: ChatSettings) -> LMStudio:
     return _conf(config).get("lmstudio") or LMStudio(settings.lmstudio_url, settings.lmstudio_model,
-                                                     settings.chat_timeout_s)
+                                                     settings.idle_timeout_s)
 
 
 def _comfy(config: RunnableConfig | None, settings: ChatSettings) -> ComfyClient | None:
@@ -272,17 +273,29 @@ async def _lock(state: ChatState, config: RunnableConfig | None, settings: ChatS
     if job_lock.holds(state.get("lock_token")):
         job_lock.renew(state["lock_token"])
         return state["lock_token"]
-    token = await job_lock.acquire("chat", settings.job_lock_timeout_s, settings.job_lock_timeout_s)
-    # The image tab releases the lock after queueing; ComfyUI may still be generating (LLM + checkpoint).
-    if await _image_tab_busy(config, settings):
-        job_lock.release(token)
-        raise JobLockBusy("image")
+    # The other tab's job is waited for while it works: its holder renews the lease, and a holder that died frees
+    # the lock when the lease runs out. JOB_LOCK_TIMEOUT_S, when set, bounds the wait instead.
+    limit = settings.job_lock_timeout_s
+    started = time.monotonic()
+    token = await job_lock.acquire("chat", limit, limit)
+    # The image tab releases the lock after queueing; ComfyUI may still be generating (LLM + checkpoint). While
+    # ComfyUI answers and its queue is busy, the chat run waits (the image run has its own idle timeout).
+    waited = False
+    while await _image_tab_busy(config, settings):
+        if limit is not None and time.monotonic() - started >= limit:
+            job_lock.release(token)
+            raise JobLockBusy("image")
+        if not waited:
+            log.info("chat waits for the image tab's ComfyUI run")
+            waited = True
+        job_lock.renew(token)
+        await asyncio.sleep(2.0)
     return token
 
 
 @contextlib.asynccontextmanager
 async def _held(token: str | None):
-    """Renew the job lock's lease while a long model call runs (a 20-minute call outlives the 15-minute lease)."""
+    """Renew the job lock's lease while a long model call runs (a long call outlives the 15-minute lease)."""
     async def beat():
         while True:
             await asyncio.sleep(RENEW_EVERY_S)
@@ -308,27 +321,12 @@ def prompt_tokens(messages: list[dict]) -> int:
     return total
 
 
-# Measured generation speed per server (tokens/s), updated from every reply of a long enough call.
+# Measured generation speed per server (tokens/s), updated from every reply of a long enough call (logged only).
 _speeds: dict[str, float] = {}
 
 
 def _speed_key(client) -> str:
     return getattr(client, "base_url", "") or type(client).__name__
-
-
-def time_cap(settings: ChatSettings, client) -> int | None:
-    """The most tokens one call can produce within CHAT_TIMEOUT_S at the server's speed (10 % margin).
-
-    The LM Studio 27B makes ~0.9 tokens/s on this machine, so a 20-minute call ends near 1000 tokens: the
-    budget for an answer and its thinking must come from the speed, not only from the context window. Other
-    servers (the llama-server leader, 8-9 tokens/s) are capped only once a speed was measured.
-    """
-    speed = _speeds.get(_speed_key(client))
-    if speed is None:
-        if not isinstance(client, LMStudio):
-            return None
-        speed = settings.lmstudio_tokens_per_s
-    return max(128, int(speed * settings.chat_timeout_s * 0.9))
 
 
 def record_speed(client, reply) -> None:
@@ -342,8 +340,9 @@ def record_speed(client, reply) -> None:
 
 
 def capped(settings: ChatSettings, client, max_tokens: int) -> int:
-    cap = time_cap(settings, client)
-    return max_tokens if cap is None else min(max_tokens, cap)
+    """The max_tokens of a call. Model calls have an idle timeout (AGENT_IDLE_TIMEOUT_S), not a total one, so a
+    slow server is not given fewer tokens; only the context window limits a reply (see _ask)."""
+    return max_tokens
 
 
 def fit_messages(messages: list[dict], budget: int) -> list[dict]:
@@ -378,14 +377,14 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
     think = want_think and room >= answer_min + THINK_RESERVE
     max_tokens = min(room, base + settings.think_tokens) if think else min(room, base)
     reply = await client.chat(messages, max_tokens=max_tokens, temperature=temperature,
-                              timeout_s=settings.chat_timeout_s, thinking=think)
+                              timeout_s=settings.idle_timeout_s, thinking=think)
     record_speed(client, reply)
     log.info("%s: thinking=%s max_tokens=%d %s", stage, think, max_tokens, _usage(reply))
     thoughts = _thought(stage, reply)
     if think and not (reply.content or "").strip():
         log.info("%s: thinking used the whole budget; answering again without thinking", stage)
         reply = await client.chat(messages, max_tokens=min(room, base), temperature=temperature,
-                                  timeout_s=settings.chat_timeout_s, thinking=False)
+                                  timeout_s=settings.idle_timeout_s, thinking=False)
         log.info("%s: retry %s", stage, _usage(reply))
     return reply, thoughts
 

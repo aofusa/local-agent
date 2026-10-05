@@ -167,7 +167,7 @@ async def test_fail_open_writes_the_unaudited_answer_marked(models_dir):
 
 async def test_time_budget_stops_verification(models_dir):
     world = _world()
-    state, message = await _run("/search topic", world, _vsettings(models_dir, claim_timeout_s=0.0), mode="fast")
+    state, message = await _run("/search topic", world, _vsettings(models_dir, claim_timeout_s=0.001), mode="fast")
     assert "突き合わせを打ち切った" in message.content and world.synth == []
     assert job_lock.holder is None
 
