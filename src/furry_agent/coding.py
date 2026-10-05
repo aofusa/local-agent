@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 
 from furry_agent import sandbox
+from furry_agent.config import env_int
 from furry_agent.sandbox import Profile, SandboxError
 
 _FILE = re.compile(r"^\s*(?:#+\s*)?FILE:\s*`?([^\s`]+)`?\s*\n```[^\n]*\n(.*?)\n```", re.MULTILINE | re.DOTALL)
@@ -94,13 +95,18 @@ def parse_plan(text: str, profile: Profile, previous: list[dict] | None = None) 
     return plan
 
 
+# Output tails of a failed run handed to the model for the fix.
+FIX_STDOUT_CHARS = env_int("CODE_FIX_STDOUT_CHARS", 1000, 100)
+FIX_STDERR_CHARS = env_int("CODE_FIX_STDERR_CHARS", 1500, 100)
+
+
 def fix_input(request: str, code: dict) -> str:
     """The failed run for the model to fix: files, command, exit code and the output tails."""
     files = "\n\n".join(f"FILE: {f['path']}\n```{f.get('language', '')}\n{f['content']}\n```" for f in code["files"])
     status = "時間切れ（60 秒）" if code.get("timed_out") else f"終了コード {code.get('last_exit')}"
     return (f"依頼: {request}\n\n前回のファイル:\n{files}\n\nCOMMAND: {' '.join(code['command'])}\n\n"
-            f"実行結果: {status}\n\nstdout（末尾）:\n```text\n{code.get('stdout_tail', '')[-1000:]}\n```\n\n"
-            f"stderr（末尾）:\n```text\n{code.get('stderr_tail', '')[-1500:]}\n```\n\n"
+            f"実行結果: {status}\n\nstdout（末尾）:\n```text\n{code.get('stdout_tail', '')[-FIX_STDOUT_CHARS:]}\n```\n\n"
+            f"stderr（末尾）:\n```text\n{code.get('stderr_tail', '')[-FIX_STDERR_CHARS:]}\n```\n\n"
             "失敗の原因を直してください。変わるファイルは全文で返してください。")
 
 

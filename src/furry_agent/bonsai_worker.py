@@ -27,15 +27,17 @@ from pathlib import Path
 
 import httpx
 
+from furry_agent.config import env_float, env_int
 from furry_agent.llm_client import OpenAICompatClient
 from furry_agent.search_agent import focus_text
 
 log = logging.getLogger("furry_agent.bonsai")
 
 HOST = "127.0.0.1"
-MAX_TOOL_ROUNDS = 2
-PAGE_TIMEOUT_S = 20.0
-PAGE_CHARS = 1200
+MAX_TOOL_ROUNDS = env_int("BONSAI_MAX_TOOL_ROUNDS", 2, 1, 20)  # open_page calls of one reader job
+PAGE_TIMEOUT_S = env_float("BONSAI_PAGE_TIMEOUT_S", 20.0, 1.0)  # one page fetch; a stalled page is skipped
+PAGE_CHARS = env_int("BONSAI_PAGE_CHARS", 1200, 200, 200000)  # page text handed to the reader (its context is BONSAI_CTX)
+PAGE_KEEP_CHARS = env_int("BONSAI_PAGE_KEEP_CHARS", 3000, 200, 200000)  # page text kept for the claim check
 OPEN_PAGE_TOOL = {
     "type": "function",
     "function": {
@@ -307,7 +309,7 @@ async def run_reader(intent: dict, hits: list[dict], client: OpenAICompatClient,
         out["opened"].append(url)
         focused = focus_text(page.text, focus, PAGE_CHARS) if page else ""
         if page:
-            out["pages"].append({"url": url, "title": page.title, "text": page.text[:3000]})
+            out["pages"].append({"url": url, "title": page.title, "text": page.text[:PAGE_KEEP_CHARS]})
         call_id = f"call_{intent.get('id', 0)}_{round_no}"
         text = f"{page.title}\n{focused}" if page else "（このページは取得できませんでした）"
         messages.append({"role": "assistant", "content": "", "tool_calls": [{

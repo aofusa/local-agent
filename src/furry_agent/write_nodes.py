@@ -25,6 +25,7 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 
 from furry_agent import search_agent as sa, writing
+from furry_agent.config import env_int
 from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, capped, _cleanup, _decision, _edited_args, _fail,
                                      _final, _held, _hitl, _is_think, _lmstudio, _lock, _progress, _prompt, _settings,
                                      _usage, end_or_record, log)
@@ -32,7 +33,11 @@ from furry_agent.job_lock import JobLockBusy
 from furry_agent.llm_client import LLMError
 
 CONTINUE_ACTION = "continue_writing"
-DRAFT_TOKENS = 3000
+DRAFT_TOKENS = env_int("WRITE_DRAFT_TOKENS", 3000, 64)
+OUTLINE_TOKENS = env_int("WRITE_OUTLINE_TOKENS", 1500, 64)
+REVISE_TOKENS = env_int("WRITE_REVISE_TOKENS", 1200, 64)
+# The least answer the draft keeps when deciding whether to think (the rest of max_tokens may go to thoughts).
+ANSWER_MIN = env_int("WRITE_ANSWER_MIN", 1200, 16)
 
 
 def _task(artifact: dict, extra: list[dict] | None = None) -> dict:
@@ -88,7 +93,7 @@ async def write_brief(state: ChatState, config: RunnableConfig) -> dict:
         async with _held(token):
             parsed = await sa.ask_json(lmstudio, [
                 {"role": "system", "content": await _prompt(settings, "system_write_outline.txt")},
-                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, lmstudio, 1500),
+                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, lmstudio, OUTLINE_TOKENS),
                 temperature=0.2)
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
@@ -132,7 +137,7 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
             reply, thoughts = await _ask(state, settings, lmstudio,
                                          [{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
                                           {"role": "user", "content": user}],
-                                         base=DRAFT_TOKENS, answer_min=1200, temperature=0.7, stage="本文")
+                                         base=DRAFT_TOKENS, answer_min=ANSWER_MIN, temperature=0.7, stage="本文")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
@@ -179,9 +184,10 @@ async def write_revise(state: ChatState, config: RunnableConfig) -> dict:
         async with _held(token):
             # The draft and the brief go in; only edits come back (never a full rewrite, §4.2).
             revision = await sa.ask_json(lmstudio, [
-                {"role": "system", "content": await _prompt(settings, "system_write_revise.txt")},
+                {"role": "system", "content": (await _prompt(settings, "system_write_revise.txt"))
+                 .replace("最大 8 件", f"最大 {writing.MAX_EDITS} 件")},
                 {"role": "user", "content": writing.revise_input(artifact, piece)}],
-                writing.Revision, max_tokens=capped(settings, lmstudio, 1200), temperature=0.2)
+                writing.Revision, max_tokens=capped(settings, lmstudio, REVISE_TOKENS), temperature=0.2)
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise

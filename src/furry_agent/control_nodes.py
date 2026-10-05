@@ -34,7 +34,8 @@ from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, _cleanup,
                                      _last_human, _leaders, _lmstudio, _lock, _progress, _prompt, _settings,
                                      _text_of, capped, log)
 from furry_agent.chat_models import LEADER_LABEL, _leader
-from furry_agent.config import ChatSettings
+from furry_agent import writing
+from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
 from furry_agent.router import CODE, SEARCH, WRITE, find_urls, long_request
@@ -45,10 +46,10 @@ KIND = {"search": SEARCH, "write": WRITE, "code": CODE}
 TOOL_LABELS = {"search": "検索", "write": "執筆", "code": "コード", "image": "画像"}
 STOP_LABELS = {"final": "回答", "max_steps": "手数の上限", "wall_clock": "時間の上限", "repeat": "同じ依頼の繰り返し",
                "error": "判断の失敗", "rejected": "利用者が止めた", "image": "画像タブへの案内"}
-DECISION_TOKENS = 400
-SUMMARY_CHARS = 1000      # one trace entry (§6: about 1 KB)
-PROMPT_SUMMARY_CHARS = 500  # what the controller reads of each entry (§8)
-RESEARCH_CHARS = 1500     # the search answer handed to the writer (writing.draft_input reads 1500)
+DECISION_TOKENS = env_int("CONTROLLER_DECISION_TOKENS", 400, 64)
+SUMMARY_CHARS = env_int("CONTROLLER_SUMMARY_CHARS", 1000, 300)  # one trace entry (§6: about 1 KB)
+PROMPT_SUMMARY_CHARS = env_int("CONTROLLER_PROMPT_SUMMARY_CHARS", 500, 50)  # what the controller reads of each entry (§8)
+RESEARCH_CHARS = writing.RESEARCH_CHARS  # the search answer handed to the writer (WRITE_RESEARCH_CHARS)
 IMAGE_TAB_TEXT = ("画像の生成は画像タブで受け付けます。画面上部の「画像」タブに切り替えて送ってください。"
                   "このタブでは会話、Web 検索、文章、コードを扱います。")
 
@@ -68,7 +69,7 @@ class Decision(BaseModel):
 
 
 def new_control(settings: ChatSettings, now: float | None = None) -> dict:
-    return {"active": True, "steps": 0, "max_steps": max(1, min(4, settings.controller_max_steps)),
+    return {"active": True, "steps": 0, "max_steps": max(1, settings.controller_max_steps),
             "started": time.time() if now is None else now, "max_wall_clock_s": settings.controller_budget_s,
             "decision": {}, "trace": [], "answer": "", "stop_reason": "", "research": ""}
 

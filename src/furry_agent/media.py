@@ -16,9 +16,11 @@ from dataclasses import dataclass, field
 
 from PIL import Image, UnidentifiedImageError
 
+from furry_agent.config import env_int
+
 MAX_IMAGES = 4
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_IMAGE_SIDE = 4096
+MAX_IMAGE_BYTES = env_int("IMAGE_MAX_MB", 10, 1, 1024) * 1024 * 1024
+MAX_IMAGE_SIDE = env_int("IMAGE_MAX_SIDE", 4096, 256, 32768)
 IMAGE_ROLES = ("auto", "style", "pose", "character", "base", "mask")
 IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 _DATA_URL = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.+)$", re.DOTALL)
@@ -70,7 +72,7 @@ def _role_and_strength(block: dict) -> tuple[str, float | None]:
 
 def _dimensions(raw: bytes, name: str) -> tuple[int, int]:
     if len(raw) > MAX_IMAGE_BYTES:
-        raise MediaError(f"{name} は {len(raw) // (1024 * 1024)} MB です。1 枚 10 MB までにしてください")
+        raise MediaError(f"{name} は {len(raw) // (1024 * 1024)} MB です。1 枚 {MAX_IMAGE_BYTES / (1024 * 1024):g} MB までにしてください")
     try:
         with Image.open(io.BytesIO(raw)) as image:
             width, height = image.size

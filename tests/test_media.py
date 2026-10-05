@@ -70,7 +70,7 @@ def test_size_limits(monkeypatch):
     with pytest.raises(MediaError, match="辺"):
         parse_request([block()])
     monkeypatch.setattr(media_module, "MAX_IMAGE_BYTES", 10)
-    with pytest.raises(MediaError, match="10 MB"):
+    with pytest.raises(MediaError, match="MB まで"):
         parse_request([block()])
 
 

@@ -29,11 +29,12 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from furry_agent.config import env_int
 from furry_agent.llm_client import LLMError, parse_json_object
 
 log = logging.getLogger("furry_agent.search_agent")
 
-MAX_INTENTS = 3
+MAX_INTENTS = env_int("SEARCH_MAX_INTENTS", 3, 1, 7)  # search intents of one round (readers: SEARCH_FANOUT_WIDTH)
 T = TypeVar("T", bound=BaseModel)
 
 

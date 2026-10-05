@@ -30,12 +30,14 @@ from furry_agent import coding, sandbox
 from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, _cleanup, _conf, _decision, _edited_args, _fail,
                                      _final, _held, _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock,
                                      _progress, _prompt, _settings, controlled, end_or_record, log)
-from furry_agent.config import REPO_ROOT, ChatSettings
+from furry_agent.config import REPO_ROOT, ChatSettings, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
 
 RUN_ACTION = "run_code"
-CODE_TOKENS = 3500
+CODE_TOKENS = env_int("CODE_TOKENS", 3500, 64)
+ANSWER_MIN = env_int("CODE_ANSWER_MIN", 1200, 16)
+SHOW_TAIL_CHARS = env_int("CODE_SHOW_TAIL_CHARS", 4000, 100)  # output tail shown in the chat
 sandbox_lock = asyncio.Lock()
 
 
@@ -89,7 +91,7 @@ async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSett
     try:
         token = await _lock(state, config, settings)
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=1200,
+            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=ANSWER_MIN,
                                          temperature=0.2, stage="修正" if fix else "コード")
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
@@ -336,9 +338,9 @@ def _result_text(code: dict) -> str:
     status = "時間切れ（60 秒で停止）" if code.get("timed_out") else f"終了コード {code.get('last_exit')}"
     parts = [f"**実行結果**（{code.get('round')} 回目、{status}）"]
     if code.get("stdout_tail"):
-        parts.append(f"stdout（末尾）:\n```text\n{code['stdout_tail'].rstrip()[-4000:]}\n```")
+        parts.append(f"stdout（末尾）:\n```text\n{code['stdout_tail'].rstrip()[-SHOW_TAIL_CHARS:]}\n```")
     if code.get("stderr_tail", "").strip():
-        parts.append(f"stderr（末尾）:\n```text\n{code['stderr_tail'].rstrip()[-4000:]}\n```")
+        parts.append(f"stderr（末尾）:\n```text\n{code['stderr_tail'].rstrip()[-SHOW_TAIL_CHARS:]}\n```")
     if code.get("outputs"):
         parts.append("作られたファイル: " + "、".join(f"`{o['path']}`" for o in code["outputs"]))
     return "\n\n".join(parts)

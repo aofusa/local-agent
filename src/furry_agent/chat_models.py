@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from furry_agent.bonsai_select import Catalog, Rank, Selection, available_models, free_memory_mb, select_model
 from furry_agent.bonsai_worker import LlamaServer, WorkerError, free_port
 from furry_agent.chat_common import ChatState, _conf, _leaders, _lmstudio, log
-from furry_agent.config import ChatSettings
+from furry_agent.config import ChatSettings, env_int
 from furry_agent.llm_client import OpenAICompatClient
 from furry_agent.search_client import TorSearchClient
 from furry_agent.tor_service import ensure_tor
@@ -24,14 +24,15 @@ from furry_agent.tor_service import ensure_tor
 LEADER_LABEL = "Qwen3.8 27B abliterated（LM Studio）"
 PROXY_LABEL = "Ternary-Bonsai-2-27B abliterated（代理、llama.cpp）"
 PORT_ROUTE, PORT_FILTER, PORT_LEADER = 7, 8, 9  # offsets from BONSAI_BASE_PORT; readers use 0..2
-LEADER_CTX = 8192  # the proxy leader's llama-server context (_server: large models get at least 8192)
+# The proxy leader's llama-server context (_server: large models get at least this much).
+LEADER_CTX = env_int("BONSAI_LEADER_CTX", 8192, 1024, 262144)
 
 
 def _server(config: RunnableConfig | None, settings: ChatSettings, selection: Selection, port: int) -> LlamaServer:
     factory = _conf(config).get("server_factory")
     if factory:
         return factory(selection, port)
-    ctx = max(settings.ctx, 8192) if selection.model.large else settings.ctx
+    ctx = max(settings.ctx, LEADER_CTX) if selection.model.large else settings.ctx
     return LlamaServer(settings.llama_server, selection.path, port, ctx, selection.ngl, selection.model.label,
                        settings.logs_dir)
 
