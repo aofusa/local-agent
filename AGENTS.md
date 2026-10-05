@@ -289,6 +289,8 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - チャットタブのタイムアウトは、モデル呼び出し 1 回が `CHAT_TIMEOUT_S`（1200 秒）、思考モードの検索全体が `SEARCH_WALL_CLOCK_S`（1200 秒）。コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
 - この端末の LM Studio の 27B は context 4096（`LMSTUDIO_CONTEXT`）で約 0.9 トークン/秒。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「`CHAT_TIMEOUT_S` で出せる量」（`LMSTUDIO_TOKENS_PER_S` から始め、応答ごとに測り直す）の小さい方に収める。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
 - Docker Desktop は普段は止めておき、承認したコードの実行のときだけ起動して、終わったら止める（VM が約 1.5GB を使い、27B や ComfyUI と取り合うため）。
+- 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の上限は `CLAIM_TIMEOUT_S`（600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かない）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
+- `/docs`（`docs/local-doc-mapreduce-design.md` §10）: `LOCAL_DOC_ROOTS` は既定で空（オフ）。パスは文字列だけ。`.log` は既定の拡張子に残し、広いルートでは `DOC_EXTENSIONS` で外す。計画は `DOC_PLANNER=auto`（節が `DOC_MAX_CHUNKS` を超えるときだけ 27B）。読む時間は `DOC_TIMEOUT_S`（600 秒）。起動できなかった reader の節は未読に戻し、以後の波の幅を下げる（この iGPU の Vulkan で確保できる量は空き RAM より小さい）。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 
 ## 作業規則
