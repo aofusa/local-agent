@@ -162,13 +162,13 @@ Check "no orphan llama-server" {
 Write-Step "チャットタブのコード実行（Docker サンドボックス、思考モードのみ）"
 Check "docker (Linux engine)" {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "docker コマンドが無い（コードは書くが実行しない。Docker Desktop も起動しない）" }
-    $os = & docker version --format "{{.Server.Os}}" 2>$null
+    $os = Invoke-Native docker version --format "{{.Server.Os}}" | Select-Object -First 1
     if ($LASTEXITCODE -ne 0) { throw "エンジンに接続できない（承認した実行のときに Docker Desktop を起動します）" }
     if ("$os".Trim() -ne "linux") { throw "エンジンが $os（Linux コンテナに切り替え）" }
     "linux"
 } -Optional
 Check "image python:3.12-slim" {
-    & docker image inspect python:3.12-slim *> $null
+    Invoke-Native docker image inspect python:3.12-slim | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "未取得（scripts\setup-sandbox.ps1）" }
     "ok"
 } -Optional
