@@ -468,3 +468,39 @@ v2 候補: MCP クライアント、サブエージェント、plan の永続化
 - `aofusa/local-agent` README / AGENTS.md。グラフ `agent` と `chat`、ポート 2024 / 3000、ループバックの ComfyUI・LM Studio、認証未確定、画像は base64、ジョブ直列
 - Claude Code のエージェントループ: gather / act / verify が混ざる。ツールが主体。ファイル・検索・実行・Web。Edit は原文一致。計画モードと権限モードを分ける
 - Grok 系の会話エージェント: 依頼の意図からタスクを切り、検索を出典付きで統合し、足りない事実を埋めない
+
+---
+
+## 17. 実装記録（v0.7.0）
+
+状態: 実装済み。段階 1〜7（§12）をまとめて実装した。
+
+### 17.1 決めたこと（§15 の未決事項）
+
+| 項目 | 決定 |
+| --- | --- |
+| バイナリ名 | `cirka`（利用者の指定）。ディレクトリは `cirka/`、設定とデータの置き場も `cirka`（`.cirka/config.toml`、`.cirkaignore`、`CIRKA.md`、`cirka-outputs/`、`CIRKA_HOST`） |
+| 認証 | 足さない。`auth_header`（`Name: value`）を設定すれば全リクエストに付けるだけ |
+| `coder` の形 | 素の `POST /coder/turn`（LangGraph のスレッドを使わない）。`langgraph.json` の `http.app` で LangGraph サーバに載せる。グラフ一覧には出ないので、到達確認は `GET /coder/health`（`gate: "coder"`、LM Studio の到達、モデル、`context`、使用中のタブ）で行う |
+| 27B の tool calling | LM Studio 0.4 のネイティブ解析で足りた（下の実測）。XML の自前パーサは入れていない。LM Studio が開始時に HTTP エラーを返したときだけ、ゲート内で 1 回送り直す |
+| シェルの確認 | 常に確認（`accept-edits` でもコマンドは確認。`bypass` だけ確認なし） |
+
+### 17.2 設計との差分と吸収
+
+- **接続先の設定**（利用者の要件）: §9 の `config.toml` に加え、`cirka config get|set|unset|path|show`（`--project` でディレクトリごと）、環境変数 `CIRKA_HOST` / `CIRKA_MODE` / `CIRKA_PERMISSION` / `CIRKA_AUTH_HEADER`、`--host`、実行中の `/host <URL> [--save]` を足した。優先は「既定 < ユーザー < プロジェクト < 環境変数 < コマンドライン」。値は書く前に検証する（不正な host やモードで黙って既定に戻らない）。
+- **ゲートの位置**: `coder_gate.py` を LangGraph がファイルパスで読むと、モジュールが `sys.modules` に登録されず `@dataclass` が失敗した。薄い入口 `coder_app.py`（パッケージから `app` を import するだけ）を `http.app` に指定した。
+- **ジョブロック**: ゲートは tab `coder` で `job_lock` を握る。ほかのタブが握っているあいだは `event: status`（待っているタブと秒数）を 5 秒ごとに送り、最大 600 秒待つ（§14「待ちをエラーにしない」）。ComfyUI のキューが動いているあいだも待つ。
+- **SSE の追加イベント**: `status`（上記）と `thinking`（思考モードの思考トークン。回答とは別に表示）を足した。`tool_call` はストリームの終わり（`done` の直前）にまとめて送り、cirka は `done` を受けるまでツールを実行しない（§13「途中切断で半分のツールを実行しない」）。
+- **context 4096**: §7 の予算は 4096〜8192 の想定だったが、この端末は 4096 で固定。ツールの説明を 1 行に縮め（11 ツールで JSON 約 2.9 KB）、システムプロンプトを約 300 トークンにした。履歴は 70 % を超えたら直近 2 件以外のツール結果を 1 行に潰し、さらに溢れたら古いやり取りを（assistant とその tool 結果を組で）落とす。1 件のツール結果の上限は窓から決める（4096 なら約 3 KB、最大 8 KiB）。ゲートは推定トークンが窓に入らなければ `error: context_overflow` を返し、cirka は 6 割に詰めて 1 回だけ送り直す。
+- **同じ失敗の繰り返し**（§4.1）: 同じツール・同じ引数が 2 回失敗したら、2 回目の結果に「方針を変えるか ask_user で聞いてください」を足す。
+- **非対話モード**: `cirka -p "<依頼>"` を足した（1 回の依頼で終わる。確認が要る操作は拒否し、`--permission` で許可）。CI や試験に使う。
+- **TUI と構成**: §10 の `loop_.rs` は `agent.rs`、`platform/` は `platform.rs` 1 ファイルにした。境界（Brain / Frontend のトレイトで UI とホストを外す）は設計どおり。Windows のシェルは PowerShell 7 があれば `pwsh`、無ければ Windows PowerShell で、出力を UTF-8 にする前置きを付ける。
+- **`/forget`**（§14 のセッション削除）と `/todos`、`/status`、`/default` を足した。`/undo` は直前のエージェントの編集を 1 件ずつ戻す（新規作成は削除）。
+
+### 17.3 確認
+
+- `cargo test`: 53 件（設定、パスの境界と秘密ファイル、伏せ字、SSE の分割と切断、ループ（ツール 2 回のあと最終文、default で bash が止まり拒否がモデルに届く、q で依頼が止まり全呼び出しに結果、未読の edit 拒否、plan で書かない、溢れたら詰めて 1 回だけ再送、最大ターン、同じ失敗の指摘、タスク一覧がプロンプトに入る、要約）、ツール（grep、glob と .gitignore、CRLF の保持、undo、bash の終了コードと時間切れでの停止）、画像の保存とパスだけを返すこと、セッションの再開）。
+- pytest `tests/test_coder_gate.py`: 12 件（トークン、断片の tool_call の組み立て、思考の分離、tool 結果の往復、context_overflow、max_tokens の上限、不正な要求の 400、LM Studio の拒否の再送、画像タブの待ちと status、ComfyUI のキューが動いているあいだの待ちと打ち切り、auto の判定、health）。
+- この端末（ROG Ally X、27B IQ3_M、context 4096）での実行:
+  - ゲート単体: grep のツール定義を渡した 1 ターンで、27B が `grep` の tool_call を正しい JSON 引数で返した（134 秒、モデルのロード込み）。
+  - cirka: テストが落ちる小さな Python プロジェクトで `cirka --mode fast --permission accept-edits -p "test_calc.py のテストが落ちる原因を調べて src/calc.py を直してください。"`。todo_write（3 項目）→ read_file × 2 → edit_file（`a - b` → `a + b`、確認なしで書き込み）→ bash（pytest。非対話なので拒否）→ 別の引数で bash（拒否）→ todo_write（確認の項目を blocked）→ 最終文（直したこと、手で確認するコマンド）。7 ターン、約 10 分 30 秒（1 ターン 23〜205 秒）。直したあとのテストは 2 件とも合格。

@@ -38,3 +38,4 @@ tools/bonsai/*
 # cirka (Rust CUI): build output and images it saves in a workspace
 cirka/target/
 cirka-outputs/
+dist/

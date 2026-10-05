@@ -17,6 +17,9 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 チャットタブでは小説や文章（`/write`）とプログラム（`/code`）も書けます。入力欄の「自動 / 速い / 思考」で、すばやい回答と、深い検索（下位問いを埋めるまで追加検索）・アウトラインと推敲・承認後の Docker 実行・思考トークンを切り替えます。「自動」は内容から自動で選びます。
 `/docs <パス> [質問]` と送ると、許可したフォルダのローカル文書（Markdown やテキスト）を、検索と同じチーム（計画 → 並列の reader → カバー → 統合）で読んで、`パス#見出し` の出典付きで答えます（ネットワークは使いません）。
 検索と `/docs` の回答は、主張ごとに出典の抜粋と突き合わせ、支持された主張だけで書き、最後に文ごとに監査して支持されない文を削除します。
+「調べてから手順書にして」のように道具を順に使う依頼は、思考モード（または自動）で **自律モード** になり、27B が検索・文章・コード・画像タブ案内を結果を見ながら選び直します（最大 3 手。「4. 使い方 › 自律モード」）。
+
+端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で（編集とコマンドは確認のうえで）実行します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
@@ -41,6 +44,11 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
                                           ──> Tor SOCKS 127.0.0.1:9050 ──> 検索エンジンと結果のページ
                                           ──> Docker（思考モードで承認したコードだけ。ネットワークなし、待受なし）
                                           ──> LOCAL_DOC_ROOTS のファイル（/docs。読み取りだけ、LangGraph が開く）
+
+別 PC の端末 ──> cirka（作業ディレクトリでファイル操作とコマンドを実行）
+                   │ POST /coder/turn（推論だけ。ツールは実行しない）、/runs/stream（検索・画像）
+                   ▼
+                 LangGraph http://<LAN IP>:2024 ──> LM Studio（ループバック）
 ```
 
 ## 動作環境
@@ -407,6 +415,19 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
   - 目安: 速いモードの会話は 27B のロード込みで約 3 分、思考モードのコード（短いスクリプト）は生成に約 12 分、文章は 1 回で 1000〜1500 字程度です。長い文章は「章立て」で分けてください。
 - Docker Desktop は普段は止めておけます。止まっていると、確認カードに「Docker Desktop: 停止中」と出て、承認後に起動し（30 秒〜数分）、実行が終わったら止めます。Docker の VM は約 1.5GB を使い、この端末では 27B（ロード中の空き 0.4GB）や ComfyUI と取り合うためです。
 
+#### 自律モード（道具を順に使う依頼）
+
+「調べてから要点を教えて」「最新の〇〇を調べて記事にして」「スクリプトを書いて、動くか試して直して」のように、ひとつの道具の結果を見て次の道具が決まる依頼（検索・文章・コードのうち 2 つ以上を含む、または「〜してから」「根拠を確認して」「結果をもとに」などの接続がある文）は、思考モードでは自律モードで処理します。「自動」でもこの形の依頼は思考を選びます。
+
+1. 27B が依頼とこれまでの結果の要約（各 500 字まで）を読み、次の道具（検索 / 文章 / コード / 画像）とその依頼文、または最終回答を JSON で返します。
+2. 道具は今までの検索・執筆・コードの流れそのものです（章の確認カードやコンテナ実行の承認カードもそのまま出ます）。終わると要約だけが制御に戻ります（検索のページ本文やカード全件、コードの出力全文は戻しません）。
+3. 道具の結果はそれぞれのメッセージとして残り、最後に自律モードの回答が付きます。文章を書いたあとは本文を繰り返さず、書いた旨だけを添えます。
+4. 上限: 道具は 3 回まで（`CONTROLLER_MAX_STEPS`、最大 4）、全体の時間は `SEARCH_WALL_CLOCK_S`（20 分）以内（`CONTROLLER_WALL_CLOCK_S`）。同じ道具を同じ依頼文で二度は呼びません。上限や重複で止まったときは、それまでの結果で答え、止まった理由を書きます。
+5. 画像は生成せず、画像タブへ案内して終わります。
+6. 回答の下の「自律の手順」を開くと、選んだ道具、その理由、依頼文、結果の要約が見られます。
+
+行頭の `/search` `/write` `/code` `/chat`、画像の添付、`/docs`、「速い」モードの送信は、今までどおり 1 つの道具で処理します（自律モードに入りません）。27B の判断 1 回は短い JSON（最大 400 トークン）ですが、この端末では 1〜5 分かかります。
+
 #### 深い検索（思考モード）
 
 1. 27B が「目的」（時期・地域・比較対象・その会話で示された条件、何が分かれば判断が変わるか）と下位問い 2〜5 個、最初の検索意図を作ります。
@@ -509,6 +530,68 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
   - フォルダは深さ 4、30 ファイルまで（浅いものから）。1 ファイルは先頭 1MiB まで（超えたら切り詰めたと回答に書きます）。
 - 画像の添付と `/docs` は同時に受けません（画像タブへ誘導します）。`/docs` の文に「検索」とあっても Web は検索しません。
 
+### CUI（cirka）
+
+`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
+
+#### ビルドと配布
+
+Rust 1.85 以上が要ります。Windows / macOS / Linux の各 OS で同じソースからビルドします。
+
+```powershell
+.\scripts\build-cirka.ps1            # cirka\target\release\cirka.exe を作り、dist\cirka-<版>-<OS>-<CPU>.zip にまとめる
+# または
+cd cirka; cargo build --release      # macOS / Linux も同じ
+```
+
+できた `cirka`（`cirka.exe`）を PATH の通った場所に置きます。単一の実行ファイルで、ほかに要るものはありません（grep もファイル検索も内蔵）。
+
+#### 接続先の設定
+
+既定の接続先は `http://127.0.0.1:2024`（ホストと同じ PC）です。別の PC から使うときは、ホストの LAN アドレスを設定します。
+
+```powershell
+cirka config set host http://192.168.1.20:2024   # ユーザー設定に保存（%APPDATA%\cirka\config.toml、macOS / Linux は ~/.config/cirka/config.toml）
+cirka config set host http://gpu-box:2024 --project   # このディレクトリだけ（.\.cirka\config.toml）
+cirka config show                                # 実際に使われる値と、読み込んだ場所
+cirka status                                     # ホストに届くか、モデルと文脈の大きさ
+```
+
+優先順位は「既定 < ユーザー設定 < プロジェクト設定 < 環境変数（`CIRKA_HOST` ほか） < コマンドライン（`--host`）」です。実行中は `/host http://… [--save]` で切り替えられます。そのほかのキー: `mode`（fast / think / auto）、`permission`（default / accept-edits / plan / bypass）、`shell`（auto / pwsh / powershell / cmd / bash / sh）、`max_turns`、`locale`、`auth_header`（`Name: value`。認証方式は未確定なので既定は空。ヘッダを付ける差し込み口だけです）、`idle_timeout_s` / `search_timeout_s` / `image_timeout_s`。
+
+#### 使い方
+
+```
+$ cd ~/src/some-project
+$ cirka                         # 対話（REPL）
+$ cirka -p "テストが落ちる原因を調べて直して" --permission accept-edits   # 1 回だけ実行して終わる
+$ cirka --resume                # このディレクトリの直前のセッションを再開
+```
+
+起動すると、カレントディレクトリをワークスペースの根にし、`CIRKA.md` / `AGENTS.md` / `CLAUDE.md` があれば規則として読みます。複数の手順が要る依頼では、モデルがまずタスク一覧（`todo_write`）を作り、探索 → 編集 → コマンドでの確認、の順に進めます。短い質問はタスク一覧を作らずに答えます。
+
+| ツール | 内容 | 既定の許可 |
+|---|---|---|
+| `list_dir` / `glob` / `grep` / `read_file` | 一覧、パターン検索、正規表現検索（.gitignore と `.cirkaignore` に従う）、行番号付きの読み取り | 自動 |
+| `edit_file` | 一意に一致する原文を置き換える（先に `read_file` したファイルだけ。CRLF を保つ） | 差分を見せて確認 |
+| `write_file` | 新規作成、または読んだファイルの置き換え | 差分を見せて確認 |
+| `bash` | シェルのコマンド（Windows は PowerShell、ほかは `sh -lc`）。既定 120 秒・最大 600 秒、出力 64 KiB まで、時間切れや Ctrl-C でプロセスツリーごと止める | 全文を見せて確認 |
+| `todo_write` / `ask_user` | タスク一覧、利用者への質問 | 自動 |
+| `web_search` | ホストのチャットタブの検索（Tor 経由、出典付き） | 自動 |
+| `image_generate` | ホストの画像タブ（参照画像 0〜4 枚と役割）。画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを返す | 自動 |
+
+確認では `y`（実行）/ `n`（拒否。理由はモデルに伝わる）/ `a`（以後この種類は確認しない）/ `q`（依頼を止める）を選びます。`/accept-edits` で編集は自動、`/plan` で変更とコマンドは提案だけ、`--permission bypass` で確認なし（シェルと同じ権限なので明示したときだけ）。どのモードでも、ワークスペースの外のパス（`..`、外を指すシンボリックリンク）と秘密ファイル（`.env`、`*.pem`、`*.key`、`id_rsa`、`credentials*` など）は扱いません。ツールの結果に鍵らしい文字列があれば `[redacted]` にしてから送ります（完全ではありません）。
+
+スラッシュコマンド: `/help`、`/status`、`/host`、`/mode`、`/plan`、`/accept-edits`、`/default`、`/cd`、`/undo`（直前の編集を戻す）、`/compact`（会話を要約して文脈を空ける）、`/search`、`/image`、`/todos`、`/resume`、`/forget`（いまのセッションのログを消す）、`/quit`。Ctrl-C は実行中のツールやモデルの応答を止め、待機中に 2 回押すと終了します。行末の `\` で複数行を入力できます。
+
+セッションは `%LOCALAPPDATA%\cirka\sessions`（macOS / Linux は `~/.local/share/cirka/sessions`）に JSON Lines で残ります（ツールの結果を含みます）。
+
+#### 注意
+
+- ホストの 27B は context 4096 トークン・約 0.9 トークン/秒です。cirka は毎ターン、規則・環境・タスク一覧・会話をこの窓に収めます（古いツール結果は 1 行の要約に、さらに溢れたら古いやり取りから省き、ホストが「入らない」と返したら詰めて 1 回だけ送り直す）。1 ターンに数分かかるので、依頼は小さく区切ってください。
+- ホストの処理は共有ロックで直列です。画像タブやチャットタブが動いているあいだ、cirka は「待っています」と表示して待ちます（エラーにしません）。
+- 認証はありません。読んだファイルの断片とコマンドの出力が LAN 上のホストへ送られます。信頼できるネットワークだけで使ってください。
+
 #### 検索で使うモデルと採否
 
 | モデル | 採否 | 役割 | 理由（この端末の実測） |
@@ -572,6 +655,10 @@ LM Studio 側の値を変えるときは、`.\scripts\setup-lmstudio.ps1 -GpuOff
 | `DOC_CHUNK_CHARS` / `DOC_CHUNK_OVERLAP` / `DOC_MAX_CHUNKS` | `3000` / `200` / `12` | 節の長さと重なり、読む節の上限（4 波 × 3） |
 | `DOC_TIMEOUT_S` | `600` | 最初の reader から最後の波までの時間の上限（読めた分で答える） |
 | `DOC_PLANNER` | `auto` | `auto`: 節が上限以下なら規則（ファイル順）、超えたら 27B / `lmstudio`: 常に 27B / `rules`: 常に規則 |
+| `CONTROLLER_MAX_STEPS` | `3` | 自律モードで道具を使う回数の上限（1〜4） |
+| `CONTROLLER_WALL_CLOCK_S` | 空（`SEARCH_WALL_CLOCK_S`） | 自律モード全体の時間の上限。`SEARCH_WALL_CLOCK_S` を超える値は `SEARCH_WALL_CLOCK_S` になる |
+
+cirka 向けの `POST /coder/turn` は、`LMSTUDIO_URL`、`LMSTUDIO_MODEL`、`LMSTUDIO_CONTEXT`、`LMSTUDIO_TOKENS_PER_S`、`CHAT_TIMEOUT_S` を使います（新しいキーはありません）。
 
 ## 6. メモリと LLM の量子化
 
@@ -598,6 +685,11 @@ src/furry_agent/claim_verify.py       主張の突き合わせ: EvidenceCard / C
 src/furry_agent/claim_nodes.py        主張の抽出 → 判定 → （統合）→ 監査 → 削除のノード
 src/furry_agent/doc_resolve.py, doc_chunk.py   /docs の許可ルート・拒否名・列挙（モデルなし）と、見出しでの分割
 src/furry_agent/doc_nodes.py          /docs のノード（解決 → 計画 → 読む（波） → カバー）
+src/furry_agent/control_nodes.py      自律モード（controller → 道具の流れ → controller_record → finish）。判断の JSON、予算、重複の禁止
+src/furry_agent/coder_gate.py         cirka 向けの POST /coder/turn（LM Studio の tool calling を SSE で返す。ツールは実行しない）。coder_app.py が langgraph.json の http.app
+prompts/chat/controller.txt           自律モードの判断の system prompt
+cirka/                                CUI（Rust）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs、context.rs、session.rs
+scripts/build-cirka.ps1               cirka のリリースビルドと zip（dist/）
 src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
 src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定
 src/furry_agent/bonsai_select.py      タスクごとのモデル選択（順位、検証結果、空きメモリ）
@@ -697,6 +789,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 - 応答モード: チャットタブの入力欄に「自動 / 速い / 思考」を置き、送信ごとに `config.configurable.mode`（`auto` / `fast` / `think`）として送ります（`mode-tabs.tsx` の `ChatModeSwitch`、配置は `thread/index.tsx`）。選択はブラウザの localStorage に覚えます。
 - 思考と手順: `additional_kwargs.thinking`（思考トークン、既定で閉じた折りたたみ）、`task_trace`（執筆とコードの手順）、`chat_mode`（選ばれたモードと自動の理由）を描画します（`search-trace.tsx`、`ai.tsx`）。思考は回答本文に混ぜません。
 - 主張の突き合わせとローカル文書: `additional_kwargs.claim_trace`（主張ごとの判定、出典番号、監査で削除した文）と `doc_trace`（対象ファイル、拒否したもの、波ごとに読んだ節）を折りたたみで描画します（`search-trace.tsx` の `ClaimTraceView` / `DocTraceView`、`ai.tsx`）。
+- 自律の手順: 自律モードのメッセージの `task_trace`（`kind: "control"`。選んだ道具、理由、依頼文、結果の要約、終了理由）を、執筆・コードの手順と同じ折りたたみで描画します（`search-trace.tsx` の `TaskTraceView`）。
 
 ## 8. ログ
 
@@ -711,6 +804,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 uv sync
 uv run pytest                                  # Python と PowerShell スクリプトのテスト（Docker 実機のテストは Docker 起動中だけ）
 uv run python scripts\build_workflows.py       # prompts\ を変えたら workflows\ を再生成
+cd cirka; cargo test                           # cirka（CUI）のテスト。ホストは立てない
 ```
 
 `.ps1` は UTF-8（BOM 付き）で保存してください。Windows PowerShell 5.1 は BOM の無いファイルを ANSI として読み、日本語を含む行で構文エラーになります（テストで確認しています）。
