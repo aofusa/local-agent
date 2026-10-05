@@ -46,6 +46,14 @@ def _runner(config: RunnableConfig | None):
     return _conf(config).get("sandbox_runner")
 
 
+def _desktop(config: RunnableConfig | None) -> tuple:
+    """(Docker Desktop's executable or None, its launcher). A fake runner stands for a fake machine: its tests say
+    whether Docker Desktop is installed (``docker_desktop_exe``) instead of this machine's Program Files."""
+    conf = _conf(config)
+    exe = conf.get("docker_desktop_exe") if "sandbox_runner" in conf else sandbox.desktop_exe()
+    return exe, conf.get("docker_desktop_launcher")
+
+
 def _rel(path: Path) -> str:
     try:
         return Path(path).relative_to(REPO_ROOT).as_posix()  # no resolve(): it blocks the event loop
@@ -159,10 +167,13 @@ async def write_files(state: ChatState, config: RunnableConfig) -> dict:
     if not _is_think(state):
         text = _answer(code, "コードを書きました。速いモードでは実行しません（「思考」で送ると、承認のあと Docker コンテナで実行します）。")
         return {"code": code, "messages": [_final(state, text, task=_task(code))]}
-    ok, reason = await sandbox.docker_status(settings.docker_exe, _runner(config))
+    engine, reason = await sandbox.engine_state(settings.docker_exe, _runner(config))
+    ok = engine == sandbox.READY
     code["start_desktop"] = False
-    if not ok and await sandbox.desktop_cli(settings.docker_exe, _runner(config)):
-        # Installed but stopped: started after the approval, only for the run (sandbox_exec).
+    # The docker CLI is used with whatever engine it reaches. Only a CLI that reaches none makes Docker Desktop
+    # start, after the approval and only for the run (sandbox_exec); without a docker command nothing starts.
+    if engine == sandbox.STOPPED and await sandbox.can_start_desktop(settings.docker_exe, _runner(config),
+                                                                        _desktop(config)[0]):
         ok, code["start_desktop"] = True, True
     elif ok and not await sandbox.image_present(code["image"], settings.docker_exe, _runner(config)):
         ok, reason = False, (f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1"
@@ -291,7 +302,8 @@ async def sandbox_exec(state: ChatState, config: RunnableConfig) -> dict:
             # Docker Desktop was stopped (its VM holds ~1.5 GB the 27B and ComfyUI need on this machine): start it
             # for this approved run only and stop it again afterwards.
             started = True
-            ok, reason = await sandbox.start_desktop(settings.docker_exe, runner)
+            exe, launcher = _desktop(config)
+            ok, reason = await sandbox.start_desktop(settings.docker_exe, runner, exe=exe, launcher=launcher)
             if ok and not await sandbox.image_present(code["image"], settings.docker_exe, runner):
                 ok, reason = False, f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1 で取得してください）"
             if not ok:

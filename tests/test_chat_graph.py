@@ -241,12 +241,15 @@ class FakeComfy:
 class FakeDocker:
     """sandbox's runner: records every docker CLI call."""
 
-    def __init__(self, world, *, up=True, image=True, exits=None, timeout=False, desktop=False):
+    def __init__(self, world, *, up=True, image=True, exits=None, timeout=False, desktop=False, missing=False):
         self.world, self.up, self.image, self.exits, self.timeout = world, up, image, list(exits or [0]), timeout
         self.desktop = desktop
+        self.missing = missing  # no docker command on PATH
 
     def __call__(self, argv, timeout_s):
         self.world.docker.append(list(argv))
+        if self.missing:
+            raise FileNotFoundError(argv[0])
         verb = argv[1]
         if verb == "desktop":
             if argv[2] == "start":
@@ -299,7 +302,8 @@ class World:
         self.controller_replies: list = []
 
 
-def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=None, thread="t"):
+def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=None, thread="t", desktop_exe=None,
+            launcher=None):
     lm = llm or FakeLlamaRouter(world)
     world.lm = lm
 
@@ -316,6 +320,10 @@ def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=
         conf["mode"] = mode
     if task:
         conf["task"] = task
+    if desktop_exe:
+        conf["docker_desktop_exe"] = desktop_exe
+    if launcher:
+        conf["docker_desktop_launcher"] = launcher
     return {"configurable": conf}
 
 
@@ -785,14 +793,60 @@ async def test_timeout_kills_the_container(models_dir):
     assert any(argv[1] == "kill" for argv in world.docker)
 
 
-async def test_docker_missing_writes_files_and_says_why(models_dir):
+async def test_unreachable_engine_without_docker_desktop_writes_files_and_says_why(models_dir):
     world = World()
     settings = _settings(models_dir)
     state, message = await _run("コードを書いて実行して", world, settings, mode="think",
                                 docker=FakeDocker(world, up=False))
-    assert _runs(world) == [] and "Docker Desktop が起動していません" in message.content
+    assert _runs(world) == [] and "エンジンに接続できません" in message.content
     assert (settings.code_dir / state["code"]["run_id"] / "main.py").is_file()
     assert _interrupt(state) is None
+
+
+async def test_no_docker_command_starts_nothing(models_dir, tmp_path):
+    """Docker Desktop installed but no docker command: nothing is started, the files are still written."""
+    world = World()
+    settings = _settings(models_dir)
+    launched = []
+    state, message = await _run("コードを書いて実行して", world, settings, mode="think",
+                                docker=FakeDocker(world, missing=True), desktop_exe=tmp_path / "Docker Desktop.exe",
+                                launcher=launched.append)
+    assert "docker コマンドがありません" in message.content and _interrupt(state) is None
+    assert launched == [] and not any(a[1:2] == ["desktop"] for a in world.docker)
+    assert (settings.code_dir / state["code"]["run_id"] / "main.py").is_file()
+
+
+async def test_running_engine_is_used_as_it_is(models_dir):
+    """A docker CLI that reaches an engine (Desktop or not) is used directly: Docker Desktop is never touched."""
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="c8", docker=FakeDocker(world, desktop=True))
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    assert "Docker Desktop" not in _interrupt(state)["action_requests"][0]["description"]
+    state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+    assert state["code"]["last_exit"] == 0 and len(_runs(world)) == 1
+    assert not any(a[1:2] == ["desktop"] for a in world.docker)
+
+
+async def test_docker_desktop_exe_starts_the_engine_when_the_cli_plugin_is_missing(models_dir, tmp_path):
+    world = World()
+    graph = _hitl_graph()
+    docker = FakeDocker(world, up=False, desktop=False)
+    launched = []
+
+    def launch(exe):
+        launched.append(exe)
+        docker.up = True
+
+    exe = tmp_path / "Docker Desktop.exe"
+    config = _config(world, _settings(models_dir), mode="think", thread="c9", docker=docker, desktop_exe=exe,
+                     launcher=launch)
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    assert "Docker Desktop: 停止中" in _interrupt(state)["action_requests"][0]["description"]
+    assert launched == []  # nothing started before approval
+    state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+    assert launched == [exe] and state["code"]["last_exit"] == 0
+    assert not any(a[1:3] == ["desktop", "stop"] for a in world.docker)  # no CLI plugin: left running
 
 
 async def test_stopped_docker_desktop_is_started_only_for_the_approved_run(models_dir):
@@ -804,7 +858,7 @@ async def test_stopped_docker_desktop_is_started_only_for_the_approved_run(model
     assert "Docker Desktop: 停止中" in _interrupt(state)["action_requests"][0]["description"]
     assert not any(a[1:3] == ["desktop", "start"] for a in world.docker)  # nothing started before approval
     state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
-    verbs = [" ".join(a[1:3]) for a in world.docker if a[1] in ("desktop", "run")]
+    verbs = [" ".join(a[1:3]) for a in world.docker if a[1] in ("desktop", "run") and a[2:3] != ["version"]]
     assert verbs[-3:] == ["desktop start", "run --rm", "desktop stop"]
     assert state["code"]["last_exit"] == 0
 

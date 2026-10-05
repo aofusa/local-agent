@@ -136,13 +136,61 @@ async def test_docker_status_without_docker():
         raise FileNotFoundError("docker")
 
     ok, reason = await sandbox.docker_status("docker", missing)
-    assert not ok and "インストール" in reason
+    assert not ok and "docker コマンドがありません" in reason
+    assert (await sandbox.engine_state("docker", missing))[0] == sandbox.MISSING
 
     def stopped(argv, timeout_s):
         return subprocess.CompletedProcess(argv, 1, b"", b"error during connect")
 
     ok, reason = await sandbox.docker_status("docker", stopped)
-    assert not ok and "起動していません" in reason
+    assert not ok and "エンジンに接続できません" in reason
+    assert (await sandbox.engine_state("docker", stopped))[0] == sandbox.STOPPED
+
+    def windows_engine(argv, timeout_s):
+        return subprocess.CompletedProcess(argv, 0, b"windows", b"")
+
+    assert (await sandbox.engine_state("docker", windows_engine))[0] == sandbox.WRONG_OS
+
+
+async def test_docker_desktop_start_prefers_the_cli_plugin(tmp_path):
+    calls, launched = [], []
+    state = {"up": False}
+
+    def runner(argv, timeout_s):
+        calls.append(argv[1:3])
+        if argv[1:3] == ["desktop", "version"]:
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        if argv[1:3] == ["desktop", "start"]:
+            state["up"] = True
+        if argv[1] == "version":
+            return subprocess.CompletedProcess(argv, 0 if state["up"] else 1, b"linux", b"")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    exe = tmp_path / "Docker Desktop.exe"
+    assert await sandbox.can_start_desktop("docker", runner, exe)
+    ok, _ = await sandbox.start_desktop("docker", runner, 10, exe=exe, launcher=launched.append)
+    assert ok and ["desktop", "start"] in calls and launched == []
+
+
+async def test_docker_desktop_start_falls_back_to_the_executable(tmp_path):
+    launched = []
+    state = {"up": False}
+
+    def runner(argv, timeout_s):
+        if argv[1] == "desktop":
+            return subprocess.CompletedProcess(argv, 1, b"", b"unknown command")
+        return subprocess.CompletedProcess(argv, 0 if state["up"] else 1, b"linux", b"")
+
+    def launch(exe):
+        launched.append(exe)
+        state["up"] = True
+
+    exe = tmp_path / "Docker Desktop.exe"
+    assert not await sandbox.can_start_desktop("docker", runner, None)
+    ok, _ = await sandbox.start_desktop("docker", runner, 10, exe=exe, launcher=launch)
+    assert ok and launched == [exe]
+    ok, reason = await sandbox.start_desktop("docker", runner, 10, exe=None)
+    assert not ok and "手段がありません" in reason
 
 
 def _docker_ready() -> bool:
