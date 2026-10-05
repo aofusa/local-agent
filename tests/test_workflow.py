@@ -32,8 +32,12 @@ def _assert_links_resolve(prompt):
 def test_fixed_ids_and_contract(workflow):
     assert set(FIXED_NODE_IDS) <= set(workflow)
     backend = workflow["llm_backend"]["inputs"]
-    assert backend["base_url"] == "http://127.0.0.1:1234/v1"
-    assert backend["auto_eject_after_run"] is True
+    assert backend["base_url"] == "http://127.0.0.1:8080/v1"
+    # LM Connect's auto-eject speaks LM Studio's API; the eject node unloads the router's model instead.
+    assert backend["auto_eject_after_run"] is False
+    assert workflow["eject"]["class_type"] == "FurryJaEjectLLM"
+    assert workflow["eject"]["inputs"]["base_url"] == backend["base_url"]
+    assert workflow["ckpt"]["inputs"]["llm_base_url"] == backend["base_url"]
     assert backend["disable_thinking"] is True
     sampler = workflow["sampler"]["inputs"]
     assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]) == (28, 5.5, "euler_ancestral", "normal")
@@ -108,7 +112,7 @@ def test_build_workflows_env_override(tmp_path, monkeypatch):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("build_workflows", ROOT / "scripts" / "build_workflows.py")
-    monkeypatch.setenv("LMSTUDIO_MODEL", "some-model@q4_k_m")
+    monkeypatch.setenv("LLM_MODEL", "some-model@q4_k_m")
     monkeypatch.setenv("CKPT_NAME", "other.safetensors")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

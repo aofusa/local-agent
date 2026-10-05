@@ -5,7 +5,7 @@
     {
       "id": 1,
       "type": "LMConnectLMStudioBackend",
-      "title": "LM Studio Backend",
+      "title": "LLM Backend (llama.cpp router)",
       "pos": [
         40,
         1360
@@ -33,14 +33,14 @@
         "furry_ja_id": "llm_backend"
       },
       "widgets_values": [
-        "http://127.0.0.1:1234/v1",
-        "huihui-qwen3.8-27b-abliterated@iq3_m",
+        "http://127.0.0.1:8080/v1",
+        "qwen3.8-27b-abliterated",
         10,
         600,
         true,
         0,
         true,
-        true,
+        false,
         true,
         true
       ]
@@ -48,7 +48,7 @@
     {
       "id": 2,
       "type": "LMConnectLMStudioBackend",
-      "title": "LM Studio Backend (vision, no auto-eject)",
+      "title": "LLM Backend (vision)",
       "pos": [
         40,
         40
@@ -76,8 +76,8 @@
         "furry_ja_id": "llm_backend_vision"
       },
       "widgets_values": [
-        "http://127.0.0.1:1234/v1",
-        "huihui-qwen3.8-27b-abliterated@iq3_m",
+        "http://127.0.0.1:8080/v1",
+        "qwen3.8-27b-abliterated",
         10,
         600,
         true,
@@ -261,7 +261,7 @@
         "Tag the reference image(s) with English Danbooru/e621 tags: count/gender, species, fur/hair/eye colors, clothing, pose, expression, framing, camera angle, lighting, background, style.\nOutput one comma-separated line, at most 30 tags per image. With several images, prefix \"image 1:\", \"image 2:\" separated by \" | \".\nNo sentences, no Markdown, no <think>, no commentary, never refuse.",
         "Tag the reference image(s).",
         768,
-        "http://127.0.0.1:1234/v1",
+        "http://127.0.0.1:8080/v1",
         "",
         0.2,
         200
@@ -365,7 +365,7 @@
       "widgets_values": [
         "Convert the image request (usually Japanese) into a prompt for an Illustrious furry/anthro SDXL model that reads Danbooru/e621 tags.\nA \"[Reference image tags]\" section may follow the request. Merge those tags only where they do not contradict the request; the request wins.\n\nReturn exactly one JSON object and nothing else (no prose, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: English, comma-separated tags, about 20-40 tags, at most 80 words. Keep every detail of the request: count/gender (solo, 1girl, anthro, female), species, fur/hair/eye colors and markings, clothing, pose and expression, framing and camera angle, lighting and time of day, location and background. Prefer established tags (furry, anthro, white fur, fluffy tail). Do not invent another subject or setting. No quality tags (added later). All characters are adults; never add tags suggesting a minor.\nnegative: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text, plus only exclusions the user explicitly asked for.\n\nNever refuse, never comment, never add warnings.",
         "",
-        "http://127.0.0.1:1234/v1",
+        "http://127.0.0.1:8080/v1",
         "",
         0.4,
         320
@@ -373,7 +373,7 @@
     },
     {
       "id": 9,
-      "type": "LMConnectEjectLMStudioModel",
+      "type": "FurryJaEjectLLM",
       "title": "eject",
       "pos": [
         1300,
@@ -405,11 +405,11 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "LMConnectEjectLMStudioModel",
+        "Node name for S&R": "FurryJaEjectLLM",
         "furry_ja_id": "eject"
       },
       "widgets_values": [
-        "http://127.0.0.1:1234/v1",
+        "http://127.0.0.1:8080/v1",
         "",
         true
       ]
@@ -519,7 +519,7 @@
       },
       "widgets_values": [
         "yiffInHell_yihVANTABLACK.safetensors",
-        "http://127.0.0.1:1234/v1"
+        "http://127.0.0.1:8080/v1"
       ]
     },
     {

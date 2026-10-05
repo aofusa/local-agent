@@ -3,7 +3,7 @@ import logging
 import folder_paths
 import nodes as comfy_nodes
 
-from .lmstudio_state import ensure_unloaded
+from .llm_state import ensure_unloaded
 from .model_files import fp8_sibling
 from .tag_split import DEFAULT_NEGATIVE, QUALITY_PREFIX, split_tags
 
@@ -42,11 +42,40 @@ class FurryJaSplitTags:
         }
 
 
+class FurryJaEjectLLM:
+    """`eject`: unload the LLM from the llama.cpp router once the prompt node has returned, and verify it is gone.
+
+    ``passthrough`` is the LLM's reply; returning it only after the unload keeps everything downstream (split, ckpt)
+    behind the eject. The router stops the model's child process, so its memory is free for the checkpoint.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {"passthrough": ("*",)},
+            "optional": {
+                "base_url": ("STRING", {"default": "http://127.0.0.1:8080/v1"}),
+                "model": ("STRING", {"default": ""}),
+                "debug_logging": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("*",)
+    FUNCTION = "passthrough_eject"
+    CATEGORY = "furry_ja"
+
+    def passthrough_eject(self, passthrough, base_url="http://127.0.0.1:8080/v1", model="", debug_logging=False):
+        report = ensure_unloaded(base_url)
+        log.info("[furry_ja] eject: LLM router unloaded %s (verified=%s)", report["forced_unload"],
+                 report["verified_unloaded"])
+        return (passthrough,)
+
+
 class FurryJaCheckpointLoaderAfterEject(comfy_nodes.CheckpointLoaderSimple):
     """`ckpt`: CheckpointLoaderSimple that waits for the eject output.
 
     The `after` link makes ComfyUI run this only after the LLM has returned and
-    been ejected. Before loading, it verifies through LM Studio's API that no
+    been ejected. Before loading, it verifies through the LLM router's API that no
     LLM is resident (and unloads one if the eject was skipped).
     """
 
@@ -56,23 +85,23 @@ class FurryJaCheckpointLoaderAfterEject(comfy_nodes.CheckpointLoaderSimple):
             "required": {
                 "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
                 "after": ("*",),
-                "lmstudio_base_url": ("STRING", {"default": "http://127.0.0.1:1234/v1"}),
+                "llm_base_url": ("STRING", {"default": "http://127.0.0.1:8080/v1"}),
             }
         }
 
     FUNCTION = "load_after_eject"
     CATEGORY = "furry_ja"
 
-    def load_after_eject(self, ckpt_name, after, lmstudio_base_url="http://127.0.0.1:1234/v1"):
-        report = ensure_unloaded(lmstudio_base_url)
+    def load_after_eject(self, ckpt_name, after, llm_base_url="http://127.0.0.1:8080/v1"):
+        report = ensure_unloaded(llm_base_url)
         log.info(
-            "[furry_ja] LM Studio verified unloaded before checkpoint/KSampler: forced_unload=%s",
+            "[furry_ja] LLM router verified unloaded before checkpoint/KSampler: forced_unload=%s",
             report["forced_unload"],
         )
         model, clip, vae = self.load_checkpoint(ckpt_name)
         return {
             "ui": {
-                "lmstudio_unloaded": [True],
+                "llm_unloaded": [True],
                 "forced_unload": list(report["forced_unload"]),
                 "ckpt_name": [ckpt_name],
             },
@@ -90,7 +119,7 @@ def _diffusion_model_names():
 class FurryJaDiffusionLoaderAfterEject:
     """`ckpt` for the Chroma1-HD family: diffusion model + text encoder + VAE, loaded after the LLM eject.
 
-    Same gate as FurryJaCheckpointLoaderAfterEject (MODEL, CLIP, VAE outputs, `after` link, LM Studio check),
+    Same gate as FurryJaCheckpointLoaderAfterEject (MODEL, CLIP, VAE outputs, `after` link, the LLM router check),
     so the node ids, the LoRA insertion and the unload verification stay the same as the SDXL templates.
     The parts are the ones UNETLoader, CLIPLoader and VAELoader would load.
     """
@@ -105,7 +134,7 @@ class FurryJaDiffusionLoaderAfterEject:
                 "clip_type": ("STRING", {"default": "chroma"}),
                 "vae_name": (folder_paths.get_filename_list("vae"),),
                 "after": ("*",),
-                "lmstudio_base_url": ("STRING", {"default": "http://127.0.0.1:1234/v1"}),
+                "llm_base_url": ("STRING", {"default": "http://127.0.0.1:8080/v1"}),
             }
         }
 
@@ -114,13 +143,13 @@ class FurryJaDiffusionLoaderAfterEject:
     CATEGORY = "furry_ja"
 
     def load_after_eject(self, unet_name, weight_dtype, clip_name, clip_type, vae_name, after,
-                         lmstudio_base_url="http://127.0.0.1:1234/v1"):
+                         llm_base_url="http://127.0.0.1:8080/v1"):
         import comfy.sd
         import torch
 
-        report = ensure_unloaded(lmstudio_base_url)
+        report = ensure_unloaded(llm_base_url)
         log.info(
-            "[furry_ja] LM Studio verified unloaded before diffusion model/KSampler: forced_unload=%s",
+            "[furry_ja] LLM router verified unloaded before diffusion model/KSampler: forced_unload=%s",
             report["forced_unload"],
         )
         path = (folder_paths.get_full_path("diffusion_models", unet_name)
@@ -147,7 +176,7 @@ class FurryJaDiffusionLoaderAfterEject:
         log.info("[furry_ja] loaded %s (%s) + %s (%s) + %s", unet_name, weight_dtype, clip_name, clip_type, vae_name)
         return {
             "ui": {
-                "lmstudio_unloaded": [True],
+                "llm_unloaded": [True],
                 "forced_unload": list(report["forced_unload"]),
                 "ckpt_name": [unet_name],
             },
@@ -202,6 +231,7 @@ class FurryJaReleaseEncoders:
 
 NODE_CLASS_MAPPINGS = {
     "FurryJaSplitTags": FurryJaSplitTags,
+    "FurryJaEjectLLM": FurryJaEjectLLM,
     "FurryJaCheckpointLoaderAfterEject": FurryJaCheckpointLoaderAfterEject,
     "FurryJaDiffusionLoaderAfterEject": FurryJaDiffusionLoaderAfterEject,
     "FurryJaImageAfter": FurryJaImageAfter,
@@ -210,6 +240,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FurryJaSplitTags": "furry_ja: Split Tags JSON",
+    "FurryJaEjectLLM": "furry_ja: Eject LLM (llama.cpp router)",
     "FurryJaCheckpointLoaderAfterEject": "furry_ja: Load Checkpoint (after LLM eject)",
     "FurryJaDiffusionLoaderAfterEject": "furry_ja: Load Diffusion Model + T5 + VAE (after LLM eject)",
     "FurryJaImageAfter": "furry_ja: Image (after)",

@@ -58,7 +58,7 @@ def test_whitespace_and_empty_tags_normalized():
 
 def test_lm_connect_error_is_raised():
     with pytest.raises(LLMCallError):
-        split_tags("[LM Connect Error] LM Studio'ya bağlanılamadı")
+        split_tags("[LM Connect Error] the LLM router'ya bağlanılamadı")
 
 
 def test_none_input_falls_back():
