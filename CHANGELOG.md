@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.11.0 — LM Studio をやめて llama.cpp のルータへ、ComfyUI と llama.cpp の自前導入、README の整理
+
+- LLM サーバを LM Studio から llama.cpp の llama-server（ルータモード、`--models-preset`、`127.0.0.1:8080`）に替えた（`docs/llamacpp-router-design.md`）。ComfyUI のタグ生成、チャットタブ、cirka の `/coder/turn` が同じ 27B を使う。モデルは最初の要求で子プロセスに載り、`POST /models/unload` で外れる（アイドル 300 秒で sleep してメモリを返す）。検索モデルと同じ PrismML fork の Vulkan 版を使い、build を 1 つにまとめた。
+  - ComfyUI: `eject` ノードを `FurryJaEjectLLM`（ルータの unload と `GET /models` での確認）に替えた。`ckpt` のゲートも同じ確認をする（入力名 `llm_base_url`）。LM Connect のバックエンドは OpenAI 互換クライアントとして使い、LM Studio 専用の auto-eject は切った。ノード ID、JSON 契約、unload 順は変えていない。テンプレートを再生成した。
+  - LangGraph: `LMStudio` クライアントを `LlamaRouter` にし、unload は外れるまで待つ。思考は `chat_template_kwargs` で切り替える（LM Studio 用の `reasoning_effort` と「Model is unloaded」の再送をやめた）。設定は `LLM_URL` / `LLM_MODEL` / `LLM_CONTEXT`（`LMSTUDIO_*` は読まない）。`SEARCH_PLANNER=lmstudio` は `llm` と同じ。`/coder/health` は `llm`（と互換の `lmstudio`）を返す。
+  - この端末の 27B（IQ3_M）は約 2.0 トークン/秒（LM Studio では 0.9〜1.5）。共有メモリの iGPU では `load-mode = mmap` が要る（無いと `ErrorOutOfDeviceMemory`）。LM Studio の既定と同じ `repeat-penalty = 1.1` をプリセットに入れた（無いとタグの JSON が閉じず、`split` が生文字列に落ちた）。
+- セットアップが llama.cpp と ComfyUI を `tools/` に自前で導入する。
+  - `setup-llm.ps1`（`setup-lmstudio.ps1` を置き換え）: `config/llm_model.json` に固定した GGUF と mmproj を Hugging Face から取得して SHA-256 を照合し（`-SourceModel` で手元のファイルを使う）、IQ3_M に再量子化し、GGUF のヘッダ（`scripts/gguf_info.py`）から GPU に置く層を決めてルータのプリセットを書く。`start-llm.ps1` がルータを起動する（`start-all.ps1` も起動する）。
+  - `setup-comfyui.ps1`: ComfyUI を検証済みのコミット（v0.38.0-32）で `tools/comfyui` に入れ、専用の Python 3.12 venv と GPU に合う PyTorch（Radeon は AMD の ROCm 7.2、NVIDIA は CUDA 12.8、ほかは CPU）を入れる。`-ModelsDir` で既存のモデルフォルダをそのまま読む（`extra_model_paths.yaml`）。参照画像と Chroma のセットアップは、どこかに同じモデルがあれば取得しない。Comfy Desktop の検出と起動引数の書き換えはやめた。`start-comfyui.ps1` は UTF-8 で ComfyUI を動かす。
+  - `doctor.ps1` はルータ（待受、プリセット、画像入力、ワークフローの接続先）を確認する。
+- チャットタブのコード実行の Docker: `docker` がエンジンにつながればそれを使う（Docker Desktop に触れない）。つながらないときだけ承認後に Docker Desktop を起動する（`docker desktop start`、無ければ `Docker Desktop.exe`）。`docker` コマンドが無ければ何も起動しない。`setup-sandbox.ps1` も同じ。
+- cirka 0.3.1: ホストの `llm` を読む（古いホストの `lmstudio` も読む）。表示を llama.cpp に合わせた。
+- README を QuickStart（概要、動作環境、インストール、実行、ドキュメントの一覧、ライセンス）だけにし、詳細を `docs/setup.md`、`docs/usage.md`、`docs/configuration.md`、`docs/architecture.md`、`docs/troubleshooting.md`、`docs/third-party-licenses.md` に分けた。`docs/lmstudio-comfyui-workflow-design.md` は `docs/llm-comfyui-workflow-design.md` に改名し、ルータに合わせて改訂した。AGENTS.md も合わせた。
+- デグレ確認（2026-10-06、ROG Ally X、新しい `tools/comfyui` と llama.cpp ルータ、LangGraph の API 経由）:
+  - SDXL テキストのみ: `split mode=json`、eject の確認 → チェックポイント → KSampler の順、`outputs/` と ComfyUI の output に保存（約 4.5 分）。
+  - SDXL 元画像 1 枚（img2img、denoise 0.45）: Vision のタグ化、構図を保ったまま背景を変更。
+  - Chroma1-HD（`COMFY_MODEL_FAMILY=flux`）: 英語の説明文、eject の後に拡散モデル・T5・VAE を読み込み、生成（確認のため `CHROMA_MAX_PIXELS` を 512×512 相当に下げた）。
+  - Tor 検索（速いモード）: 計画をルータの 27B が作り、reader の前に unload、代理リーダーの統合と主張 8 件の突き合わせ、後始末で 27B と検索用 llama-server が残らない。
+  - cirka 0.3.1: `cirka status` が `llm: true`。auto モードで読み取り → 編集 → コマンド実行まで完了。
+  - pytest 577 件、cirka の `cargo test` 67 件と `cargo clippy` が通る。
+
 ## v0.10.0 — 定数だった上限を `.env` で変えられるようにした
 
 - 検索（`SEARCH_MAX_INTENTS`、`SEARCH_INTENT_TIMEOUT_S`、`SEARCH_MAX_REDIRECTS`、`SEARCH_PAGE_TEXT_CHARS`、`TOR_BOOTSTRAP_TIMEOUT_S`）、reader（`BONSAI_MAX_TOOL_ROUNDS`、`BONSAI_PAGE_TIMEOUT_S`、`BONSAI_PAGE_CHARS`、`BONSAI_PAGE_KEEP_CHARS`、`BONSAI_LEADER_CTX`）、各段の `max_tokens`（`CHAT_*`、`SEARCH_*_TOKENS`、`CLAIM_*_TOKENS`、`WRITE_*`、`CODE_*`、`CONTROLLER_DECISION_TOKENS`、`CODER_*`）、長さと件数（`CLAIM_AUDIT_MAX`、`CHAT_HISTORY_CHARS`、`CHAT_THINK_RESERVE`、`WRITE_MAX_EDITS` など）、コード実行の出力とファイル（`SANDBOX_TAIL_BYTES`、`SANDBOX_MAX_FILES`、`SANDBOX_MAX_FILE_BYTES`、`SANDBOX_DESKTOP_START_S`）、ロック（`JOB_LOCK_LEASE_S`、`JOB_LOCK_RENEW_S`）、添付画像（`IMAGE_MAX_MB`、`IMAGE_MAX_SIDE`）。既定値は変えていない。
