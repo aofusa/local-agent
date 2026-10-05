@@ -512,7 +512,7 @@ def next_round(search: dict) -> tuple[bool, str]:
         return False, "diminishing"
     if (search.get("round", 0) >= search.get("max_rounds", 1)
             or search.get("pages_read", 0) >= search.get("max_pages", 12)
-            or search.get("wall_clock_s", 0) >= search.get("max_wall_clock_s", 1200)):
+            or 0 < search.get("max_wall_clock_s", 0) <= search.get("wall_clock_s", 0)):
         return False, "budget"
     if not search.get("next_intents"):
         return False, "diminishing"

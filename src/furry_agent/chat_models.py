@@ -24,7 +24,6 @@ from furry_agent.tor_service import ensure_tor
 LEADER_LABEL = "Qwen3.8 27B abliterated（LM Studio）"
 PROXY_LABEL = "Ternary-Bonsai-2-27B abliterated（代理、llama.cpp）"
 PORT_ROUTE, PORT_FILTER, PORT_LEADER = 7, 8, 9  # offsets from BONSAI_BASE_PORT; readers use 0..2
-LARGE_BOOT_S = 300.0
 LEADER_CTX = 8192  # the proxy leader's llama-server context (_server: large models get at least 8192)
 
 
@@ -73,8 +72,8 @@ async def _run_model(config, settings: ChatSettings, task: str, port: int,
                                  reserve_mb=settings.reserve_mb, exclude=tuple(failed))
         server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + port))
         try:
-            await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
-            return await fn(server.client(max_tokens_timeout or settings.worker_timeout_s), selection), selection
+            await server.start(settings.idle_timeout_s)
+            return await fn(server.client(max_tokens_timeout or settings.idle_timeout_s), selection), selection
         except WorkerError as exc:
             failed.append(selection.model.id)
             errors.append(str(exc))
@@ -89,7 +88,7 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
     synthesis, killed by _cleanup."""
     if token in _leaders and _leaders[token][0].alive:
         server, selection = _leaders[token]
-        return server.client(settings.chat_timeout_s), selection.model.label
+        return server.client(settings.idle_timeout_s), selection.model.label
     catalog, rank, available = await asyncio.to_thread(_catalog, settings)
     failed: list[str] = []
     errors = []
@@ -98,7 +97,7 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
                                  reserve_mb=settings.reserve_mb, exclude=tuple(failed))
         server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + PORT_LEADER))
         try:
-            await server.start(LARGE_BOOT_S)
+            await server.start(settings.idle_timeout_s)
         except WorkerError as exc:
             await server.stop()
             failed.append(selection.model.id)
@@ -106,7 +105,7 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
             continue
         _leaders[token] = (server, selection)
         log.info("proxy leader %s on port %s (boot %.1fs)", selection.model.id, server.port, server.boot_s)
-        return server.client(settings.chat_timeout_s), selection.model.label
+        return server.client(settings.idle_timeout_s), selection.model.label
     raise WorkerError("代理リーダーを起動できません（次点も失敗）: " + " / ".join(errors))
 
 

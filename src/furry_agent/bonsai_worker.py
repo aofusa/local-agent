@@ -128,10 +128,13 @@ class LlamaServer:
             cmd += ["--log-file", str(Path(self.logs_dir) / f"llama-server-{self.port}.log")]
         return cmd
 
-    def client(self, timeout_s: float = 120.0) -> OpenAICompatClient:
+    def client(self, timeout_s: float = 1200.0) -> OpenAICompatClient:
         return OpenAICompatClient(self.base_url, timeout_s=timeout_s, api_key=self.api_key)
 
-    async def start(self, timeout_s: float = 120.0) -> float:
+    async def start(self, timeout_s: float = 1200.0) -> float:
+        """Start the server and wait until /health says ready. ``timeout_s`` is an idle timeout: while the process
+        lives and answers /health (503 while the model loads), it is waited for; only ``timeout_s`` seconds without
+        any answer fail the start."""
         # File and socket checks run in a thread: langgraph dev fails runs that block the event loop.
         if not self.exe or not await asyncio.to_thread(Path(self.exe).is_file):
             raise WorkerError("PrismML 版 llama-server がありません（scripts\\setup-llamacpp.ps1 を実行してください）")
@@ -148,18 +151,21 @@ class LlamaServer:
             stderr=subprocess.DEVNULL, creationflags=flags)
         _live[self.process.pid] = self
         log.info("llama-server start pid=%s port=%s model=%s ngl=%s", self.process.pid, self.port, self.label, self.ngl)
+        last_answer = started
         try:
             async with httpx.AsyncClient(timeout=3.0, trust_env=False) as http:
                 while True:
                     if not self.alive:
                         raise WorkerError(f"{self.label} の llama-server が起動直後に終了しました（logs\\llama-server-{self.port}.log）")
                     try:
-                        if (await http.get(f"http://{HOST}:{self.port}/health")).status_code == 200:
+                        response = await http.get(f"http://{HOST}:{self.port}/health")
+                        last_answer = time.monotonic()  # 503 while loading is an answer too
+                        if response.status_code == 200:
                             break
                     except httpx.HTTPError:
                         pass
-                    if time.monotonic() - started > timeout_s:
-                        raise WorkerError(f"{self.label} の起動が {timeout_s:.0f} 秒以内に終わりませんでした")
+                    if time.monotonic() - last_answer > timeout_s:
+                        raise WorkerError(f"{self.label} の llama-server が {timeout_s:.0f} 秒間応答しませんでした")
                     await asyncio.sleep(0.5)
         except BaseException:
             await asyncio.shield(self.stop())
@@ -272,11 +278,12 @@ async def run_reader(intent: dict, hits: list[dict], client: OpenAICompatClient,
     """One Grok-style reader for one search intent.
 
     ``ask_cards(client, messages)`` returns validated fact cards (schema check and one retry, see
-    search_agent.ask_json). Opening pages stops after ``browse_budget_s`` so the card extraction always runs.
+    search_agent.ask_json). Opening pages stops after ``browse_budget_s`` (0 = no budget; the model calls have the
+    client's idle timeout) so the card extraction always runs.
     Pages are cut to the lines relevant to the question (search_agent.focus_text) before the model sees them.
     Returns {"pages": [...], "cards": [...], "tool_call": bool, "opened": [...]}.
     """
-    deadline = time.monotonic() + browse_budget_s
+    deadline = time.monotonic() + browse_budget_s if browse_budget_s > 0 else float("inf")
     focus = f"{question} {intent.get('q', '')} {intent.get('why', '')}"
     out: dict = {"pages": [], "cards": [], "tool_call": False, "opened": []}
     messages = [{"role": "system", "content": system_prompt},

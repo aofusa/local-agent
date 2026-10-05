@@ -1,8 +1,11 @@
-//! bash: one shell command in the workspace, with a timeout, an output cap and a kill of the whole process tree.
-//! The command is shown in full before it runs (policy); nothing here decides whether it may run.
+//! bash: one shell command in the workspace, with an idle timeout (stopped only after `timeout_s` seconds without
+//! any output; a build that keeps printing runs as long as it needs), an output cap and a kill of the whole
+//! process tree. Whether it may run is the policy's decision, not this file's.
 
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -13,8 +16,6 @@ use crate::config::ShellKind;
 use crate::platform::{resolve_shell, shell_argv};
 use crate::ui::{Frontend, UiEvent};
 
-pub const DEFAULT_TIMEOUT_S: u64 = 120;
-pub const MAX_TIMEOUT_S: u64 = 600;
 const OUTPUT_CAP: usize = 64 * 1024;
 
 pub fn plan(ctx: &ToolCtx, args: &Value) -> Planned {
@@ -29,7 +30,9 @@ pub fn plan(ctx: &ToolCtx, args: &Value) -> Planned {
         },
         None => ctx.ws.root.clone(),
     };
-    let timeout_s = arg_u64(args, "timeout_s").unwrap_or(DEFAULT_TIMEOUT_S).clamp(1, MAX_TIMEOUT_S);
+    // The model may ask for a shorter silence limit; the default and the ceiling are idle_timeout_s.
+    let idle = ctx.config.idle_timeout_s.max(1);
+    let timeout_s = arg_u64(args, "timeout_s").unwrap_or(idle).clamp(1, idle);
     Planned::Command { command: command.to_string(), cwd, timeout_s }
 }
 
@@ -69,7 +72,7 @@ async fn kill_tree(pid: Option<u32>, child: &mut tokio::process::Child) {
     let _ = child.kill().await;
 }
 
-async fn drain<R: tokio::io::AsyncRead + Unpin>(reader: Option<R>) -> (Vec<u8>, usize) {
+async fn drain<R: tokio::io::AsyncRead + Unpin>(reader: Option<R>, activity: Arc<AtomicU64>, origin: Instant) -> (Vec<u8>, usize) {
     let Some(mut reader) = reader else { return (Vec::new(), 0) };
     let mut kept = Vec::new();
     let mut dropped = 0usize;
@@ -78,6 +81,7 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(reader: Option<R>) -> (Vec<u8>, 
         match reader.read(&mut buf).await {
             Ok(0) | Err(_) => break,
             Ok(n) => {
+                activity.store(origin.elapsed().as_millis() as u64, Ordering::SeqCst);
                 let room = OUTPUT_CAP.saturating_sub(kept.len());
                 kept.extend_from_slice(&buf[..n.min(room)]);
                 dropped += n.saturating_sub(room);
@@ -104,9 +108,10 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
         Err(e) => return ToolOutput::err(format!("{program} を起動できません: {e}")),
     };
     let pid = child.id();
-    let out_task = tokio::spawn(drain(child.stdout.take()));
-    let err_task = tokio::spawn(drain(child.stderr.take()));
     let started = Instant::now();
+    let activity = Arc::new(AtomicU64::new(0)); // ms since start of the last output
+    let out_task = tokio::spawn(drain(child.stdout.take(), activity.clone(), started));
+    let err_task = tokio::spawn(drain(child.stderr.take(), activity.clone(), started));
     let limit = Duration::from_secs(timeout_s);
     let mut stopped: Option<&str> = None;
     let mut last_tick = Instant::now();
@@ -120,7 +125,7 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
                 if ctx.cancelled() {
                     stopped = Some("中断（Ctrl-C）");
-                } else if started.elapsed() > limit {
+                } else if started.elapsed().saturating_sub(Duration::from_millis(activity.load(Ordering::SeqCst))) > limit {
                     stopped = Some("時間切れ");
                 }
                 if stopped.is_some() {
@@ -135,7 +140,8 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
     let seconds = started.elapsed().as_secs_f32();
     let code = status.and_then(|s| s.code());
     let mut text = match (stopped, code) {
-        (Some(why), _) => format!("{why}: {timeout_s} 秒の上限、{seconds:.1} 秒で停止しました（プロセスツリーごと終了）\n"),
+        (Some("時間切れ"), _) => format!("時間切れ: {timeout_s} 秒間出力がなかったため、{seconds:.1} 秒で停止しました（プロセスツリーごと終了）\n"),
+        (Some(why), _) => format!("{why}: {seconds:.1} 秒で停止しました（プロセスツリーごと終了）\n"),
         (None, Some(c)) => format!("終了コード {c}（{seconds:.1} 秒）\n"),
         (None, None) => format!("シグナルで終了しました（{seconds:.1} 秒）\n"),
     };
@@ -173,8 +179,11 @@ mod tests {
     #[test]
     fn plan_checks_cwd_and_timeout() {
         let (c, dir) = ctx();
+        // The default and the ceiling are the configured idle timeout (1200 s).
         assert!(matches!(plan(&c, &json!({"command": "echo hi", "timeout_s": 9999})),
-                         Planned::Command { timeout_s: MAX_TIMEOUT_S, .. }));
+                         Planned::Command { timeout_s: 1200, .. }));
+        assert!(matches!(plan(&c, &json!({"command": "echo hi"})), Planned::Command { timeout_s: 1200, .. }));
+        assert!(matches!(plan(&c, &json!({"command": "echo hi", "timeout_s": 5})), Planned::Command { timeout_s: 5, .. }));
         assert!(matches!(plan(&c, &json!({"command": "echo hi", "cwd": ".."})), Planned::Invalid(_)));
         assert!(matches!(plan(&c, &json!({"command": "  "})), Planned::Invalid(_)));
         assert!(matches!(plan(&c, &json!({"command": "x", "cwd": "sub"})), Planned::Command { .. }));
@@ -193,12 +202,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_command_that_keeps_printing_is_not_stopped() {
+        let (c, dir) = ctx();
+        // Prints every 0.4 s for about 2.4 s; the silence limit is 1 s.
+        let cmd = if cfg!(windows) {
+            "1..6 | ForEach-Object { [Console]::Out.WriteLine($_); [Console]::Out.Flush(); Start-Sleep -Milliseconds 400 }"
+        } else {
+            "for i in 1 2 3 4 5 6; do echo $i; sleep 0.4; done"
+        };
+        let started = Instant::now();
+        let out = run(&c, cmd, &dir, 1, &mut NullUi).await;
+        assert!(out.ok, "{}", out.content);
+        assert!(started.elapsed() > Duration::from_secs(2));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
     async fn timeout_kills_the_command() {
         let (c, dir) = ctx();
         let sleep = if cfg!(windows) { "Start-Sleep -Seconds 30" } else { "sleep 30" };
         let started = Instant::now();
         let out = run(&c, sleep, &dir, 1, &mut NullUi).await;
-        assert!(!out.ok && out.content.contains("時間切れ"));
+        assert!(!out.ok && out.content.contains("時間切れ") && out.content.contains("出力がなかった"));
         assert!(started.elapsed() < Duration::from_secs(15));
         std::fs::remove_dir_all(dir).ok();
     }

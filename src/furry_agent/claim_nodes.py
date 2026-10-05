@@ -12,7 +12,7 @@
                    is formatted with its sources
 
 The search graph enters at claim_extract after the critic (or after reading in fast mode). A JSON reply that does not parse is repaired once by the same process; a second failure or
-CLAIM_TIMEOUT_S fails the stage: with CLAIM_VERIFY_FAIL_OPEN=0 (default) the user gets the excerpts and no
+an optional CLAIM_TIMEOUT_S budget (0 = none; every call has the idle timeout) fails the stage: with CLAIM_VERIFY_FAIL_OPEN=0 (default) the user gets the excerpts and no
 unaudited answer, with 1 the unaudited synthesis prefixed with 「突き合わせ失敗」.
 """
 
@@ -87,7 +87,10 @@ async def ask_repair(client, messages: list[dict], schema: type[T], *, max_token
     return value
 
 
-def _budget(search: dict, settings: ChatSettings) -> float:
+def _budget(search: dict, settings: ChatSettings) -> float | None:
+    """What is left of CLAIM_TIMEOUT_S; None when no budget is set (the model calls have the idle timeout)."""
+    if settings.claim_timeout_s <= 0:
+        return None
     return settings.claim_timeout_s - float((search.get("claim") or {}).get("spent", 0.0))
 
 
@@ -99,7 +102,7 @@ async def _call(state: ChatState, config: RunnableConfig, search: dict, stage: s
     job_lock.renew(token)
     claim = dict(search.get("claim") or {})
     left = _budget(search, settings)
-    if left <= 0:
+    if left is not None and left <= 0:
         return None, "timeout"
     started = time.monotonic()
     try:
@@ -122,8 +125,8 @@ async def _call(state: ChatState, config: RunnableConfig, search: dict, stage: s
     claim["spent"] = round(float(claim.get("spent", 0.0)) + seconds, 1)
     claim.setdefault("seconds", {})[stage] = round(seconds, 1)
     search["claim"] = claim
-    log.info("%s: %s seconds=%.1f spent=%.1f/%.0f", stage, error or "ok", seconds, claim["spent"],
-             settings.claim_timeout_s)
+    log.info("%s: %s seconds=%.1f spent=%.1f budget=%s", stage, error or "ok", seconds, claim["spent"],
+             f"{settings.claim_timeout_s:.0f}" if settings.claim_timeout_s > 0 else "none")
     return value, error
 
 

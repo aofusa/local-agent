@@ -106,8 +106,51 @@ class ChatReply:
         return timings.get("predicted_per_second")
 
 
+def idle_timeout(idle_s: float) -> httpx.Timeout:
+    """Wait as long as bytes keep coming; give up after ``idle_s`` seconds without any (httpx's read timeout is the
+    time between two reads, not the whole response)."""
+    return httpx.Timeout(connect=30.0, read=idle_s, write=60.0, pool=60.0)
+
+
+def _message_from_stream(chunks: list[dict]) -> tuple[dict, dict]:
+    """(message, raw) from the parsed chunks of a streamed completion: content, reasoning and the tool calls put
+    back together; the last usage / timings / finish_reason kept in ``raw``."""
+    content, reasoning = [], []
+    calls: dict[int, dict] = {}
+    raw: dict = {"choices": [{"finish_reason": None}]}
+    for chunk in chunks:
+        for key in ("usage", "timings", "model", "id"):
+            if chunk.get(key):
+                raw[key] = chunk[key]
+        choice = (chunk.get("choices") or [{}])[0] if chunk.get("choices") else {}
+        if choice.get("finish_reason"):
+            raw["choices"][0]["finish_reason"] = choice["finish_reason"]
+        delta = choice.get("delta") or choice.get("message") or {}
+        if delta.get("content"):
+            content.append(delta["content"])
+        thought = delta.get("reasoning_content") or delta.get("reasoning")
+        if thought:
+            reasoning.append(thought)
+        for call in delta.get("tool_calls") or []:
+            slot = calls.setdefault(int(call.get("index", len(calls))), {"id": "", "name": "", "arguments": ""})
+            slot["id"] = call.get("id") or slot["id"]
+            fn = call.get("function") or {}
+            slot["name"] = fn.get("name") or slot["name"]
+            args = fn.get("arguments")
+            if args:
+                slot["arguments"] += args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+    message = {"content": "".join(content), "reasoning_content": "".join(reasoning),
+               "tool_calls": [{"id": c["id"], "function": {"name": c["name"], "arguments": c["arguments"]}}
+                              for _, c in sorted(calls.items())]}
+    return message, raw
+
+
 class OpenAICompatClient:
-    def __init__(self, base_url: str, model: str = "", timeout_s: float = 180.0, *, thinking_off: bool = True,
+    """``timeout_s`` is an idle timeout: the reply is streamed, and only a stretch of ``timeout_s`` seconds without
+    any byte from the server (no token, no thinking token, no keep-alive) ends the call. A long reply that keeps
+    coming is never cut off; the 27B on a small machine can take many minutes."""
+
+    def __init__(self, base_url: str, model: str = "", timeout_s: float = 1200.0, *, thinking_off: bool = True,
                  transport: httpx.AsyncBaseTransport | None = None, api_key: str = "local"):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -117,7 +160,7 @@ class OpenAICompatClient:
         self._transport = transport
 
     def _http(self, timeout: float | None = None) -> httpx.AsyncClient:
-        kwargs: dict = {"timeout": timeout or self.timeout_s, "trust_env": False,
+        kwargs: dict = {"timeout": idle_timeout(timeout or self.timeout_s), "trust_env": False,
                         "headers": {"Authorization": f"Bearer {self.api_key}"}}
         if self._transport is not None:
             kwargs["transport"] = self._transport
@@ -128,8 +171,9 @@ class OpenAICompatClient:
                    json_mode: bool = False, json_schema: dict | None = None,
                    timeout_s: float | None = None, thinking: bool | None = None) -> ChatReply:
         """``thinking``: True = thinking tokens on (the chat tab's think mode), False = off, None = the client's
-        default (off unless the client was made with thinking_off=False)."""
-        body: dict = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": False}
+        default (off unless the client was made with thinking_off=False). ``timeout_s``: the idle timeout."""
+        body: dict = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": True,
+                      "stream_options": {"include_usage": True}}
         if self.model:
             body["model"] = self.model
         think = (not self.thinking_off) if thinking is None else thinking
@@ -147,25 +191,45 @@ class OpenAICompatClient:
                                        "json_schema": {"name": "reply", "strict": True, "schema": json_schema}}
         elif json_mode:
             body["response_format"] = {"type": "json_object"}
+        idle = timeout_s or self.timeout_s
         started = time.monotonic()
+        data: dict = {}
+        message: dict = {}
         for attempt in (1, 2):
             try:
-                async with self._http(timeout_s) as http:
-                    response = await http.post(f"{self.base_url}/chat/completions", json=body)
+                async with self._http(idle) as http:
+                    async with http.stream("POST", f"{self.base_url}/chat/completions", json=body) as response:
+                        if response.status_code >= 400:
+                            text = (await response.aread()).decode("utf-8", "replace")
+                            # LM Studio's idle TTL can unload the model just as a request arrives ("Model is
+                            # unloaded."): the same request once more makes it load again (JIT).
+                            if attempt == 1 and response.status_code == 400 and "Model is unloaded" in text:
+                                log.info("LM Studio unloaded the model while the request arrived; sending it again")
+                                continue
+                            raise LLMError(f"HTTP {response.status_code}: {text[:300]}")
+                        if "text/event-stream" not in response.headers.get("content-type", ""):
+                            # A server that ignores "stream": the whole JSON at once.
+                            data = json.loads(await response.aread())
+                            message = ((data.get("choices") or [{}])[0]).get("message") or {}
+                            break
+                        chunks = []
+                        async for line in response.aiter_lines():
+                            line = line.strip()
+                            if not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == "[DONE]":
+                                break
+                            try:
+                                chunks.append(json.loads(payload))
+                            except json.JSONDecodeError:
+                                continue
+                        message, data = _message_from_stream(chunks)
+                        break
             except httpx.TimeoutException as exc:
-                raise LLMError(f"時間切れです（{timeout_s or self.timeout_s:.0f} 秒）") from exc
+                raise LLMError(f"{idle:.0f} 秒間応答がありませんでした") from exc
             except httpx.HTTPError as exc:
                 raise LLMError(f"{self.base_url} に接続できません: {exc!r}") from exc
-            # LM Studio's idle TTL can unload the model just as a request arrives ("Model is unloaded."):
-            # the same request once more makes it load again (JIT).
-            if attempt == 1 and response.status_code == 400 and "Model is unloaded" in response.text:
-                log.info("LM Studio unloaded the model while the request arrived; sending it again")
-                continue
-            break
-        if response.status_code >= 400:
-            raise LLMError(f"HTTP {response.status_code}: {response.text[:300]}")
-        data = response.json()
-        message = ((data.get("choices") or [{}])[0]).get("message") or {}
         calls = []
         for call in message.get("tool_calls") or []:
             fn = call.get("function") or {}

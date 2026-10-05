@@ -357,12 +357,14 @@ impl HostClient {
     }
 
     /// Run a graph to the end (`stream_mode: values`); `on_progress` sees the last AI message text as it changes.
+    /// The run is waited for as long as the host keeps sending (every chunk restarts the idle clock); `idle`
+    /// without a byte gives up.
     pub async fn run_graph(
         &self,
         assistant_id: &str,
         content: Value,
         configurable: Value,
-        timeout: Duration,
+        idle: Duration,
         on_progress: &mut (dyn FnMut(&str) + Send),
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<GraphResult, HostError> {
@@ -385,7 +387,7 @@ impl HostClient {
             let text = response.text().await.unwrap_or_default();
             return Err(HostError::Refused { message: format!("HTTP {status}: {}", text.chars().take(300).collect::<String>()), code: "http".into() });
         }
-        let started = tokio::time::Instant::now();
+        let mut last_activity = std::time::Instant::now();
         let mut stream = response.bytes_stream();
         let mut parser = SseParser::default();
         let mut last = GraphResult::default();
@@ -394,8 +396,8 @@ impl HostClient {
             if cancelled() {
                 return Err(HostError::Interrupted);
             }
-            if started.elapsed() > timeout {
-                return Err(HostError::Unreachable(format!("{} 秒で打ち切りました", timeout.as_secs())));
+            if last_activity.elapsed() > idle {
+                return Err(HostError::Unreachable(format!("ホストから {} 秒間応答がありません", idle.as_secs())));
             }
             let chunk = match tokio::time::timeout(Duration::from_millis(250), stream.next()).await {
                 Err(_) => {
@@ -406,6 +408,7 @@ impl HostClient {
                 Ok(Some(Err(e))) => return Err(HostError::Unreachable(e.to_string())),
                 Ok(Some(Ok(b))) => b,
             };
+            last_activity = std::time::Instant::now();
             for (event, data) in parser.feed(&String::from_utf8_lossy(&chunk)) {
                 match event.as_str() {
                     "values" => {

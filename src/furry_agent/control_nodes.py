@@ -86,8 +86,12 @@ def remaining(control: dict) -> int:
 
 
 def over_clock(control: dict, now: float | None = None) -> bool:
+    """The optional wall clock of the loop ran out (0 = no wall clock; the steps bound the loop)."""
+    limit = float(control.get("max_wall_clock_s") or 0)
+    if limit <= 0:
+        return False
     now = time.time() if now is None else now
-    return now - float(control.get("started") or now) >= float(control.get("max_wall_clock_s") or 0)
+    return now - float(control.get("started") or now) >= limit
 
 
 def repeated(control: dict, tool: str, text: str) -> bool:

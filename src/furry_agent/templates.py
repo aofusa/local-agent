@@ -162,6 +162,7 @@ def build_run_prompt(
     loras: list[LoraSpec] | None = None,
     workflows_dir: Path = REPO_WORKFLOWS,
     models: dict[str, str] | None = None,
+    llm_read_timeout_s: float | None = None,
 ) -> dict:
     """Fill a template for one run. ``images`` maps role -> ComfyUI input filename.
 
@@ -177,6 +178,12 @@ def build_run_prompt(
 
     _set(prompt, slots["prompt"], text)
     _set(prompt, slots["seed"], int(plan["seed"]))
+    if llm_read_timeout_s:
+        # The LM Connect backends stream from LM Studio; their read timeout is the gap allowed between two chunks,
+        # i.e. the same idle timeout as the rest of the agent (AGENT_IDLE_TIMEOUT_S). Only this value changes.
+        for node in prompt.values():
+            if node.get("class_type") == "LMConnectLMStudioBackend" and "read_timeout_seconds" in node.get("inputs", {}):
+                node["inputs"]["read_timeout_seconds"] = int(llm_read_timeout_s)
     if ckpt_name:
         _set(prompt, slots["ckpt_name"], ckpt_name)
     if "width" in slots:

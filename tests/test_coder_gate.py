@@ -179,10 +179,12 @@ async def test_waits_for_the_image_tab_and_reports_the_wait(monkeypatch):
     assert events[-1][0] == "done" and job_lock.holder is None
 
 
-async def test_comfy_queue_busy_waits_then_gives_up(monkeypatch):
-    monkeypatch.setattr(gate, "LOCK_WAIT_S", 0.3)
+async def test_comfy_queue_busy_waits_then_gives_up_when_a_limit_is_set():
+    # Without JOB_LOCK_TIMEOUT_S the gate waits as long as the image run works; with it, it gives up.
     lm = LM(_chunks({"content": "x"}))
-    status, raw = await _post(_app(lm, Comfy(busy=True)), {"mode": "fast", "messages": MESSAGES})
+    app = _app(lm, Comfy(busy=True))
+    app.state.chat_settings = replace(SETTINGS, job_lock_timeout_s=0.3)
+    status, raw = await _post(app, {"mode": "fast", "messages": MESSAGES})
     events = _events(raw)
     assert events[-1][0] == "error" and events[-1][1]["code"] == "busy" and lm.bodies == []
     assert job_lock.holder is None

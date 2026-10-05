@@ -546,7 +546,7 @@ async def test_think_stops_at_the_page_limit(models_dir):
 async def test_think_stops_on_the_wall_clock(models_dir):
     world = World()
     world.reflect = _open_q2_until(99)
-    state, message = await _run("/search topic", world, _settings(models_dir, search_wall_clock_s=0.0), mode="think")
+    state, message = await _run("/search topic", world, _settings(models_dir, search_wall_clock_s=0.001), mode="think")
     assert world.critiques == 1 and message.additional_kwargs["search_trace"]["stop_reason"] == "budget"
 
 

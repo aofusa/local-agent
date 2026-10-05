@@ -23,7 +23,6 @@ import logging.handlers
 import os
 import queue
 import re
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -216,8 +215,7 @@ async def ingest(state: State, config: RunnableConfig) -> dict:
             log.info("refetch prompt_id=%s", prompt_id)
             return {**reset, "comfy_prompt_id": prompt_id,
                     "job": {"mode": "refetch", "prompt_id": prompt_id, "client_id": uuid.uuid4().hex,
-                            "seed": None, "ckpt_name": None, "refs": [], "template_id": "?",
-                            "deadline": time.time() + settings.timeout_s},
+                            "seed": None, "ckpt_name": None, "refs": [], "template_id": "?"},
                     "messages": [AIMessage(id=progress_id, content=f"prompt_id {prompt_id} の結果を ComfyUI から取得しています…")]}
         references = [_reference(f"img_{i}", m) for i, m in enumerate(request.images, start=1)]
         if wants_previous_output(request.text, bool(request.images)) and not any(m.role == "base" for m in request.images):
@@ -454,12 +452,15 @@ async def submit(state: State, config: RunnableConfig) -> dict:
     stage = "キュー待ち"
     try:
         loras: list[LoraSpec] = parse_loras(settings.loras_for(family))
-        # Shared with the chat tab (job_lock.py): another image run is waited for as before; a chat run
-        # (LM Studio 27B or Bonsai workers in memory) is refused after JOB_LOCK_TIMEOUT_S.
-        token = await job_lock.acquire("image", float(os.environ.get("JOB_LOCK_TIMEOUT_S") or 30), None)
+        # Shared with the chat tab (job_lock.py): the other job is waited for while it works (its holder renews
+        # the lease; a holder that died frees the lock when the lease runs out). JOB_LOCK_TIMEOUT_S, when set,
+        # bounds the wait for a chat run.
+        lock_limit = os.environ.get("JOB_LOCK_TIMEOUT_S", "").strip()
+        token = await job_lock.acquire("image", float(lock_limit) if lock_limit else None, None)
         try:
-            # One generation at a time: never queue while ComfyUI is still busy.
-            await client.wait_queue_idle(settings.timeout_s)
+            # One generation at a time: never queue while ComfyUI is still busy (waited for while ComfyUI answers;
+            # that run has its own idle timeout).
+            await client.wait_queue_idle()
             # Drop ComfyUI's cached models so the 27B has the shared memory.
             await client.free()
             await asyncio.sleep(2.0)
@@ -483,7 +484,8 @@ async def submit(state: State, config: RunnableConfig) -> dict:
             stage = "ワークフロー注入"
             prompt = await asyncio.to_thread(build_run_prompt, family, plan_, images, state["job"]["text"],
                                              ckpt_name, loras, settings.workflows_dir,
-                                             settings.model_overrides(family))
+                                             settings.model_overrides(family),
+                                             llm_read_timeout_s=settings.timeout_s)
             await _check_nodes(client, prompt, family_map)
             stage = "キュー投入"
             client_id = uuid.uuid4().hex
@@ -497,12 +499,10 @@ async def submit(state: State, config: RunnableConfig) -> dict:
     except Exception as exc:  # httpx / websockets errors
         return _fail(state, ComfyError(f"ローカルの ComfyUI（{settings.comfyui_url}）に接続できません: {exc!r}"), stage)
 
-    deadline = time.time() + settings.timeout_s
     job = {**state["job"], "mode": plan_["template_id"], "template_id": plan_["template_id"], "prompt_id": prompt_id,
            "client_id": client_id, "seed": plan_["seed"], "ckpt_name": ckpt_name, "family": family,
            "loras": [f"{s.name}:{s.strength_model}" for s in loras],
-           "refs": [(r["image_id"], r["resolved_role"], r["filename_on_comfy"]) for r in references],
-           "deadline": deadline}
+           "refs": [(r["image_id"], r["resolved_role"], r["filename_on_comfy"]) for r in references]}
     log.info("submitted prompt_id=%s family=%s template=%s seed=%d steps=%s cfg=%s refs=%s loras=%s", prompt_id,
              family, plan_["template_id"], plan_["seed"], plan_["steps"], plan_["cfg"], job["refs"], job["loras"])
     vision = "参照画像の役割別タグ付け → " if images else ""
@@ -521,10 +521,6 @@ async def submit(state: State, config: RunnableConfig) -> dict:
 # --- wait ----------------------------------------------------------------------------------------------
 
 
-def _monotonic_deadline(job: dict) -> float:
-    return time.monotonic() + max(1.0, job["deadline"] - time.time())
-
-
 def _timeout_hint(exc: Exception, job: dict) -> Exception:
     if "タイムアウト" in str(exc):
         return StageError("タイムアウト", f"{exc}。prompt_id {job['prompt_id']}。完了後に「再取得 {job['prompt_id']}」と送ると結果を取得できます")
@@ -536,8 +532,8 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     client = _client(config, settings)
     job = state["job"]
     try:
-        result = await client.wait(job["prompt_id"], job["client_id"], until_node="split",
-                                   deadline=_monotonic_deadline(job))
+        # Idle timeout (AGENT_IDLE_TIMEOUT_S): every event of the prompt restarts it.
+        result = await client.wait(job["prompt_id"], job["client_id"], until_node="split", idle_s=settings.timeout_s)
     except asyncio.CancelledError:
         await asyncio.shield(_cancel(client, job["prompt_id"]))
         raise
@@ -561,9 +557,7 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     return {
         "tags": tags,
         # ckpt usually runs before split, so keep its unload check for the image phase.
-        # Each wait gets the full timeout: the LLM phase (27B load + role Vision calls) alone can take minutes.
-        "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}, "warnings": warnings,
-                "deadline": time.time() + settings.timeout_s},
+        "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}, "warnings": warnings},
         "messages": [_progress(state, (
             f"{made}。LM Studio のモデルを unload してから画像を生成しています…\n\n"
             f"**positive**: {tags['positive']}\n\n**negative**: {tags['negative']}"
@@ -606,8 +600,8 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
 
     saved, blocks = [], []
     try:
-        result = await client.wait(job["prompt_id"], job["client_id"],
-                                   deadline=_monotonic_deadline(job), on_event=on_event)
+        result = await client.wait(job["prompt_id"], job["client_id"], on_event=on_event,
+                                   idle_s=settings.timeout_s)
         outputs = result.outputs
         ckpt_ui = outputs.get("ckpt") or gate
         if ckpt_ui.get("lmstudio_unloaded") != [True]:

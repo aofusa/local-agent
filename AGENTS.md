@@ -125,7 +125,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。動画生成モデルはロードしない。VHS が無い間は動画を対象外にし、その旨を README に書く。
 - IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
 - ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/sdxl.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補）に限る。構造の変更は、マップにある前処理候補の差し替えと、`LORAS` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
-- API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。タイムアウトはタグ生成と画像生成のそれぞれに 10 分。この呼び出しを行うのは LangGraph である。
+- API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。待ちは「その prompt の進捗イベントが `AGENT_IDLE_TIMEOUT_S`（既定 20 分）届かないとき」だけ打ち切る（利用者の指定で設計書の 10 分の固定値から変えた。下の「タイムアウト」）。この呼び出しを行うのは LangGraph である。
 
 ## チャットタブ（会話と Tor 経由検索）
 
@@ -138,10 +138,10 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
 - チャットグラフの kind は `CHAT` / `SEARCH` / `WRITE` / `CODE` / `TO_IMAGE_TAB` の 5 つ（設計は `docs/chat-deep-search-creative-sandbox.md`）。1 本の `chat` グラフの中で分岐し、グラフを増やさない。文章とコードを書くのは LM Studio の 27B で、検索モデルと画像用プロンプトは使わない。`/docs`（ローカル文書）は v0.8.0 で削除した。行頭の `/docs` は特別扱いせず、ふつうの文として振り分ける。
-- モードは `configurable.mode` の `fast` / `think` / `auto`（UI の「速い / 思考 / 自動」。無指定は `fast`、`auto` はルールとルータの判定で片方を選ぶ）。変わるのは予算と思考トークンだけ: 検索は 1 ラウンド / 下位問いの充足判定で最大 4 ラウンド・12 ページ・20 分、文章は一発 / アウトライン→本文→差分推敲、コードは生成のみ / 承認後に Docker で実行（最大 2 回）。思考トークンは回答本文に混ぜない。
+- モードは `configurable.mode` の `fast` / `think` / `auto`（UI の「速い / 思考 / 自動」。無指定は `fast`、`auto` はルールとルータの判定で片方を選ぶ）。変わるのは予算と思考トークンだけ: 検索は 1 ラウンド / 下位問いの充足判定で最大 4 ラウンド・12 ページ（時間の予算 `SEARCH_WALL_CLOCK_S` は既定で無し）、文章は一発 / アウトライン→本文→差分推敲、コードは生成のみ / 承認後に Docker で実行（最大 2 回）。思考トークンは回答本文に混ぜない。
 - コードの実行は `src/furry_agent/sandbox.py` だけが行う（`python:3.12-slim`、`--network none`、`--read-only`、`/work` のみマウント、2g / 2 CPU / 256 pids、`--cap-drop ALL`、非 root、60 秒、argv のみ）。承認（HITL）前に実行しない。サンドボックスは `job_lock` を握らない。
 - 主張の検証（`CLAIM_VERIFY=1`）は、検索で、批評と同じ代理リーダーのプロセスで抽出 → 判定 → 統合 → 監査を行い、`claim_drop` が支持されない文を削除する（言い換えない）。採否を決めるのはオーケストレータの門（`claim_verify.gate`: 実在するカード、20 字の一致または数値・固有名詞、カードに無い数値は不可）で、モデルの判定は参考にとどめる。検証段は通信しない、LM Studio を載せ直さない、ツールを渡さない。失敗時の既定（`CLAIM_VERIFY_FAIL_OPEN=0`）は無監査の回答を出さず抜粋だけを返す。`job_lock` は監査が終わり、llama-server が消え、LM Studio を unload するまで放さない。
-- 自律モード（`control_nodes.py`）: 思考モード（「自動」で思考になったものを含む）で、検索・文章・コードのうち 2 つ以上、または結果に応じて次が決まる接続（「〜してから」「根拠を確認して」など）を含む依頼だけが入る（`router.is_compound`）。接頭辞・`configurable.task`・添付・続き・速いモードは入らない。27B（LM Studio が無ければ代理リーダー）が `ask_json` で 1 手ずつ JSON の Decision を返し、道具は既存の入口ノード（`plan` / `write_brief` / `code_plan`）へエッジで渡す。道具の終端は `controller_record` に戻る。上限は `CONTROLLER_MAX_STEPS`（既定 3、最大 4）と `SEARCH_WALL_CLOCK_S` 以内の壁時計、同じ道具と同じ依頼文の再実行は禁止。画像は生成せず画像タブへ案内する（`graph.py` は呼ばない）。章の確認とコンテナ実行の承認は残す。グラフは増やさない。
+- 自律モード（`control_nodes.py`）: 思考モード（「自動」で思考になったものを含む）で、検索・文章・コードのうち 2 つ以上、または結果に応じて次が決まる接続（「〜してから」「根拠を確認して」など）を含む依頼だけが入る（`router.is_compound`）。接頭辞・`configurable.task`・添付・続き・速いモードは入らない。27B（LM Studio が無ければ代理リーダー）が `ask_json` で 1 手ずつ JSON の Decision を返し、道具は既存の入口ノード（`plan` / `write_brief` / `code_plan`）へエッジで渡す。道具の終端は `controller_record` に戻る。上限は `CONTROLLER_MAX_STEPS`（既定 3、最大 4）と、設定したときだけ掛かる壁時計（`CONTROLLER_WALL_CLOCK_S`、`SEARCH_WALL_CLOCK_S` を超えない）、同じ道具と同じ依頼文の再実行は禁止。画像は生成せず画像タブへ案内する（`graph.py` は呼ばない）。章の確認とコンテナ実行の承認は残す。グラフは増やさない。
 
 既定の役割（採否の理由と実測は README「検索で使うモデルと採否」と実装記録 §4）:
 
@@ -199,7 +199,8 @@ docs/autonomous-controller-design.md            チャットタブの自律モ�
 docs/locus-cui-design.md                        CUI cirka とモデルゲートの設計と実装記録
 client/                           クライアント側の CUI（Rust、単一バイナリ、実行ファイル名 cirka）。client/target/ は git に
                                   含めない。agent.rs がループ、tools/ がツール、policy.rs が許可、tui.rs が Claude Code に倣った
-                                  画面、art.rs と art_data.rs（生成物）がロゴの端末用の絵。テストは cargo test
+                                  画面、art.rs と art_data.rs（生成物）がロゴの端末用の絵。テストは cargo test。
+                                  client/README.md が cirka の利用者向けの説明
 docs/logo/                        cirka のロゴ（cirka-icon / cirka-logo / cirka-design の JPG、icon / logo / image の SVG）
 scripts/gen_cirka_art.py          docs/logo の JPG から client/src/art_data.rs（半角ブロック用のビットマップ）を作る
 scripts/build-cirka.ps1           cirka のリリースビルドと配布用の zip（dist/、git に含めない）
@@ -315,14 +316,14 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - 参照画像の役割と強度は、画像ブロックの `metadata.role` / `metadata.strength` で送る。UI には添付ごとの役割セレクトと強度欄を加えた。役割の確認は在庫の HITL 表示（承認 / 編集 / 却下）を使う。
 - LoRA は `.env` の `LORAS`（`名前[:モデル強度[:CLIP 強度]]` のカンマ区切り）。空なら使わない。
 - 参照画像用のノードとモデルは `scripts/setup-comfyui-refs.ps1` が入れる（ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose ONNX、Depth Anything V2 Small）。実行時の自動ダウンロードはしない。
-- タイムアウトはタグ生成と画像生成のそれぞれに `COMFYUI_TIMEOUT_S`（600 秒）。
+- タイムアウト（v0.9.0、利用者の指定）: 何も返ってこない時間が `AGENT_IDLE_TIMEOUT_S`（`.env`、既定 1200 秒、最小 30 秒）続いたときだけ打ち切り、何かが返ってきている限り全体の時間では打ち切らない。モデル呼び出し（LM Studio、llama-server）はすべてストリームで受け取り、トークンと思考トークンで計る（`llm_client.idle_timeout`）。ComfyUI の待ちはその prompt の進捗イベントで計り、LM Connect ノードの `read_timeout_seconds` にも同じ値を入れる（`templates.build_run_prompt`。入力値の差し替えだけで、ノード ID と構造は変えない）。llama-server の起動は `/health` の応答（読み込み中の 503 を含む）で計る。ほかのタブや ComfyUI のキューは、相手が動いているあいだ待つ（ロックの期限 15 分が止まった相手を外す）。全体の予算（`SEARCH_WALL_CLOCK_S`、`CLAIM_TIMEOUT_S`、`CONTROLLER_WALL_CLOCK_S`、`SEARCH_TOTAL_TIMEOUT_S`、`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）は既定で無しで、設定したときだけ掛かる。1 件を諦めて先へ進むための短い上限（Tor 経由の HTTP リクエスト 30 秒、Tor の起動 90 秒、状態確認の HTTP）とコンテナ実行の 60 秒は残す。時間で `max_tokens` を削らない（context だけで決める）。`COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は廃止。cirka は設定 `idle_timeout_s`（既定 1200 秒）で同じ考え方（`bash` は出力が途切れた時間で止める）。
 - ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1` と Comfy Desktop の起動引数）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
 - モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
 - 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。取得物（Tor、fork の zip、モデル）は SHA-256 を照合する（値は `config/search_models.json` と Tor の配布元）。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
-- チャットタブのタイムアウトは、モデル呼び出し 1 回が `CHAT_TIMEOUT_S`（1200 秒）、思考モードの検索全体が `SEARCH_WALL_CLOCK_S`（1200 秒）。コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
-- この端末の LM Studio の 27B は context 4096（`LMSTUDIO_CONTEXT`）で約 0.9 トークン/秒。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「`CHAT_TIMEOUT_S` で出せる量」（`LMSTUDIO_TOKENS_PER_S` から始め、応答ごとに測り直す）の小さい方に収める。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
+- コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
+- この端末の LM Studio の 27B は context 4096（`LMSTUDIO_CONTEXT`）で約 0.9〜1.5 トークン/秒。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context に収める（v0.9.0 から時間では削らない）。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
 - Docker Desktop は普段は止めておき、承認したコードの実行のときだけ起動して、終わったら止める（VM が約 1.5GB を使い、27B や ComfyUI と取り合うため）。
-- 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の上限は `CLAIM_TIMEOUT_S`（600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かない）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
+- 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の予算 `CLAIM_TIMEOUT_S` は既定で無し（v0.9.0。以前は 600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かなかった）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 - 自律モード（`docs/autonomous-controller-design.md` 末尾の実装記録）: 制御のノードは `control_nodes.py` に置き（write_nodes / code_nodes と同じ形）、Decision のスキーマもそこに置く。道具のメッセージはその id のまま残し、制御のメッセージには新しい id を振る（道具の出力を上書きしない）。文章のあとの最終回答は本文を繰り返さない。利用者が章の確認やコンテナ実行を却下したら、制御もそこで終える。
 - CUI の画面（v0.8.0）: Claude Code に倣い、ロゴ入りの枠、枠付きの入力欄と許可モードの行、`⏺` / `⎿` のブロック、差分、スピナー、矢印キーのメニュー。生のキー入力（raw mode）は入力欄とメニューのあいだだけ使い、出力は通常の行のまま（パイプや `-p` でも読める）。ロゴは画像のまま出せないので、`scripts/gen_cirka_art.py` が `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を小さなビットマップにし、▀ ▄ █ で描く（24 ビット色の端末ではロゴの赤 #D63A2F）。

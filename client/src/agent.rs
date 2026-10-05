@@ -272,7 +272,7 @@ impl<B: Brain> Agent<B> {
                     }
                     Planned::Command { command, cwd, timeout_s } => {
                         let dir = self.tools.ws.rel(cwd);
-                        (format!("コマンド（{timeout_s} 秒まで、{}）", if dir.is_empty() { "." } else { dir.as_str() }), command.clone())
+                        (format!("コマンド（{}、出力が {timeout_s} 秒途切れたら停止）", if dir.is_empty() { "." } else { dir.as_str() }), command.clone())
                     }
                     _ => (call.name.clone(), call.arguments.clone()),
                 };

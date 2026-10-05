@@ -353,7 +353,7 @@ Chroma 経路の違い:
 ```
 CHROMA_MAX_PIXELS=589824     # 768x768 相当。縦長・横長も同じ画素数に縮める（既定 1048576 = 1024x1024）
 CHROMA_STEPS=28              # 既定 28
-COMFYUI_TIMEOUT_S=1200       # 画像生成がタイムアウトより長くなる場合
+AGENT_IDLE_TIMEOUT_S=1800    # 進捗の途切れる時間が 20 分を超える場合（既定 1200）
 ```
 
 GPU メモリ別の目安（作業指示書 §2.2）: 24GB 以上は BF16（`CHROMA_WEIGHT_DTYPE=default`）、16GB / 12GB / UMA は fp8（既定）か GGUF の Q8_0〜Q5_K_M
@@ -368,8 +368,8 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 ### 進捗・中断・保存
 
 - 進捗はチャットの 1 つのメッセージが更新されます（受付 → 実行計画 → 投入 → タグ生成完了（positive / negative を表示）→ 画像）。
-- タグ生成と画像生成はそれぞれ 10 分（`COMFYUI_TIMEOUT_S`）で打ち切ります。タイムアウトしたときは prompt_id を返すので、
-  完了後に `再取得 <prompt_id>` と送ると結果を受け取れます。
+- ComfyUI が 20 分（`AGENT_IDLE_TIMEOUT_S`）何も進捗を返さなかったときだけ打ち切ります。サンプラーの 1 ステップごとの進捗も「進んでいる」とみなすので、遅い GPU で長くかかる生成も最後まで待ちます（「5. 設定 › タイムアウト」）。
+  打ち切ったときは prompt_id を返すので、完了後に `再取得 <prompt_id>` と送ると結果を受け取れます。
 - 生成中に UI の停止ボタンを押すと、ComfyUI の該当 prompt も中断します。
 - 複数送っても、ComfyUI のキューが空くまで次は投入しません。
 - 失敗したときは、どの段階（入力・ワークフロー選択・役割推定・アップロード・ワークフロー注入・キュー投入・生成・タイムアウト）で止まったかを返します。
@@ -410,9 +410,9 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 - **自動**は Grok の自動モードと同じく、送った内容から選びます。比較・分析・理由・複数の条件を含む調査、章立てや構成が要る文章、実行やテストを頼んだコード、計算や推論の要る相談は「思考」、単一の事実確認、短い文章、コードの生成だけ、雑談は「速い」です。「じっくり」「詳しく」/「手短に」「ざっくり」と書けばそれに従います。判断に迷う文はルータ（Qwen3-1.7B）の判定も使います。回答の下に「自動 → 思考（『違い』を含む調査）」のように、選んだモードと理由が出ます。
 - モードを付けずに API から送った実行は「速い」です。画像タブはモードを使いません。
 - 思考トークンは LM Studio の 27B だけが出します（`reasoning_effort`。LM Studio は `chat_template_kwargs` を無視するため）。JSON を返す段（計画・批評・推敲・アウトライン）は思考なしで呼びます。
-- タイムアウト: 1 回のモデル呼び出しは 20 分（`CHAT_TIMEOUT_S=1200`）、思考モードの検索全体も 20 分（`SEARCH_WALL_CLOCK_S=1200`）。長い呼び出しのあいだも共有ロックは延長されます。
-- この端末での速さ（実測）: LM Studio の 27B（IQ3_M、context 4096）の生成は約 0.9 トークン/秒です（Docker の停止や ComfyUI の `/free` では変わりませんでした）。そのため 1 回の呼び出しで出せるのは 20 分で約 1000 トークンまでで、チャットタブは回答と思考の量を、context（4096）と実測の速さの両方に収まるように決めます（`LMSTUDIO_CONTEXT`、`LMSTUDIO_TOKENS_PER_S`。速さは応答のたびに測り直します）。答えの分が残らないときは思考を使いません。思考が予算を使い切って答えが空なら、思考なしでもう一度だけ答えさせます。
-  - 目安: 速いモードの会話は 27B のロード込みで約 3 分、思考モードのコード（短いスクリプト）は生成に約 12 分、文章は 1 回で 1000〜1500 字程度です。長い文章は「章立て」で分けてください。
+- タイムアウト: モデルの応答はストリームで受け取り、トークン（思考トークンを含む）が届いている限り待ちます。20 分（`AGENT_IDLE_TIMEOUT_S`）何も届かなかったときだけ打ち切ります。検索全体・主張の検証・自律モードにも既定では時間の上限はなく、ラウンド数・ページ数・手数で止まります（「5. 設定 › タイムアウト」）。長い呼び出しのあいだも共有ロックは延長されます。
+- この端末での速さ（実測）: LM Studio の 27B（IQ3_M、context 4096）の生成は約 0.9〜1.5 トークン/秒です。チャットタブは回答と思考の量を context（4096、`LMSTUDIO_CONTEXT`）に収まるように決めます。時間では削りません（遅くても最後まで書きます）。答えの分が残らないときは思考を使いません。思考が予算を使い切って答えが空なら、思考なしでもう一度だけ答えさせます。
+  - 目安: 速いモードの会話は 27B のロード込みで約 3 分、思考モードのコード（短いスクリプト）は生成に約 12 分、文章は 1 回で、context（4096）の残りに収まる量まで書きます（時間では切りません）。長い文章は「章立て」で分けてください。
 - Docker Desktop は普段は止めておけます。止まっていると、確認カードに「Docker Desktop: 停止中」と出て、承認後に起動し（30 秒〜数分）、実行が終わったら止めます。Docker の VM は約 1.5GB を使い、この端末では 27B（ロード中の空き 0.4GB）や ComfyUI と取り合うためです。
 
 #### 自律モード（道具を順に使う依頼）
@@ -422,7 +422,7 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 1. 27B が依頼とこれまでの結果の要約（各 500 字まで）を読み、次の道具（検索 / 文章 / コード / 画像）とその依頼文、または最終回答を JSON で返します。
 2. 道具は今までの検索・執筆・コードの流れそのものです（章の確認カードやコンテナ実行の承認カードもそのまま出ます）。終わると要約だけが制御に戻ります（検索のページ本文やカード全件、コードの出力全文は戻しません）。
 3. 道具の結果はそれぞれのメッセージとして残り、最後に自律モードの回答が付きます。文章を書いたあとは本文を繰り返さず、書いた旨だけを添えます。
-4. 上限: 道具は 3 回まで（`CONTROLLER_MAX_STEPS`、最大 4）、全体の時間は `SEARCH_WALL_CLOCK_S`（20 分）以内（`CONTROLLER_WALL_CLOCK_S`）。同じ道具を同じ依頼文で二度は呼びません。上限や重複で止まったときは、それまでの結果で答え、止まった理由を書きます。この端末では思考モードの検索 1 回で 20 分近くかかるため、検索のあとは時間の上限で終わることが多く、その場合は検索の答え（出典付き）がそのまま結果になります。
+4. 上限: 道具は 3 回まで（`CONTROLLER_MAX_STEPS`、最大 4）。全体の時間の上限は既定ではありません（`CONTROLLER_WALL_CLOCK_S` か `SEARCH_WALL_CLOCK_S` を設定したときだけ掛かります）。同じ道具を同じ依頼文で二度は呼びません。上限や重複で止まったときは、それまでの結果で答え、止まった理由を書きます。この端末では思考モードの検索 1 回に 20 分前後かかるので、検索から執筆まで進む依頼は 1 時間近くかかることがあります。
 5. 画像は生成せず、画像タブへ案内して終わります。
 6. 回答の下の「自律の手順」を開くと、選んだ道具、その理由、依頼文、結果の要約が見られます。
 
@@ -502,7 +502,7 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
 
 ### CUI（cirka）
 
-`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)。ソースはクライアント側の CUI として `client/` にあり、できる実行ファイルの名前が `cirka` です）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
+`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)。ソースはクライアント側の CUI として `client/` にあり、できる実行ファイルの名前が `cirka` です。cirka だけの説明は [client/README.md](client/README.md)）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
 
 #### ビルドと配布
 
@@ -546,7 +546,7 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 | `list_dir` / `glob` / `grep` / `read_file` | 一覧、パターン検索、正規表現検索（.gitignore と `.cirkaignore` に従う）、行番号付きの読み取り | 自動 |
 | `edit_file` | 一意に一致する原文を置き換える（先に `read_file` したファイルだけ。CRLF を保つ） | 自動（差分を表示） |
 | `write_file` | 新規作成、または読んだファイルの置き換え | 自動（差分を表示） |
-| `bash` | シェルのコマンド（Windows は PowerShell、ほかは `sh -lc`）。既定 120 秒・最大 600 秒、出力 64 KiB まで、時間切れや Ctrl-C でプロセスツリーごと止める | 自動（危険な操作だけ確認） |
+| `bash` | シェルのコマンド（Windows は PowerShell、ほかは `sh -lc`）。出力が 20 分（`idle_timeout_s`）途切れたときだけ止める（出し続けるビルドは最後まで待つ）、出力 64 KiB まで、止めるときや Ctrl-C はプロセスツリーごと | 自動（危険な操作だけ確認） |
 | `todo_write` / `ask_user` | タスク一覧、利用者への質問 | 自動 |
 | `web_search` | ホストのチャットタブの検索（Tor 経由、出典付き） | 自動 |
 | `image_generate` | ホストの画像タブ（参照画像 0〜4 枚と役割）。画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを返す | 自動 |
@@ -604,7 +604,7 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 |---|---|---|
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | LangGraph から見た ComfyUI |
 | `CKPT_NAME` | `yiffInHell_yihVANTABLACK.safetensors` | 使うチェックポイント（実行時にワークフローの値を上書き） |
-| `COMFYUI_TIMEOUT_S` | `600` | 待ち時間の上限（タグ生成・画像生成それぞれ） |
+| `AGENT_IDLE_TIMEOUT_S` | `1200` | 何も返ってこない時間の上限（秒）。画像タブ・チャットタブ・`/coder/turn` で共通（下の「タイムアウト」） |
 | `LORAS` | 空 | 適用する LoRA（「4. 使い方 › LoRA」） |
 | `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `flux`（Chroma1-HD、英語の説明文） |
 | `CHROMA_UNET_NAME` / `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | Chroma のモデルファイルと読み込み精度（「4. 使い方 › Chroma1-HD」） |
@@ -623,25 +623,42 @@ LM Studio 側の値を変えるときは、`.\scripts\setup-lmstudio.ps1 -GpuOff
 | `LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | チャットタブの会話と検索の計画・統合だけが使う |
 | `TOR_SOCKS_URL` / `TOR_EXE` / `TOR_AUTOSTART` | `socks5h://127.0.0.1:9050` / セットアップが設定 / `1` | Tor。`socks5h` 以外は拒否（DNS 漏れ防止） |
 | `SEARCH_FANOUT_WIDTH` / `SEARCH_MAX_RESULTS` | `3` / `5` | 検索意図と reader の数の上限（1〜3）、1 検索の結果数 |
-| `SEARCH_TIMEOUT_S` / `SEARCH_TOTAL_TIMEOUT_S` | `30` / `150` | 1 リクエストの上限、reader 1 体の上限 |
+| `SEARCH_TIMEOUT_S` / `SEARCH_TOTAL_TIMEOUT_S` | `30` / `0` | Tor 経由の HTTP リクエスト 1 回の上限（止まったページは飛ばして続ける）、reader 1 体の時間の予算（0 = なし） |
 | `SEARCH_PLANNER` | `lmstudio` | `local` にすると、計画も代理 27B が行う（LM Studio を検索で使わない） |
 | `SEARCH_FILTER` / `SEARCH_CRITIQUE` / `SEARCH_AUTO_ROUTE` | `1` | フィルタ / 思考モードの批評と追加ラウンド / 決まらない文のルータ判定 |
-| `CHAT_TIMEOUT_S` | `1200` | 会話・文章・コード・統合のモデル呼び出し 1 回の上限（20 分） |
-| `SEARCH_MAX_ROUNDS` / `SEARCH_MAX_PAGES` / `SEARCH_WALL_CLOCK_S` | `4` / `12` / `1200` | 思考モードの検索のラウンド、読むページ、全体の時間（20 分）の上限 |
+| `SEARCH_MAX_ROUNDS` / `SEARCH_MAX_PAGES` / `SEARCH_WALL_CLOCK_S` | `4` / `12` / `0` | 思考モードの検索のラウンド、読むページ、全体の時間の予算（0 = なし） |
 | `SEARCH_HITS_PER_INTENT` | `4` | 1 つの検索意図から reader に渡す結果数 |
 | `CHAT_THINK_TOKENS` | `3072` | 思考モードで回答に足す思考トークンの上限（context と速さの範囲内で使う） |
-| `LMSTUDIO_CONTEXT` / `LMSTUDIO_TOKENS_PER_S` | `4096` / `1.0` | 27B の context と、測る前の生成速度。1 回の呼び出しの量をこの範囲に収める |
-| `SANDBOX_DOCKER` / `SANDBOX_USER` / `SANDBOX_WAIT_S` | `docker` / `10001:10001` / `600` | コード実行の docker、コンテナ内の uid:gid（root は不可）、画像タブの生成が終わるのを待つ上限 |
+| `LMSTUDIO_CONTEXT` | `4096` | 27B の context。1 回の呼び出しの量（回答 + 思考）をこの範囲に収める |
+| `SANDBOX_DOCKER` / `SANDBOX_USER` / `SANDBOX_WAIT_S` | `docker` / `10001:10001` / 空 | コード実行の docker、コンテナ内の uid:gid（root は不可）、画像タブの生成が終わるのを待つ上限（空 = 生成が進んでいるあいだは待つ） |
 | `BONSAI_LLAMA_SERVER` / `BONSAI_MODELS_DIR` | セットアップが設定 | PrismML fork の llama-server.exe と、モデルの置き場 |
 | `BONSAI_MODEL` | 空（自動） | reader のモデルを固定する（`ternary-8b` など）。入らなければ断る |
 | `BONSAI_RESERVE_MB` | `3072` | モデルを何体載せるか決めるときに残す空きメモリ |
-| `JOB_LOCK_TIMEOUT_S` | `30` | もう片方のタブの実行が終わるのを待つ上限 |
+| `JOB_LOCK_TIMEOUT_S` | 空 | もう片方のタブの実行が終わるのを待つ上限（空 = 相手が動いているあいだは待つ） |
 | `CLAIM_VERIFY` / `CLAIM_VERIFY_FAIL_OPEN` | `1` / `0` | 主張の突き合わせ（`0` で旧来の統合） / 失敗時に無監査の回答を出すか |
-| `CLAIM_MAX` / `CLAIM_QUOTE_CHARS` / `CLAIM_TIMEOUT_S` | `12` / `400` / `600` | 主張の上限、判定に見せる抜粋の長さ、抽出 + 判定 + 監査の時間の上限 |
+| `CLAIM_MAX` / `CLAIM_QUOTE_CHARS` / `CLAIM_TIMEOUT_S` | `12` / `400` / `0` | 主張の上限、判定に見せる抜粋の長さ、抽出 + 判定 + 監査の時間の予算（0 = なし） |
 | `CONTROLLER_MAX_STEPS` | `3` | 自律モードで道具を使う回数の上限（1〜4） |
-| `CONTROLLER_WALL_CLOCK_S` | 空（`SEARCH_WALL_CLOCK_S`） | 自律モード全体の時間の上限。`SEARCH_WALL_CLOCK_S` を超える値は `SEARCH_WALL_CLOCK_S` になる |
+| `CONTROLLER_WALL_CLOCK_S` | 空（`SEARCH_WALL_CLOCK_S`） | 自律モード全体の時間の予算（どちらも 0 なら無し）。`SEARCH_WALL_CLOCK_S` を設定したときは、それを超えない |
 
-cirka 向けの `POST /coder/turn` は、`LMSTUDIO_URL`、`LMSTUDIO_MODEL`、`LMSTUDIO_CONTEXT`、`LMSTUDIO_TOKENS_PER_S`、`CHAT_TIMEOUT_S` を使います（新しいキーはありません）。
+cirka 向けの `POST /coder/turn` は、`LMSTUDIO_URL`、`LMSTUDIO_MODEL`、`LMSTUDIO_CONTEXT`、`AGENT_IDLE_TIMEOUT_S`、`JOB_LOCK_TIMEOUT_S` を使います。
+
+### タイムアウト
+
+エージェントは「何も返ってこない時間」だけで打ち切ります。何かが返ってきている限り、全体にかかる時間では打ち切りません。この端末の上で 27B や拡散モデルを動かす都合上、時間がかかることはよくあるためです。上限は `.env` の `AGENT_IDLE_TIMEOUT_S`（既定 1200 秒 = 20 分）の 1 か所で変えます（変えたら LangGraph を再起動）。
+
+| 待つもの | 「返ってきている」とみなすもの |
+|---|---|
+| LM Studio の 27B、検索用の llama-server の応答 | ストリームで届くトークン・思考トークン（応答はすべてストリームで受け取る） |
+| llama-server の起動 | `/health` の応答（モデル読み込み中の 503 も含む） |
+| ComfyUI の生成（タグ生成と画像生成） | その prompt の進捗イベント（ノードの実行、サンプラーの 1 ステップごとの進捗など）。ComfyUI の LM Connect ノードが LM Studio を待つ時間（read timeout）も同じ値にする |
+| ComfyUI のキューが空くのを待つ / もう片方のタブの処理を待つ | 相手の処理が続いていること（ComfyUI がキューに応答している、相手がロックの期限を延ばしている）。止まった相手のロックは 15 分の期限で外れる |
+| cirka の `/coder/turn` | トークンと、待っているあいだ 5 秒ごとに送る状態通知 |
+
+- 次のものは時間の上限を既定で持ちません（設定すれば掛かります）: 思考モードの検索全体（`SEARCH_WALL_CLOCK_S`）、主張の検証（`CLAIM_TIMEOUT_S`）、自律モード（`CONTROLLER_WALL_CLOCK_S`）、reader 1 体（`SEARCH_TOTAL_TIMEOUT_S`）、ほかのタブを待つ時間（`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）。量はラウンド・ページ・手数・主張の数で決まります。
+- 次のものは短い上限を残しています。エージェント全体を止めるものではなく、その 1 件を諦めて先へ進むためのものです: Tor 経由の検索・ページ取得の HTTP リクエスト 1 回（`SEARCH_TIMEOUT_S`、30 秒。止まったページは飛ばします）、Tor の起動（90 秒）、ComfyUI・LM Studio・Docker への状態確認の HTTP リクエスト。
+- チャットタブのコンテナ実行は 1 回 60 秒で止めます（モデルが書いたコードの安全のための固定の上限で、このリポジトリの規則で決めています）。
+- `COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は読まなくなりました（`AGENT_IDLE_TIMEOUT_S` にまとめました）。
+- cirka 側の上限は cirka の設定 `idle_timeout_s`（既定 1200 秒）です（[client/README.md](client/README.md)）。
 
 ## 6. メモリと LLM の量子化
 
@@ -806,13 +823,13 @@ uv run python scripts\gen_cirka_art.py         # docs\logo を変えたら cirka
 | 「チャットタブ（画像タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す |
 | チャットタブのコードで「Docker Desktop が起動していません」/「Docker がインストールされていません」 | Docker Desktop を入れて `.\scripts\setup-sandbox.ps1`（イメージ取得と動作確認）。普段は止めたままでよく、承認後に自動で起動・停止する |
 | 「コンテナイメージ python:3.12-slim がありません」 | `.\scripts\setup-sandbox.ps1`（Rust は `-Rust`）。実行時はイメージを取得しない（`--pull never`） |
-| 思考モードなのに「思考」の折りたたみが出ない | 答えに要る量と 20 分の時間枠（約 1000 トークン）に思考の余地が無いと、思考なしで答える（`logs\furry_agent.log` の `thinking=False`）。代理リーダーが統合した検索の回答にも思考は無い |
+| 思考モードなのに「思考」の折りたたみが出ない | context（4096）に答えの分と思考の余地が残らないと、思考なしで答える（`logs\furry_agent.log` の `thinking=False`）。代理リーダーが統合した検索の回答にも思考は無い |
 | 思考モードの文章・コードがとても遅い | この端末の 27B は約 0.9 トークン/秒。長い文章は章立てにするか「速い」で送る |
 | 「LM Studio に接続できないか、時間切れです（HTTP 400: Model is unloaded.）」 | LM Studio の自動 unload と要求が重なった。1 回は自動で送り直すので、続くときは送り直す |
 | `doctor.ps1` で「no orphan llama-server」が WARN | 検索中でなければ `Stop-Process -Name llama-server` |
 | ブラウザに Deployment URL の入力画面が出る / 接続できない | `start-ui.ps1` を再実行（LAN IP が変わると再ビルド）。`open-firewall.ps1` を管理者で実行。ネットワークがプライベートか確認 |
 | 「生成できませんでした: ... Failed to load model」 | メモリ不足。他のアプリを閉じる、`setup-lmstudio.ps1 -GpuOffload 0.4` に下げる、ComfyUI を再起動して常駐メモリを解放 |
-| 10 分でタイムアウト | 同上。参照画像の枚数を減らす。完了していれば `再取得 <prompt_id>` で受け取れる |
+| 「… 秒間進捗がありません」「… 秒間応答がありませんでした」 | ComfyUI か LM Studio が止まっている（メモリ不足が多い）。上と同じ対処。本当に長く無音になる処理なら `AGENT_IDLE_TIMEOUT_S` を増やす。画像は完了していれば `再取得 <prompt_id>` で受け取れる |
 | 「この環境の ComfyUI に無いノードがあります」 | `setup-comfyui-refs.ps1` を実行して ComfyUI を再起動。`doctor.ps1` の reference nodes を確認 |
 | 「この環境の ComfyUI に無いノードがあります: FurryJaDiffusionLoaderAfterEject」 | Chroma 対応後に ComfyUI を再起動していない。`start-comfyui.ps1` で起動し直す |
 | 「Chroma1-HD のモデルファイルが ComfyUI に見つかりません」 | `setup-comfyui-chroma.ps1` を実行。拡散モデルは手動で `models\diffusion_models` か `models\checkpoints` に置く |
@@ -857,7 +874,7 @@ uv run python scripts\gen_cirka_art.py         # docs\logo を変えたら cirka
 - コードの実行は Docker Desktop（Linux エンジン）だけです。Windows コンテナ、WSL 直接、ホストでの実行はしません。コンテナ内からネットワークは使えず（依存の取得だけ例外）、1 回 60 秒・2GB までです。GUI、サーバの常駐、標準入力を使うプログラムは動きません。
 - 思考トークンは LM Studio の 27B だけです。代理リーダー（Ternary-Bonsai-2-27B）は `--reasoning off` のまま動かすので、代理で統合した回答には思考の折りたたみが出ません。
 - 検索モデルは PrismML の llama.cpp fork の Vulkan 版だけで動かします（Q1_0 / PQ2_0 / PTQ1_0 は素の llama.cpp や LM Studio では動かないため）。ROCm 版は使いません。
-- チャットタブの自律モードは、この端末では思考モードの検索 1 回で時間の上限（20 分）に近づくため、検索のあとで次の道具に進まずに終わることが多いです。
+- チャットタブの自律モードは時間の上限を既定で持たないため、この端末では検索から執筆まで進む依頼に 1 時間近くかかることがあります。時間で区切りたいときは `CONTROLLER_WALL_CLOCK_S` を設定します。
 - cirka: ホストの 27B は context 4096・1 ターン数分です。ツールの結果は窓に合わせて切り詰めます。`bash` は OS のサンドボックスなしで cirka を動かした PC の上で動き、既定の auto では確認なしで実行します（危険な操作の一覧だけ確認）。信頼できないリポジトリでは `/default` か `/plan` で使ってください。実行中の中断は Ctrl-C（Esc ではありません）。ロゴの絵は JPG から作っており、SVG はまだ使っていません。
 
 ## ライセンス

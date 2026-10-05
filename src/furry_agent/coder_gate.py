@@ -34,10 +34,10 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from furry_agent import modes
-from furry_agent.chat_common import _image_tab_busy, prompt_tokens, time_cap
+from furry_agent.chat_common import _image_tab_busy, prompt_tokens
 from furry_agent.config import ChatSettings
 from furry_agent.job_lock import job_lock
-from furry_agent.llm_client import LMStudio
+from furry_agent.llm_client import LMStudio, idle_timeout
 from furry_agent.router import CHAT, Route as ChatRoute
 
 log = logging.getLogger("furry_agent.coder")
@@ -45,7 +45,6 @@ log = logging.getLogger("furry_agent.coder")
 ROLES = ("system", "user", "assistant", "tool")
 DEFAULT_MAX_TOKENS = 2048
 MIN_ROOM = 256          # less room than this for the reply: the CUI must compact (context_overflow)
-LOCK_WAIT_S = 600.0     # the image tab's generation can take minutes (COMFYUI_TIMEOUT_S)
 STATUS_EVERY_S = 5.0
 
 
@@ -147,7 +146,7 @@ def parse_turn(body: Any) -> Turn:
 
 def budget(turn: Turn, settings: ChatSettings, client: LMStudio) -> tuple[int, int]:
     """(max_tokens, prompt estimate). The 27B runs with LMSTUDIO_CONTEXT (4096 on this machine): the prompt plus
-    the tool schemas plus the reply must fit, and the reply must end within CHAT_TIMEOUT_S."""
+    the tool schemas plus the reply must fit. There is no time cap: the stream has an idle timeout only."""
     estimate = prompt_tokens(turn.messages)
     if turn.tools:
         estimate += prompt_tokens([{"content": json.dumps(turn.tools, ensure_ascii=False)}])
@@ -155,8 +154,7 @@ def budget(turn: Turn, settings: ChatSettings, client: LMStudio) -> tuple[int, i
     if room < MIN_ROOM:
         raise GateError(f"文脈が足りません（推定 {estimate} トークン、窓 {settings.lmstudio_ctx}）。会話を圧縮してください",
                         "context_overflow")
-    cap = time_cap(settings, client) or room
-    return min(turn.max_tokens, room, cap), estimate
+    return min(turn.max_tokens, room), estimate
 
 
 def sse(event: str, data: dict) -> bytes:
@@ -199,7 +197,7 @@ async def stream_lmstudio(client: LMStudio, turn: Turn, max_tokens: int, timeout
     if turn.tools:
         body["tools"] = turn.tools
         body["tool_choice"] = "auto"
-    kwargs: dict[str, Any] = {"timeout": httpx.Timeout(timeout_s, connect=10.0), "trust_env": False}
+    kwargs: dict[str, Any] = {"timeout": idle_timeout(timeout_s), "trust_env": False}
     if transport is not None:
         kwargs["transport"] = transport
     for attempt in (1, 2):
@@ -225,13 +223,16 @@ async def stream_lmstudio(client: LMStudio, turn: Turn, max_tokens: int, timeout
                             continue
                     return
             except httpx.TimeoutException as exc:
-                raise GateError(f"LM Studio の応答が時間切れです（{timeout_s:.0f} 秒）", "lmstudio") from exc
+                raise GateError(f"LM Studio が {timeout_s:.0f} 秒間応答しませんでした", "lmstudio") from exc
             except httpx.HTTPError as exc:
                 raise GateError(f"LM Studio に接続できません: {exc!r}", "lmstudio") from exc
 
 
 async def _acquire(settings: ChatSettings, comfy_config: dict | None) -> AsyncIterator[str | dict]:
-    """Yields status dicts while waiting, then the lock token (str). Raises GateError("busy") after LOCK_WAIT_S."""
+    """Yields status dicts while waiting, then the lock token (str). The other job is waited for while it works
+    (the holder renews its lease; the image run has its own idle timeout); JOB_LOCK_TIMEOUT_S, when set, bounds
+    the wait with GateError("busy"). The status events keep the CUI's idle timer from running out."""
+    limit = settings.job_lock_timeout_s
     started = time.monotonic()
     last_status = 0.0
     while True:
@@ -245,8 +246,8 @@ async def _acquire(settings: ChatSettings, comfy_config: dict | None) -> AsyncIt
         else:
             holder = job_lock.holder or "?"
         now = time.monotonic()
-        if now - started > LOCK_WAIT_S:
-            raise GateError(f"{holder} の処理が終わりません（{LOCK_WAIT_S:.0f} 秒待ちました）", "busy")
+        if limit is not None and now - started > limit:
+            raise GateError(f"{holder} の処理が終わりません（{limit:.0f} 秒待ちました）", "busy")
         if now - last_status >= STATUS_EVERY_S:
             last_status = now
             yield {"state": "waiting", "holder": holder, "waited_s": round(now - started)}
@@ -257,7 +258,7 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LMStudio | Non
                    transport: httpx.AsyncBaseTransport | None = None,
                    comfy_config: dict | None = None) -> AsyncIterator[bytes]:
     """The SSE body of one turn. Tool calls are sent only after the stream ended (a broken stream sends none)."""
-    client = client or LMStudio(settings.lmstudio_url, settings.lmstudio_model, settings.chat_timeout_s)
+    client = client or LMStudio(settings.lmstudio_url, settings.lmstudio_model, settings.idle_timeout_s)
     token = None
     started = time.monotonic()
     try:
@@ -268,7 +269,7 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LMStudio | Non
             else:
                 yield sse("status", item)
         out = Collected()
-        async for chunk in stream_lmstudio(client, turn, max_tokens, settings.chat_timeout_s, transport):
+        async for chunk in stream_lmstudio(client, turn, max_tokens, settings.idle_timeout_s, transport):
             job_lock.renew(token)
             text, thinking = apply_chunk(chunk, out)
             if thinking:

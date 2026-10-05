@@ -21,6 +21,18 @@ CHROMA_MODEL_ENV = {
 CHROMA_DEFAULT_ENV = {"CHROMA_MAX_PIXELS": "max_pixels", "CHROMA_STEPS": "steps"}
 
 
+# How long the agent waits while nothing at all comes back (no token, no progress event, no output), in seconds.
+# Anything that keeps answering is waited for without a limit: a local machine can take long (AGENT_IDLE_TIMEOUT_S).
+IDLE_TIMEOUT_DEFAULT_S = 1200.0
+IDLE_TIMEOUT_MIN_S = 30.0
+
+
+def idle_timeout_from_env() -> float:
+    raw = os.environ.get("AGENT_IDLE_TIMEOUT_S", "").strip()
+    value = float(raw) if raw else IDLE_TIMEOUT_DEFAULT_S
+    return max(IDLE_TIMEOUT_MIN_S, value)
+
+
 @dataclass(frozen=True)
 class Settings:
     comfyui_url: str
@@ -28,6 +40,7 @@ class Settings:
     workflows_dir: Path
     outputs_dir: Path
     logs_dir: Path
+    # Idle timeout of a ComfyUI run: no progress event for this long (AGENT_IDLE_TIMEOUT_S).
     timeout_s: float
     model_family: str = SDXL
     loras: str = ""
@@ -44,7 +57,7 @@ class Settings:
             workflows_dir=Path(os.environ.get("WORKFLOWS_DIR", REPO_ROOT / "workflows")),
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", REPO_ROOT / "outputs")),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
-            timeout_s=float(os.environ.get("COMFYUI_TIMEOUT_S", "600")),
+            timeout_s=idle_timeout_from_env(),
             # sdxl (yiffInHell, Danbooru tags; default) or flux (Chroma1-HD, prose). Alias: illustrious.
             model_family=canonical_family(os.environ.get("COMFY_MODEL_FAMILY")) or SDXL,
             # "name[:model_strength[:clip_strength]]", comma separated. Empty = no LoRA.
@@ -95,6 +108,11 @@ def _float(name: str, default: float) -> float:
 
 
 
+def _optional_float(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    return float(raw) if raw else None
+
+
 def _path(name: str, default: Path) -> Path:
     raw = os.environ.get(name, "").strip()
     path = Path(raw) if raw else default
@@ -109,11 +127,9 @@ class ChatSettings:
     lmstudio_model: str = ""
     # Context window of the LM Studio 27B (scripts/setup-lmstudio.ps1 loads it with 4096: more does not fit).
     lmstudio_ctx: int = 4096
-    # Generation speed of the LM Studio 27B before one is measured (tokens/s). Measured on the Ally X: ~0.9.
-    lmstudio_tokens_per_s: float = 1.0
-    # One model call of the chat tab (conversation, writing, code, synthesis). 20 minutes: the 27B on this machine
-    # needs minutes for a long draft or for thinking tokens.
-    chat_timeout_s: float = 1200.0
+    # No response for this long ends a model call or a wait (AGENT_IDLE_TIMEOUT_S, 20 minutes). Model calls stream,
+    # so every token counts as a response; a call that keeps producing tokens is never cut off.
+    idle_timeout_s: float = IDLE_TIMEOUT_DEFAULT_S
     history_turns: int = 12
     tor_socks_url: str = "socks5h://127.0.0.1:9050"
     tor_required: bool = True
@@ -121,13 +137,17 @@ class ChatSettings:
     tor_autostart: bool = True
     search_max_results: int = 5
     search_fetch_pages: int = 1
+    # One HTTP request through Tor (a search page, a result page): a stalled page is skipped, the run goes on.
     search_timeout_s: float = 30.0
-    search_total_timeout_s: float = 150.0
+    # Optional budget of one reader over all its pages (0 = no limit; its model calls use the idle timeout).
+    search_total_timeout_s: float = 0.0
     fanout_width: int = 3
     # Deep search (think mode; docs/chat-deep-search-creative-sandbox.md §3.4). Width stays, rounds grow.
     search_max_rounds: int = 4
     search_max_pages: int = 12
-    search_wall_clock_s: float = 1200.0
+    # Optional budget of a think-mode search before it stops adding rounds (0 = no limit; rounds and pages still
+    # bound it).
+    search_wall_clock_s: float = 0.0
     hits_per_intent: int = 4
     # Thinking tokens added to max_tokens in think mode.
     think_tokens: int = 3072
@@ -136,12 +156,13 @@ class ChatSettings:
     docker_exe: str = "docker"
     sandbox_user: str = "10001:10001"
     code_dir: Path = REPO_ROOT / "artifacts" / "code"
-    sandbox_wait_s: float = 600.0
+    sandbox_wait_s: float | None = None
     search_planner: str = "lmstudio"
     search_filter: bool = True
     search_critique: bool = True
     auto_route: bool = True
-    job_lock_timeout_s: float = 30.0
+    # Waiting for the other tab's job (None = AGENT_IDLE_TIMEOUT_S; the holder renews its lease while it works).
+    job_lock_timeout_s: float | None = None
     llama_server: str = ""
     models_dir: Path = REPO_ROOT / "tools" / "models"
     model_override: str = ""
@@ -150,7 +171,6 @@ class ChatSettings:
     rank_path: Path = REPO_ROOT / "tools" / "bonsai" / "rank.json"
     catalog_path: Path = REPO_ROOT / "config" / "search_models.json"
     base_port: int = 18181
-    worker_timeout_s: float = 120.0
     logs_dir: Path = REPO_ROOT / "logs"
     prompts_dir: Path = REPO_ROOT / "prompts"
     comfyui_url: str = "http://127.0.0.1:8188"
@@ -158,17 +178,28 @@ class ChatSettings:
     claim_verify: bool = True
     claim_max: int = 12
     claim_quote_chars: int = 400
-    claim_timeout_s: float = 600.0
+    # Optional budget of the whole claim check (0 = no limit; its model calls use the idle timeout).
+    claim_timeout_s: float = 0.0
     claim_fail_open: bool = False
-    # Control loop (docs/autonomous-controller-design.md §10): tools run per compound think request, and the
-    # wall clock of the whole loop (0 = SEARCH_WALL_CLOCK_S; never more than that).
+    # Control loop (docs/autonomous-controller-design.md §10): tools run per compound think request, and an
+    # optional wall clock of the whole loop (0 = SEARCH_WALL_CLOCK_S; both 0 = no limit, the steps bound it).
     controller_max_steps: int = 3
     controller_wall_clock_s: float = 0.0
 
     @property
     def controller_budget_s(self) -> float:
-        limit = self.controller_wall_clock_s or self.search_wall_clock_s
-        return min(limit, self.search_wall_clock_s)
+        """The control loop's wall clock (0 = no limit). It never exceeds a search budget when one is set."""
+        limits = [x for x in (self.controller_wall_clock_s, self.search_wall_clock_s) if x > 0]
+        return min(limits) if limits else 0.0
+
+    @property
+    def lock_wait_s(self) -> float:
+        """How long to wait for the other tab's job (JOB_LOCK_TIMEOUT_S, else the idle timeout)."""
+        return self.job_lock_timeout_s if self.job_lock_timeout_s is not None else self.idle_timeout_s
+
+    @property
+    def sandbox_wait_limit_s(self) -> float:
+        return self.sandbox_wait_s if self.sandbox_wait_s is not None else self.idle_timeout_s
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
@@ -180,8 +211,7 @@ class ChatSettings:
             lmstudio_url=os.environ.get("LMSTUDIO_URL", "").strip() or "http://127.0.0.1:1234/v1",
             lmstudio_model=os.environ.get("LMSTUDIO_MODEL", "").strip(),
             lmstudio_ctx=_int("LMSTUDIO_CONTEXT", 4096, 1024, 262144),
-            lmstudio_tokens_per_s=_float("LMSTUDIO_TOKENS_PER_S", 1.0),
-            chat_timeout_s=_float("CHAT_TIMEOUT_S", 1200.0),
+            idle_timeout_s=idle_timeout_from_env(),
             history_turns=_int("CHAT_HISTORY_TURNS", 12, 1, 100),
             tor_socks_url=socks,
             tor_required=os.environ.get("TOR_REQUIRED", "1").strip() != "0",
@@ -190,24 +220,24 @@ class ChatSettings:
             search_max_results=_int("SEARCH_MAX_RESULTS", 5, 1, 8),
             search_fetch_pages=_int("SEARCH_FETCH_PAGES", 1, 0, 2),
             search_timeout_s=_float("SEARCH_TIMEOUT_S", 30.0),
-            search_total_timeout_s=_float("SEARCH_TOTAL_TIMEOUT_S", 150.0),
+            search_total_timeout_s=_float("SEARCH_TOTAL_TIMEOUT_S", 0.0),
             fanout_width=_int("SEARCH_FANOUT_WIDTH", 3, 1, 3),
             search_max_rounds=_int("SEARCH_MAX_ROUNDS", 4, 1, 4),
             search_max_pages=_int("SEARCH_MAX_PAGES", 12, 1, 12),
-            search_wall_clock_s=_float("SEARCH_WALL_CLOCK_S", 1200.0),
+            search_wall_clock_s=_float("SEARCH_WALL_CLOCK_S", 0.0),
             hits_per_intent=_int("SEARCH_HITS_PER_INTENT", 4, 1, 8),
             think_tokens=_int("CHAT_THINK_TOKENS", 3072, 0, 16384),
             docker_exe=os.environ.get("SANDBOX_DOCKER", "").strip() or "docker",
             sandbox_user=os.environ.get("SANDBOX_USER", "").strip() or "10001:10001",
             code_dir=_path("SANDBOX_CODE_DIR", REPO_ROOT / "artifacts" / "code"),
-            sandbox_wait_s=_float("SANDBOX_WAIT_S", 600.0),
+            sandbox_wait_s=_optional_float("SANDBOX_WAIT_S"),
             # lmstudio = the Qwen3.8 27B plans first and is unloaded when the readers do not fit next to it;
             # local = the Ternary-Bonsai-2-27B proxy plans too (LM Studio is not loaded for a search at all).
             search_planner=(os.environ.get("SEARCH_PLANNER", "").strip().lower() or "lmstudio"),
             search_filter=os.environ.get("SEARCH_FILTER", "1").strip() != "0",
             search_critique=os.environ.get("SEARCH_CRITIQUE", "1").strip() != "0",
             auto_route=os.environ.get("SEARCH_AUTO_ROUTE", "1").strip() != "0",
-            job_lock_timeout_s=_float("JOB_LOCK_TIMEOUT_S", 30.0),
+            job_lock_timeout_s=_optional_float("JOB_LOCK_TIMEOUT_S"),
             llama_server=os.environ.get("BONSAI_LLAMA_SERVER", "").strip(),
             models_dir=_path("BONSAI_MODELS_DIR", REPO_ROOT / "tools" / "models"),
             model_override=os.environ.get("BONSAI_MODEL", "").strip(),
@@ -215,13 +245,12 @@ class ChatSettings:
             reserve_mb=_int("BONSAI_RESERVE_MB", 3072, 0),
             rank_path=_path("BONSAI_RANK", REPO_ROOT / "tools" / "bonsai" / "rank.json"),
             base_port=_int("BONSAI_BASE_PORT", 18181, 1024, 65000),
-            worker_timeout_s=_float("BONSAI_WORKER_TIMEOUT_S", 120.0),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             comfyui_url=os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"),
             claim_verify=os.environ.get("CLAIM_VERIFY", "1").strip() != "0",
             claim_max=_int("CLAIM_MAX", 12, 1, 12),
             claim_quote_chars=_int("CLAIM_QUOTE_CHARS", 400, 80, 400),
-            claim_timeout_s=_float("CLAIM_TIMEOUT_S", 600.0),
+            claim_timeout_s=_float("CLAIM_TIMEOUT_S", 0.0),
             claim_fail_open=os.environ.get("CLAIM_VERIFY_FAIL_OPEN", "0").strip() == "1",
             controller_max_steps=_int("CONTROLLER_MAX_STEPS", 3, 1, 4),
             controller_wall_clock_s=_float("CONTROLLER_WALL_CLOCK_S", 0.0),

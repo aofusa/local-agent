@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::platform;
 
 pub const DEFAULT_HOST: &str = "http://127.0.0.1:2024";
+/// 20 minutes without any answer (the host's AGENT_IDLE_TIMEOUT_S has the same default).
+pub const DEFAULT_IDLE_TIMEOUT_S: u64 = 1200;
+pub const MIN_IDLE_TIMEOUT_S: u64 = 10;
 pub const KEYS: &[&str] = &[
     "host",
     "mode",
@@ -20,8 +23,6 @@ pub const KEYS: &[&str] = &[
     "locale",
     "auth_header",
     "idle_timeout_s",
-    "search_timeout_s",
-    "image_timeout_s",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,8 +118,6 @@ pub struct FileConfig {
     pub locale: Option<String>,
     pub auth_header: Option<String>,
     pub idle_timeout_s: Option<u64>,
-    pub search_timeout_s: Option<u64>,
-    pub image_timeout_s: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,10 +130,10 @@ pub struct Config {
     pub locale: String,
     /// `Name: value`, sent with every request when set. No auth scheme is decided yet (local-agent AGENTS.md).
     pub auth_header: Option<(String, String)>,
-    /// A model turn with no event for this long is abandoned (the 27B can take minutes to load and prefill).
+    /// Seconds without any answer before cirka gives up: a model turn, a host search or image run, a shell
+    /// command without output. Anything that keeps answering (tokens, progress, output) is waited for without a
+    /// limit; the host's 27B on a small machine can take long.
     pub idle_timeout_s: u64,
-    pub search_timeout_s: u64,
-    pub image_timeout_s: u64,
     /// Where each value came from, for `cirka config show`.
     pub sources: Vec<String>,
 }
@@ -149,9 +148,7 @@ impl Default for Config {
             max_turns: 40,
             locale: "ja".into(),
             auth_header: None,
-            idle_timeout_s: 900,
-            search_timeout_s: 1500,
-            image_timeout_s: 1500,
+            idle_timeout_s: DEFAULT_IDLE_TIMEOUT_S,
             sources: vec!["defaults".into()],
         }
     }
@@ -236,15 +233,7 @@ impl Config {
             used = true;
         }
         if let Some(n) = layer.idle_timeout_s {
-            self.idle_timeout_s = n.max(10);
-            used = true;
-        }
-        if let Some(n) = layer.search_timeout_s {
-            self.search_timeout_s = n.max(10);
-            used = true;
-        }
-        if let Some(n) = layer.image_timeout_s {
-            self.image_timeout_s = n.max(10);
+            self.idle_timeout_s = n.max(MIN_IDLE_TIMEOUT_S);
             used = true;
         }
         if used {
@@ -274,7 +263,7 @@ pub fn project_config_path(cwd: &Path) -> PathBuf {
     cwd.join(".cirka").join("config.toml")
 }
 
-/// CIRKA_HOST, CIRKA_MODE, CIRKA_PERMISSION, CIRKA_AUTH_HEADER.
+/// CIRKA_HOST, CIRKA_MODE, CIRKA_PERMISSION, CIRKA_AUTH_HEADER, CIRKA_IDLE_TIMEOUT_S.
 pub fn env_layer(get: impl Fn(&str) -> Option<String>) -> FileConfig {
     let pick = |k: &str| get(k).filter(|v| !v.trim().is_empty());
     FileConfig {
@@ -282,6 +271,7 @@ pub fn env_layer(get: impl Fn(&str) -> Option<String>) -> FileConfig {
         mode: pick("CIRKA_MODE"),
         permission: pick("CIRKA_PERMISSION"),
         auth_header: pick("CIRKA_AUTH_HEADER"),
+        idle_timeout_s: pick("CIRKA_IDLE_TIMEOUT_S").and_then(|v| v.trim().parse().ok()),
         ..FileConfig::default()
     }
 }
@@ -317,8 +307,6 @@ pub fn write_key(path: &Path, key: &str, value: Option<&str>) -> Result<FileConf
         "locale" => file.locale = v,
         "auth_header" => file.auth_header = v,
         "idle_timeout_s" => file.idle_timeout_s = num(&v)?,
-        "search_timeout_s" => file.search_timeout_s = num(&v)?,
-        "image_timeout_s" => file.image_timeout_s = num(&v)?,
         _ => unreachable!(),
     }
     // Validate the whole file as it will be read back.
@@ -341,8 +329,6 @@ pub fn get_key(config: &Config, key: &str) -> Option<String> {
         "locale" => config.locale.clone(),
         "auth_header" => config.auth_header.as_ref().map(|(n, _)| format!("{n}: ***")).unwrap_or_default(),
         "idle_timeout_s" => config.idle_timeout_s.to_string(),
-        "search_timeout_s" => config.search_timeout_s.to_string(),
-        "image_timeout_s" => config.image_timeout_s.to_string(),
         _ => return None,
     })
 }
