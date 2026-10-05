@@ -2,9 +2,11 @@
 
 The mode changes budgets and thinking tokens, not the graph: one chat graph reads ``mode`` from state.
 
-- ``fast``: one search round without critique, one-shot writing, code is generated but never run, thinking off.
+- ``fast``: one search round without critique, one-shot writing, code is generated but never run, thinking off;
+  /docs reads the planned sections in order.
 - ``think``: up to 4 search rounds scored against sub-questions, outline -> draft -> revise, code runs in the
-  Docker sandbox after approval, thinking tokens on (shown apart from the answer).
+  Docker sandbox after approval, thinking tokens on (shown apart from the answer); /docs lets the leader pick the
+  next sections after each wave (coverage check).
 - ``auto``: like Grok's auto mode, the request picks one of the two. The rules below decide from the task and the
   wording (comparison, analysis, long writing, running code ...); when the router model was asked anyway (an
   ambiguous message), its ``deep`` flag breaks a tie. Pure functions; no model is loaded only for this choice.
@@ -17,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from furry_agent.router import CHAT, CODE, SEARCH, WRITE, Route
+from furry_agent.router import CHAT, CODE, DOCS, SEARCH, WRITE, Route
 
 FAST, THINK, AUTO = "fast", "think", "auto"
 MODES = (FAST, THINK, AUTO)
@@ -103,6 +105,12 @@ def auto_mode(route: Route, *, has_draft: bool = False, draft_status: str = "",
         if _RUN.search(text):
             return THINK, "実行・テストの依頼"
         return FAST, "コードの生成のみ"
+    if route.kind == DOCS:
+        # Both modes read up to DOC_MAX_CHUNKS in waves; fast takes the planned order, think lets the leader pick.
+        match = _DEEP_SEARCH.search(text) or _DEEP_CHAT.search(text)
+        if match:
+            return THINK, f"「{match.group(0)}」を含む読解"
+        return FAST, "文書の要点"
     if route.kind == CHAT:
         match = _DEEP_CHAT.search(text)
         if match:

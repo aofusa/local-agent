@@ -18,10 +18,14 @@ import { useArtifact } from "../artifact";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
 import {
   ChatModeBadge,
+  ClaimTraceView,
+  DocTraceView,
   SearchTraceView,
   TaskTraceView,
   ThinkingView,
   isChatModeInfo,
+  isClaimTrace,
+  isDocTrace,
   isSearchTrace,
   isTaskTrace,
   isThinking,
@@ -233,6 +237,12 @@ export function AssistantMessage({
             {/* local-agent: the chat tab's search trace */}
             {isSearchTrace(message?.additional_kwargs?.search_trace) && (
               <SearchTraceView trace={message.additional_kwargs.search_trace} />
+            )}
+            {isDocTrace(message?.additional_kwargs?.doc_trace) && (
+              <DocTraceView trace={message.additional_kwargs.doc_trace} />
+            )}
+            {isClaimTrace(message?.additional_kwargs?.claim_trace) && (
+              <ClaimTraceView trace={message.additional_kwargs.claim_trace} />
             )}
             {isTaskTrace(message?.additional_kwargs?.task_trace) && (
               <TaskTraceView trace={message.additional_kwargs.task_trace} />

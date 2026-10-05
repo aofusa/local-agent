@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from furry_agent.doc_resolve import parse_roots
 from furry_agent.families import FLUX, SDXL, canonical_family
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -94,6 +95,12 @@ def _float(name: str, default: float) -> float:
     return float(raw) if raw else default
 
 
+def _extensions(raw: str) -> tuple[str, ...]:
+    """DOC_EXTENSIONS: comma separated (".md,.txt"); empty = the default list of the design (§5.2)."""
+    items = tuple(e if e.startswith(".") else f".{e}" for e in (x.strip().lower() for x in raw.split(",")) if e)
+    return items or (".md", ".txt", ".log", ".json", ".toml", ".yaml", ".yml")
+
+
 def _path(name: str, default: Path) -> Path:
     raw = os.environ.get(name, "").strip()
     path = Path(raw) if raw else default
@@ -153,6 +160,24 @@ class ChatSettings:
     logs_dir: Path = REPO_ROOT / "logs"
     prompts_dir: Path = REPO_ROOT / "prompts"
     comfyui_url: str = "http://127.0.0.1:8188"
+    # Claim verification (docs/claim-verification-design.md §5.7): extract -> verify -> synthesize -> audit.
+    claim_verify: bool = True
+    claim_max: int = 12
+    claim_quote_chars: int = 400
+    claim_timeout_s: float = 600.0
+    claim_fail_open: bool = False
+    # Local documents (/docs; docs/local-doc-mapreduce-design.md §5.2). No roots = the feature is off.
+    local_doc_roots: tuple[Path, ...] = ()
+    doc_extensions: tuple[str, ...] = (".md", ".txt", ".log", ".json", ".toml", ".yaml", ".yml")
+    doc_max_files: int = 30
+    doc_max_file_bytes: int = 1048576
+    doc_max_depth: int = 4
+    doc_chunk_chars: int = 3000
+    doc_chunk_overlap: int = 200
+    doc_max_chunks: int = 12
+    doc_timeout_s: float = 600.0
+    # auto: rules when every chunk fits in DOC_MAX_CHUNKS, the LM Studio 27B otherwise; lmstudio; rules.
+    doc_planner: str = "auto"
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
@@ -202,4 +227,19 @@ class ChatSettings:
             worker_timeout_s=_float("BONSAI_WORKER_TIMEOUT_S", 120.0),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             comfyui_url=os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"),
+            claim_verify=os.environ.get("CLAIM_VERIFY", "1").strip() != "0",
+            claim_max=_int("CLAIM_MAX", 12, 1, 12),
+            claim_quote_chars=_int("CLAIM_QUOTE_CHARS", 400, 80, 400),
+            claim_timeout_s=_float("CLAIM_TIMEOUT_S", 600.0),
+            claim_fail_open=os.environ.get("CLAIM_VERIFY_FAIL_OPEN", "0").strip() == "1",
+            local_doc_roots=tuple(parse_roots(os.environ.get("LOCAL_DOC_ROOTS", ""))),
+            doc_extensions=_extensions(os.environ.get("DOC_EXTENSIONS", "")),
+            doc_max_files=_int("DOC_MAX_FILES", 30, 1, 200),
+            doc_max_file_bytes=_int("DOC_MAX_FILE_BYTES", 1048576, 1024, 16 * 1048576),
+            doc_max_depth=_int("DOC_MAX_DEPTH", 4, 0, 8),
+            doc_chunk_chars=_int("DOC_CHUNK_CHARS", 3000, 500, 6000),
+            doc_chunk_overlap=_int("DOC_CHUNK_OVERLAP", 200, 0, 1000),
+            doc_max_chunks=_int("DOC_MAX_CHUNKS", 12, 1, 12),
+            doc_timeout_s=_float("DOC_TIMEOUT_S", 600.0),
+            doc_planner=(os.environ.get("DOC_PLANNER", "").strip().lower() or "auto"),
         )

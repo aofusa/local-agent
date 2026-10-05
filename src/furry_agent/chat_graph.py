@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,114 +38,27 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from furry_agent import code_nodes, modes, search_agent as sa, write_nodes, writing
-from furry_agent.bonsai_select import (Catalog, Rank, Selection, SelectionError, available_models, free_memory_mb,
-                                       select_model)
-from furry_agent.bonsai_worker import Ledger, LlamaServer, WorkerError, free_port, run_reader
+from furry_agent import (claim_nodes, claim_verify as cv, code_nodes, doc_nodes, modes, search_agent as sa, write_nodes,
+                         writing)
+from furry_agent.bonsai_select import Catalog, Selection, SelectionError, select_model
+from furry_agent.bonsai_worker import Ledger, WorkerError, run_reader
 from furry_agent.chat_common import (RESET, ChatState, StageError, _ask, capped, _cleanup, _conf, _fail, _final, _held,
                                      _history, _is_think, _last_human, _leaders, _ledgers, _lmstudio, _lock,
                                      _progress, _prompt, _settings, _text_of, log)
-from furry_agent.config import ChatSettings
+from furry_agent.chat_models import (LARGE_BOOT_S, LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
+                                     _catalog, _ensure_tor, _free_mb, _leader, _leader_client, _run_model, _search_client,
+                                     _server)
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
-from furry_agent.llm_client import LLMError, OpenAICompatClient
-from furry_agent.router import CHAT, CODE, SEARCH, TO_IMAGE_TAB, WRITE, Route, route as route_rules
-from furry_agent.search_client import SearchError, TorSearchClient
-from furry_agent.tor_service import TorUnavailable, ensure_tor
+from furry_agent.llm_client import LLMError
+from furry_agent.router import CHAT, CODE, DOCS, SEARCH, TO_IMAGE_TAB, WRITE, Route, route as route_rules
+from furry_agent.search_client import SearchError
+from furry_agent.tor_service import TorUnavailable
 
 __all__ = ["graph", "ChatState", "WorkerError", "RESET"]
 
-LEADER_LABEL = "Qwen3.8 27B abliterated（LM Studio）"
 HITS_PER_INTENT = 4  # default of SEARCH_HITS_PER_INTENT
-PORT_ROUTE, PORT_FILTER, PORT_LEADER = 7, 8, 9  # offsets from BONSAI_BASE_PORT; readers use 0..2
-LARGE_BOOT_S = 300.0
-LEADER_CTX = 8192  # the proxy leader's llama-server context (_server: large models get at least 8192)
 ROUTER_KINDS = {"SEARCH": SEARCH, "WRITE": WRITE, "CODE": CODE, "CHAT": CHAT}  # the router never sends to the image tab
-
-
-# --- dependencies (overridable through config["configurable"] for tests) ----------------------------------------
-
-
-def _server(config: RunnableConfig | None, settings: ChatSettings, selection: Selection, port: int) -> LlamaServer:
-    factory = _conf(config).get("server_factory")
-    if factory:
-        return factory(selection, port)
-    ctx = max(settings.ctx, 8192) if selection.model.large else settings.ctx
-    return LlamaServer(settings.llama_server, selection.path, port, ctx, selection.ngl, selection.model.label,
-                       settings.logs_dir)
-
-
-def _search_client(config: RunnableConfig | None, settings: ChatSettings, tag: str):
-    factory = _conf(config).get("search_factory")
-    if factory:
-        return factory(tag)
-    return TorSearchClient(settings.tor_socks_url, settings.search_timeout_s, settings.search_max_results,
-                           0, isolation=tag)
-
-
-def _free_mb(config: RunnableConfig | None) -> int:
-    fn = _conf(config).get("free_memory")
-    return int(fn()) if fn else free_memory_mb()
-
-
-async def _ensure_tor(config: RunnableConfig | None, settings: ChatSettings) -> str:
-    fn = _conf(config).get("ensure_tor")
-    return await fn(settings) if fn else await ensure_tor(settings)
-
-
-def _catalog(settings: ChatSettings) -> tuple[Catalog, Rank, dict[str, Path]]:
-    catalog = Catalog.load(settings.catalog_path)
-    return catalog, Rank.load(settings.rank_path), available_models(catalog, settings.models_dir)
-
-
-async def _run_model(config, settings: ChatSettings, task: str, port: int,
-                     fn: Callable[[OpenAICompatClient, Selection], Awaitable[Any]], *, leader_resident: bool,
-                     max_tokens_timeout: float | None = None) -> tuple[Any, Selection]:
-    """Start the best model for ``task``, run ``fn`` on it and kill it. A failed start tries the next candidate
-    once; a second failure stops (design doc §5.6 step 5)."""
-    catalog, rank, available = await asyncio.to_thread(_catalog, settings)
-    failed: list[str] = []
-    errors = []
-    for _ in range(2):
-        selection = select_model(task, catalog, rank, available, _free_mb(config), leader_resident=leader_resident,
-                                 reserve_mb=settings.reserve_mb, exclude=tuple(failed))
-        server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + port))
-        try:
-            await server.start(LARGE_BOOT_S if selection.model.large else settings.worker_timeout_s)
-            return await fn(server.client(max_tokens_timeout or settings.worker_timeout_s), selection), selection
-        except WorkerError as exc:
-            failed.append(selection.model.id)
-            errors.append(str(exc))
-            log.warning("%s model %s failed to start: %s", task, selection.model.id, exc)
-        finally:
-            await server.stop()
-    raise WorkerError(f"{task} のモデルを起動できません（次点も失敗）: " + " / ".join(errors))
-
-
-async def _leader(config, settings: ChatSettings, token: str, task: str) -> tuple[OpenAICompatClient, str]:
-    """The proxy leader (Ternary-Bonsai-2-27B abliterated): started once per run and kept for critique and
-    synthesis, killed by _cleanup."""
-    if token in _leaders and _leaders[token][0].alive:
-        server, selection = _leaders[token]
-        return server.client(settings.chat_timeout_s), selection.model.label
-    catalog, rank, available = await asyncio.to_thread(_catalog, settings)
-    failed: list[str] = []
-    errors = []
-    for _ in range(2):
-        selection = select_model(task, catalog, rank, available, _free_mb(config), leader_resident=False,
-                                 reserve_mb=settings.reserve_mb, exclude=tuple(failed))
-        server = _server(config, settings, selection, await asyncio.to_thread(free_port, settings.base_port + PORT_LEADER))
-        try:
-            await server.start(LARGE_BOOT_S)
-        except WorkerError as exc:
-            await server.stop()
-            failed.append(selection.model.id)
-            errors.append(str(exc))
-            continue
-        _leaders[token] = (server, selection)
-        log.info("proxy leader %s on port %s (boot %.1fs)", selection.model.id, server.port, server.boot_s)
-        return server.client(settings.chat_timeout_s), selection.model.label
-    raise WorkerError("代理リーダーを起動できません（次点も失敗）: " + " / ".join(errors))
 
 
 # --- trace -----------------------------------------------------------------------------------------------------------
@@ -212,6 +124,8 @@ _NOTES = {
     (CODE, modes.FAST): "コードを書いています…",
     (CODE, modes.THINK): "コードを書いています（承認後にコンテナで実行します）…",
     (CHAT, modes.THINK): "考えています（思考モード）…",
+    (DOCS, modes.FAST): "ローカル文書を確認しています（ネットワークは使いません）…",
+    (DOCS, modes.THINK): "ローカル文書を確認しています（ネットワークは使いません）…",
 }
 
 
@@ -223,7 +137,9 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
     artifact = state.get("artifact") or {}
     has_draft = bool(artifact.get("draft"))
     reset = {"progress_id": progress_id, "error": None, "lock_token": None, "search": {}, "code": {},
-             "hits": [RESET], "cards": [RESET], "logs": [RESET], "thinking": [RESET]}
+             "hits": [RESET], "cards": [RESET], "logs": [RESET], "thinking": [RESET],
+             "evidence": [RESET], "claims": [], "claim_audit": [], "verify_error": None,
+             "doc_root_hit": "", "doc_files": [], "doc_chunks": [], "doc_waves": 0}
     human = _last_human(state)
     if human is None:
         return {**reset, "error": "no input", "messages": [AIMessage(id=progress_id, content="メッセージがありません。")]}
@@ -246,7 +162,8 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
                 "messages": [AIMessage(id=progress_id, content=content, additional_kwargs={"chat_mode": info})]}
     if not decision.text:
         return {**reset, "error": "empty", "messages": [AIMessage(id=progress_id, content="内容を入力してください。")]}
-    route_state = {**vars(decision), "kind": kind}
+    route_state = {**vars(decision), "kind": kind, "claim_verify": settings.claim_verify,
+                   "claim_fail_open": settings.claim_fail_open}
     if kind == WRITE and decision.needs_search and not decision.continuation:
         # A writing task on real facts: think mode searches first; fast mode writes without searching (§7).
         route_state["search_first"] = choice.mode == modes.THINK
@@ -264,7 +181,7 @@ def _after_ingest(state: ChatState) -> str:
     kind = state["route"]["kind"]
     if kind == WRITE:
         return "plan" if state["route"].get("search_first") else "write_brief"
-    return {SEARCH: "plan", "route": "route", CODE: "code_plan"}.get(kind, "chat")
+    return {SEARCH: "plan", "route": "route", CODE: "code_plan", DOCS: "doc_resolve"}.get(kind, "chat")
 
 
 async def route(state: ChatState, config: RunnableConfig) -> dict:
@@ -426,7 +343,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         search.update({"intents": intents, "pending": [i["id"] for i in intents], "mode": mode,
                        "roles": {**search["roles"], "planner": planner,
                                  "leader": LEADER_LABEL if mode == "resident" else
-                                 "Ternary-Bonsai-2-27B abliterated（代理、llama.cpp）"}})
+                                 PROXY_LABEL}})
         _ledgers[token] = Ledger()
         # Query and intent texts are not logged (design doc §5.10); result URLs are, in search_client.
         log.info("search plan mode=%s chat_mode=%s planner=%s intents=%s subquestions=%d", mode, state.get("mode"),
@@ -574,7 +491,7 @@ def _after_reading(state: ChatState) -> str:
     """Think mode scores the round (critique); fast mode, or SEARCH_CRITIQUE=0, skips the critic (§3.3)."""
     if state.get("error"):
         return END
-    return "judge" if _is_think(state) and _settings_critique(state) else "synthesize"
+    return "judge" if _is_think(state) and _settings_critique(state) else claim_nodes.answer_entry(state)
 
 
 def _settings_critique(state: ChatState) -> bool:
@@ -669,12 +586,6 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
 # --- judge / critique / synthesize -----------------------------------------------------------------------------------
 
 
-async def _leader_client(config, settings: ChatSettings, state: ChatState, task: str):
-    if state["search"]["mode"] == "resident":
-        return _lmstudio(config, settings), LEADER_LABEL
-    return await _leader(config, settings, state["lock_token"], task)
-
-
 async def judge(state: ChatState, config: RunnableConfig) -> dict:
     """Think mode: show that the critic is working (a node's text appears when the node ends)."""
     search = state["search"]
@@ -742,7 +653,7 @@ def _after_critique(state: ChatState):
         return END
     if state["search"].get("pending"):
         return _to_search(state)
-    return "synthesize"
+    return claim_nodes.answer_entry(state)
 
 
 def _research_text(answer: str, refs: list[dict]) -> str:
@@ -750,25 +661,40 @@ def _research_text(answer: str, refs: list[dict]) -> str:
 
 
 async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
+    """The answer from the cards (search) or the excerpt cards (/docs). With claim verification it is written
+    from the supported and partial claims only and then audited (claim_audit keeps the leader and the lock);
+    otherwise every model is freed here."""
     settings = _settings(config)
     lmstudio = _lmstudio(config, settings)
     search = dict(state["search"])
     token = state.get("lock_token")
     job_lock.renew(token)
+    docs = claim_nodes.is_docs(state)
     cards = state.get("cards") or []
     hits = state.get("hits") or []
     logs = state.get("logs") or []
-    refs = sa.references(cards, hits)
+    refs = [] if docs else sa.references(cards, hits)
+    evidence = claim_nodes.evidence_of(state, settings)
     roles = dict(search.get("roles") or {})
     think = _is_think(state)
-    search["pages_read"] = _pages_read(logs)
-    if not search.get("stop_reason"):
-        # Fast mode: one round by design; think mode reaches here through the critic, which set the reason.
-        search["stop_reason"] = "no_hits" if not hits else "budget"
+    claims = state.get("claims") or []
+    verified = bool(state["route"].get("claim_verify") and (search.get("claim") or {}).get("started")
+                    and not state.get("verify_error"))
+    if not docs:
+        search["pages_read"] = _pages_read(logs)
+        if not search.get("stop_reason"):
+            # Fast mode: one round by design; think mode reaches here through the critic, which set the reason.
+            search["stop_reason"] = "no_hits" if not hits else "budget"
     thoughts: list[dict] = []
     then_write = bool(state["route"].get("search_first"))
+    update: dict[str, Any] = {"evidence": [RESET, *evidence]} if docs else {}
     try:
-        if not refs:
+        if docs and not evidence:
+            await _cleanup(token, lmstudio, unload=True)
+            doc_nodes.forget(state)
+            text = "制限時間までに読めた節がありませんでした（打ち切り）。パスを絞ってください。"
+            return {"lock_token": None, "search": search, "messages": [_final({**state, **update}, text)]}
+        if not docs and not refs:
             # Nothing came back: do not wake up a leader (design doc §5.4 step 6).
             errors = "; ".join(f"{e['error']}" for e in logs if e.get("error"))
             text = "検索結果がありません。Tor 出口が拒否された可能性があります。"
@@ -781,44 +707,112 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
                 return {"lock_token": None, "search": search, "artifact": artifact,
                         "messages": [_progress(state, text + "\n\n資料なしで書きます…", _trace(state, search))]}
             return {"lock_token": None, "messages": [_progress(state, text, _trace(state, search))]}
-        client, label = await _leader_client(config, settings, state, "synthesize")
-        # Thinking tokens only on the LM Studio 27B (the proxy leader runs with --reasoning off, 8192 context).
-        resident = search["mode"] == "resident"
-        async with _held(token):
-            reply, thoughts = await _ask(
-                state, settings, client,
-                [{"role": "system", "content": await _prompt(settings, "system_search.txt")},
-                 {"role": "user", "content": sa.leader_input(search["question"], cards, refs, search if think else None)}],
-                base=1600 if think else 1200, answer_min=800, temperature=0.4, stage="統合", thinking=resident,
-                context=None if resident else LEADER_CTX)
-        answer = reply.content or "（統合モデルの応答が空でした）"
-        roles["synthesizer"] = label
+        block = cv.verified_block(claims, evidence) if verified else ""
+        if verified and not block:
+            # Not one claim survived the check: no answer is written from unchecked cards (§4.1).
+            answer, label = "出典カードで確かめられた主張がありませんでした。", roles.get("critic") or ""
+        else:
+            client, label = await _leader_client(config, settings, state, "synthesize")
+            # Thinking tokens only on the LM Studio 27B (the proxy leader runs with --reasoning off, 8192 context).
+            resident = search.get("mode") == "resident"
+            user = (doc_nodes.leader_input(search["question"], evidence) if docs else
+                    sa.leader_input(search["question"], cards, refs, search if think else None))
+            if block:
+                user += f"\n\n検証済みの主張（これ以外の事実は書かない。[n] はそのまま使う）:\n{block}"
+            async with _held(token):
+                reply, thoughts = await _ask(
+                    state, settings, client,
+                    [{"role": "system", "content": await _prompt(settings, "system_search.txt")},
+                     {"role": "user", "content": user}],
+                    base=1600 if think else 1200, answer_min=800, temperature=0.4, stage="統合", thinking=resident,
+                    context=None if resident else LEADER_CTX)
+            answer = reply.content or "（統合モデルの応答が空でした）"
+            roles["synthesizer"] = label
+            if state.get("verify_error"):  # CLAIM_VERIFY_FAIL_OPEN=1: the unaudited synthesis, marked (§5.3)
+                answer = "（突き合わせ失敗。以下は主張の監査を通していない統合です）\n\n" + answer
     except asyncio.CancelledError:
         await asyncio.shield(_cleanup(token, lmstudio, unload=True))
         raise
     except (LLMError, WorkerError, SelectionError, OSError) as exc:
         await _cleanup(token, lmstudio, unload=True)
-        return _fail(state, exc, "chat", _trace(state, search))
+        doc_nodes.forget(state)
+        return _fail(state, exc, "chat", None if docs else _trace(state, search))
+    search["roles"] = roles
+    search["answer"] = answer
+    search["thoughts"] = thoughts
+    update["search"] = search
+    log.info("%s answered leader=%s cards=%d verified=%s", "docs" if docs else "search", label,
+             len(evidence), verified)
+    if verified and block:
+        # The leader and the lock stay for the audit (claim_audit frees them).
+        view = {**state, **update}
+        return {**update, "messages": [_progress(view, "回答の各文を出典と照合しています（監査）…",
+                                                 None if docs else _trace(view, search))]}
     # Every llama-server is killed and the 27B unloaded so the image tab gets the memory back (design doc §5.8).
     await _cleanup(token, lmstudio, unload=True)
-    search["roles"] = roles
+    update["lock_token"] = None
+    return {**update, **await finish_answer({**state, **update}, config)}
+
+
+async def finish_answer(state: ChatState, config: RunnableConfig) -> dict:
+    """claim_drop and the end of synthesize: delete the sentences the audit rejected, add the sources and send
+    the final message (or hand the research to the writer). No model is called here."""
+    settings = _settings(config)
+    search = dict(state["search"])
+    docs = claim_nodes.is_docs(state)
+    evidence = [c for c in state.get("evidence") or [] if c != RESET and c.get("evidence_id")]
+    cards = state.get("cards") or []
+    answer = search.get("answer") or ""
+    error = state.get("verify_error")
+    audit = state.get("claim_audit") or []
+    claims = state.get("claims") or []
+    deleted: list[str] = []
+    if error and not answer:
+        # CLAIM_VERIFY_FAIL_OPEN=0: no unaudited answer, the excerpts only (§5.3).
+        answer = f"{claim_nodes.FAIL_TEXT.get(error, claim_nodes.FAIL_TEXT['json'])}。\n\n{cv.excerpts_text(evidence)}"
+    elif audit:
+        drop = {a["sentence_index"] for a in audit if a["status"] in cv.DROP}
+        answer, deleted = cv.drop_sentences(answer, drop)
+        if not answer.strip():
+            answer = "監査の結果、出典で支持される文が残りませんでした。抜粋:\n\n" + cv.excerpts_text(evidence)
+    if deleted:
+        log.info("claim_drop deleted %d sentences", len(deleted))
+    if any(c.get("status") == "contradicted" for c in [*claims, *audit]):
+        answer += "\n\n一部の候補は出典と矛盾したため本文から除いた。"
     seconds = round(time.time() - search.get("started", time.time()), 1)
     search["wall_clock_s"] = seconds
+    thoughts = search.pop("thoughts", None) or []
+    view = {**state, "search": search}
+    if docs:
+        doc_nodes.forget(state)
+        notes = list((search.get("doc") or {}).get("notes") or [])
+        content = doc_nodes.format_answer(answer, evidence, state.get("doc_chunks") or [],
+                                          settings.doc_max_chunks, notes)
+        log.info("docs answered cards=%d waves=%s seconds=%.1f", len(evidence), state.get("doc_waves"), seconds)
+        return {"search": search, "lock_token": None, "messages": [_final(view, content, thoughts=thoughts)]}
+    refs = sa.references(cards, state.get("hits") or [])
     confirmed = sum(1 for c in cards for cl in c["claims"] if cl.get("quote_ok"))
-    trace = _trace(state, search, seconds=seconds, cards_total=len(cards), claims_confirmed=confirmed)
-    log.info("search answered leader=%s refs=%d rounds=%s stop=%s seconds=%.1f", label, len(refs),
-             search.get("round"), search.get("stop_reason"), seconds)
-    if then_write:
+    trace = _trace(view, search, seconds=seconds, cards_total=len(cards), claims_confirmed=confirmed)
+    log.info("search answered refs=%d rounds=%s stop=%s seconds=%.1f", len(refs), search.get("round"),
+             search.get("stop_reason"), seconds)
+    if state["route"].get("search_first"):
         artifact = {**(state.get("artifact") or {}), "research": _research_text(answer, refs)}
         return {"lock_token": None, "search": search, "artifact": artifact, "thinking": thoughts,
-                "messages": [_progress(state, "調べた内容をもとにアウトラインを作っています…", trace)]}
-    content = sa.format_answer(answer, refs, search if think else None, cards)
-    return {"lock_token": None, "search": search,
-            "messages": [_final(state, content, trace, thoughts=thoughts)]}
+                "messages": [_progress(view, "調べた内容をもとにアウトラインを作っています…", trace)]}
+    content = sa.format_answer(answer, refs, search if _is_think(state) else None, cards)
+    return {"lock_token": None, "search": search, "messages": [_final(view, content, trace, thoughts=thoughts)]}
 
 
 def _after_synthesize(state: ChatState) -> str:
-    if state.get("error") or not state["route"].get("search_first"):
+    if state.get("error"):
+        return END
+    if claim_nodes.audit_needed(state) and state.get("lock_token"):
+        return "claim_audit"
+    return "write_brief" if state["route"].get("search_first") and not claim_nodes.is_docs(state) else END
+
+
+def _after_drop(state: ChatState) -> str:
+    if state.get("error") or not state["route"].get("search_first") or claim_nodes.is_docs(state):
         return END
     return "write_brief"
 
@@ -834,19 +828,36 @@ builder.add_node("read", read)
 builder.add_node("judge", judge)
 builder.add_node("critique", critique)
 builder.add_node("synthesize", synthesize)
+builder.add_node("claim_extract", claim_nodes.claim_extract)
+builder.add_node("claim_verify", claim_nodes.claim_verify)
+builder.add_node("claim_audit", claim_nodes.claim_audit)
+builder.add_node("claim_drop", claim_nodes.claim_drop)
+doc_nodes.add_nodes(builder)
 write_nodes.add_nodes(builder)
 code_nodes.add_nodes(builder)
+ANSWER = ["claim_extract", "synthesize", END]
 builder.add_edge(START, "ingest")
-builder.add_conditional_edges("ingest", _after_ingest, ["chat", "route", "plan", "write_brief", "code_plan", END])
+builder.add_conditional_edges("ingest", _after_ingest,
+                              ["chat", "route", "plan", "write_brief", "code_plan", "doc_resolve", END])
 builder.add_conditional_edges("route", _after_route, ["chat", "plan", "write_brief", "code_plan", END])
 builder.add_edge("chat", END)
 builder.add_conditional_edges("plan", _to_search, ["search", "synthesize", END])
 builder.add_edge("search", "filter")
-builder.add_conditional_edges("filter", _to_read, ["read", "judge", "synthesize", END])
-builder.add_conditional_edges("read", _after_reading, ["judge", "synthesize", END])
+builder.add_conditional_edges("filter", _to_read, ["read", "judge", *ANSWER])
+builder.add_conditional_edges("read", _after_reading, ["judge", *ANSWER])
 builder.add_edge("judge", "critique")
-builder.add_conditional_edges("critique", _after_critique, ["search", "synthesize", END])
-builder.add_conditional_edges("synthesize", _after_synthesize, ["write_brief", END])
+builder.add_conditional_edges("critique", _after_critique, ["search", *ANSWER])
+# /docs: the same answer path from its excerpt cards (docs/local-doc-mapreduce-design.md §5.1)
+builder.add_conditional_edges("doc_resolve", doc_nodes._after_resolve, ["doc_plan", END])
+builder.add_conditional_edges("doc_plan", doc_nodes._to_map, ["doc_map", *ANSWER])
+builder.add_edge("doc_map", "doc_cover")
+builder.add_conditional_edges("doc_cover", doc_nodes._to_map, ["doc_map", *ANSWER])
+# Claim verification (docs/claim-verification-design.md §5.1)
+builder.add_conditional_edges("claim_extract", claim_nodes._after_extract, ["claim_verify", "synthesize", "claim_drop"])
+builder.add_conditional_edges("claim_verify", claim_nodes._after_verify, ["synthesize", "claim_drop"])
+builder.add_conditional_edges("synthesize", _after_synthesize, ["claim_audit", "write_brief", END])
+builder.add_edge("claim_audit", "claim_drop")
+builder.add_conditional_edges("claim_drop", _after_drop, ["write_brief", END])
 
 graph = builder.compile()
 graph.name = "chat agent"

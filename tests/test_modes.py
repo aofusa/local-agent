@@ -216,3 +216,10 @@ async def test_think_chat_still_thinks_within_the_time_budget():
                                  answer_min=512, temperature=0.6, stage="回答")
     assert sent[0]["reasoning_effort"] == "medium" and sent[0]["max_tokens"] == 1080
     assert thoughts == [{"stage": "回答", "text": "12=2^2*3"}]
+
+
+def test_auto_docs():
+    from furry_agent.router import route as route_rules
+
+    assert modes.choose("auto", route_rules("/docs a.md 比較して")).mode == "think"
+    assert modes.choose("auto", route_rules("/docs a.md")).mode == "fast"
