@@ -4,14 +4,13 @@
 // Think mode adds the rounds, the sub-questions and their status, the adopted and rejected cards and the stop
 // reason. The same file holds the folded thinking block (additional_kwargs.thinking, never part of the answer),
 // the writing / code steps (additional_kwargs.task_trace), the claim table of claim verification
-// (additional_kwargs.claim_trace) and what /docs read (additional_kwargs.doc_trace).
+// (additional_kwargs.claim_trace).
 import { ReactNode, useState } from "react";
 import {
   Brain,
   ChevronDown,
   ChevronRight,
   Code2,
-  FileText,
   Globe,
   Loader2,
   Newspaper,
@@ -651,128 +650,6 @@ export function ClaimTraceView({ trace }: { trace: ClaimTrace }) {
           <p className="text-muted-foreground text-xs">
             判定は出典カードの抜粋だけを根拠にし、支持された主張だけで回答を書きます。
             抜粋と語句・数値が合わない主張は採用しません。
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// --- local documents (/docs; additional_kwargs.doc_trace) ---------------------------------------------------
-
-export type DocTrace = {
-  root: string;
-  files?: { rel: string; size?: number; truncated?: boolean }[];
-  denied?: { rel: string; reason: string }[];
-  waves?: number;
-  read?: { id: string; locator: string; wave?: number }[];
-  unread?: number;
-  total?: number;
-};
-
-export function isDocTrace(value: unknown): value is DocTrace {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as DocTrace).root === "string"
-  );
-}
-
-export function DocTraceView({ trace }: { trace: DocTrace }) {
-  const [open, setOpen] = useState(false);
-  const files = trace.files ?? [];
-  const denied = trace.denied ?? [];
-  const read = trace.read ?? [];
-  const summary = [
-    `${files.length} ファイル`,
-    denied.length ? `拒否 ${denied.length}` : null,
-    `読んだ節 ${read.length} / ${trace.total ?? read.length}`,
-    trace.waves ? `${trace.waves} 波` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const byWave = new Map<number, string[]>();
-  for (const r of read) {
-    const w = r.wave ?? 0;
-    byWave.set(w, [...(byWave.get(w) ?? []), r.locator]);
-  }
-  return (
-    <div className="bg-muted/40 w-full rounded-xl border text-sm">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="text-muted-foreground flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left"
-      >
-        {open ? (
-          <ChevronDown className="size-4" />
-        ) : (
-          <ChevronRight className="size-4" />
-        )}
-        <FileText className="size-4" />
-        <span className="text-foreground font-medium">
-          ローカル文書（{trace.root}）
-        </span>
-        <span className="truncate">{summary}</span>
-      </button>
-      {open && (
-        <div className="flex flex-col gap-3 border-t px-3 py-3">
-          {[...byWave.entries()]
-            .sort((a, b) => a[0] - b[0])
-            .map(([wave, locators]) => (
-              <div
-                key={wave}
-                className="flex flex-col gap-0.5 text-xs"
-              >
-                <p className="text-muted-foreground font-medium">波 {wave}</p>
-                {locators.map((l) => (
-                  <code
-                    key={l}
-                    className="break-all"
-                  >
-                    {l}
-                  </code>
-                ))}
-              </div>
-            ))}
-          {files.length > 0 && (
-            <Section title={`対象ファイル ${files.length} 件`}>
-              <ul className="flex flex-col gap-0.5 text-xs">
-                {files.map((f) => (
-                  <li
-                    key={f.rel}
-                    className="break-all"
-                  >
-                    {f.rel}
-                    <span className="text-muted-foreground">
-                      {f.size != null ? ` ${f.size} バイト` : ""}
-                      {f.truncated ? "（先頭のみ）" : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-          {denied.length > 0 && (
-            <Section title={`読まなかったもの ${denied.length} 件`}>
-              <ul className="flex flex-col gap-0.5 text-xs">
-                {denied.map((d) => (
-                  <li
-                    key={d.rel}
-                    className="flex items-baseline gap-1.5"
-                  >
-                    <span className="text-muted-foreground shrink-0">×</span>
-                    <span className="break-all">{d.rel}</span>
-                    <span className="text-muted-foreground shrink-0">
-                      {d.reason}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-          <p className="text-muted-foreground text-xs">
-            ファイルを開くのはサーバ側のオーケストレータだけで、ネットワークは使いません。
-            {trace.unread ? ` 未読の節 ${trace.unread} 件。` : ""}
           </p>
         </div>
       )}

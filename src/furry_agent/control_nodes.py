@@ -235,9 +235,9 @@ def final_text(control: dict) -> str:
 
 
 def _own(state: ChatState, **changes) -> dict:
-    """The view for the loop's own messages: the claim table, the /docs trace and the thinking belong to the
-    tool's message and are not shown a second time under the loop's."""
-    return {**state, "claims": [], "claim_audit": [], "verify_error": None, "doc_root_hit": "", "thinking": [],
+    """The view for the loop's own messages: the claim table and the thinking belong to the tool's message and
+    are not shown a second time under the loop's."""
+    return {**state, "claims": [], "claim_audit": [], "verify_error": None, "thinking": [],
             **changes}
 
 

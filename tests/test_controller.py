@@ -47,7 +47,6 @@ def test_prefixes_media_and_docs_are_never_compound():
     assert not is_compound(route("/search 調べてから記事を書いて"))
     assert not is_compound(route("/write 調べてから記事を書いて"))
     assert not is_compound(route("調べてから記事にして", has_media=True))
-    assert not is_compound(route("/docs notes 調べてから記事にして"))
     assert not is_compound(route("調べてから記事を書いて", task="search"))
     assert compound_kinds("調べてから記事を書いて Python スクリプトも作って") == [SEARCH, WRITE, CODE]
 
@@ -331,7 +330,7 @@ def test_fallback_after_a_failed_tool_shows_its_summary():
 
 
 async def test_the_loop_message_does_not_repeat_the_claim_table(models_dir, monkeypatch):
-    import test_claims_docs_graph as claims
+    import test_claims_graph as claims
     from test_chat_graph import FakeLLM
 
     monkeypatch.setattr(FakeLLM, "chat", claims._chat)

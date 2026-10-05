@@ -1,7 +1,6 @@
 """Starting and stopping the chat tab's local models (PrismML llama-server) and the other outside dependencies.
 
-Shared by the search nodes (chat_graph), the claim checks (claim_nodes) and the local-document readers
-(doc_nodes). Every dependency can be replaced through ``config["configurable"]`` for tests (server_factory,
+Shared by the search nodes (chat_graph) and the claim checks (claim_nodes). Every dependency can be replaced through ``config["configurable"]`` for tests (server_factory,
 search_factory, free_memory, ensure_tor).
 """
 

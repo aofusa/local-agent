@@ -53,7 +53,7 @@ def _settings(models_dir, **kw) -> ChatSettings:
     d, exe, catalog = models_dir
     kw.setdefault("code_dir", d.parent / "code")
     # The search tests below check the synthesis as it was before claim verification (CLAIM_VERIFY=0 keeps that
-    # path); tests/test_claims_docs_graph.py covers the verified path and /docs.
+    # path); tests/test_claims_graph.py covers the verified path.
     kw.setdefault("claim_verify", False)
     return replace(ChatSettings(), llama_server=str(exe), models_dir=d, rank_path=d / "missing-rank.json",
                    catalog_path=catalog, logs_dir=d.parent / "logs", job_lock_timeout_s=0.2, sandbox_wait_s=0.5,

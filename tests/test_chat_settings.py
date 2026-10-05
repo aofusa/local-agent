@@ -1,35 +1,30 @@
-"""CLAIM_* and DOC_* in ChatSettings.from_env (docs/claim-verification-design.md §5.7, local-doc §5.2)."""
+"""CLAIM_* and CONTROLLER_* in ChatSettings.from_env (docs/claim-verification-design.md §5.7)."""
 
 from furry_agent.config import ChatSettings
 
 
 def test_defaults(monkeypatch):
-    for name in ("CLAIM_VERIFY", "CLAIM_VERIFY_FAIL_OPEN", "LOCAL_DOC_ROOTS", "DOC_EXTENSIONS", "DOC_PLANNER"):
+    for name in ("CLAIM_VERIFY", "CLAIM_VERIFY_FAIL_OPEN", "CONTROLLER_MAX_STEPS", "CONTROLLER_WALL_CLOCK_S"):
         monkeypatch.delenv(name, raising=False)
     s = ChatSettings.from_env()
     assert s.claim_verify and not s.claim_fail_open and s.claim_max == 12
-    assert s.local_doc_roots == () and s.doc_planner == "auto"
-    assert s.doc_extensions == (".md", ".txt", ".log", ".json", ".toml", ".yaml", ".yml")
-    assert (s.doc_max_files, s.doc_max_depth, s.doc_max_chunks, s.doc_chunk_chars) == (30, 4, 12, 3000)
+    assert s.controller_max_steps == 3 and s.controller_budget_s == s.search_wall_clock_s
+    assert not hasattr(s, "local_doc_roots")  # /docs was removed
 
 
-def test_env_values(monkeypatch, tmp_path):
+def test_env_values(monkeypatch):
     monkeypatch.setenv("CLAIM_VERIFY", "0")
     monkeypatch.setenv("CLAIM_VERIFY_FAIL_OPEN", "1")
     monkeypatch.setenv("CLAIM_MAX", "40")
-    monkeypatch.setenv("LOCAL_DOC_ROOTS", f"{tmp_path}, not/absolute")
-    monkeypatch.setenv("DOC_EXTENSIONS", "md, .TXT")
-    monkeypatch.setenv("DOC_MAX_CHUNKS", "99")
+    monkeypatch.setenv("CONTROLLER_MAX_STEPS", "9")
     s = ChatSettings.from_env()
     assert not s.claim_verify and s.claim_fail_open and s.claim_max == 12  # capped at the design's 12
-    assert s.local_doc_roots == (tmp_path,)
-    assert s.doc_extensions == (".md", ".txt") and s.doc_max_chunks == 12
+    assert s.controller_max_steps == 4
 
 
-async def test_from_env_does_not_touch_the_disk_on_the_event_loop(monkeypatch, tmp_path):
+async def test_from_env_does_not_touch_the_disk_on_the_event_loop(monkeypatch):
     # langgraph dev runs nodes under blockbuster; every node reads the settings.
     from blockbuster import blockbuster_ctx
 
-    monkeypatch.setenv("LOCAL_DOC_ROOTS", f"{tmp_path},{tmp_path / 'missing'}")
     with blockbuster_ctx():
-        assert len(ChatSettings.from_env().local_doc_roots) == 2
+        assert ChatSettings.from_env().claim_verify in (True, False)

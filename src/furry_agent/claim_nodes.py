@@ -11,8 +11,7 @@
     claim_drop     no model: the sentences that lost their support are deleted (never rewritten), the answer
                    is formatted with its sources
 
-The search graph enters at claim_extract after the critic (or after reading in fast mode); /docs enters after
-its coverage check. A JSON reply that does not parse is repaired once by the same process; a second failure or
+The search graph enters at claim_extract after the critic (or after reading in fast mode). A JSON reply that does not parse is repaired once by the same process; a second failure or
 CLAIM_TIMEOUT_S fails the stage: with CLAIM_VERIFY_FAIL_OPEN=0 (default) the user gets the excerpts and no
 unaudited answer, with 1 the unaudited synthesis prefixed with 「突き合わせ失敗」.
 """
@@ -36,7 +35,6 @@ from furry_agent.chat_models import _leader_client
 from furry_agent.config import ChatSettings
 from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LLMError
-from furry_agent.router import DOCS
 
 T = TypeVar("T", bound=BaseModel)
 # Measured: 12 verdicts with short notes take ~1100 tokens; 1100 cut the reply (finish_reason=length).
@@ -49,28 +47,18 @@ FAIL_TEXT = {"json": "主張の突き合わせに失敗した。抜粋は末尾�
              "model": "主張の突き合わせに使うモデルを起動できなかった。抜粋は末尾に残す"}
 
 
-def is_docs(state: ChatState) -> bool:
-    return (state.get("route") or {}).get("kind") == DOCS
-
-
 def answer_entry(state: ChatState) -> str:
     """Where reading ends: claim_extract when CLAIM_VERIFY=1 and there are cards to check, else synthesize
     (0 cards: synthesize says so without waking a leader, §5.10)."""
     if state.get("error"):
         return "__end__"
-    cards = state.get("evidence") if is_docs(state) else state.get("cards")
+    cards = state.get("cards")
     has_cards = any(c != RESET for c in cards or [])
     return "claim_extract" if (state.get("route") or {}).get("claim_verify") and has_cards else "synthesize"
 
 
 def evidence_of(state: ChatState, settings: ChatSettings) -> list[dict]:
-    """The run's EvidenceCards, numbered once (§5.4): search cards by their reference number, document cards in
-    reading order."""
-    current = [c for c in state.get("evidence") or [] if c != RESET]
-    if is_docs(state):
-        if current and all(c.get("evidence_id") for c in current):
-            return current
-        return cv.number_doc_cards(current, settings.claim_quote_chars)
+    """The run's EvidenceCards, numbered once (§5.4) by their reference number."""
     refs = sa.references(state.get("cards") or [], state.get("hits") or [])
     return cv.evidence_from_search(state.get("cards") or [], refs, settings.claim_quote_chars)
 
@@ -153,9 +141,7 @@ async def _failed(state: ChatState, config: RunnableConfig, update: dict) -> dic
 
 
 def _search_trace(state: ChatState) -> dict | None:
-    """The search trace when this is a search run (docs runs show doc_trace instead)."""
-    if is_docs(state):
-        return None
+    """The search trace of the run."""
     from furry_agent.chat_graph import _trace  # the search trace lives with the search nodes
 
     return _trace(state, state["search"])

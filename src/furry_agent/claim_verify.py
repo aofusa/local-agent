@@ -1,6 +1,6 @@
 """Claim-level verification for the chat tab (docs/claim-verification-design.md). No model calls here.
 
-The search readers and the local-document readers both produce ``EvidenceCard``s. A leader model (the same
+The search readers produce ``EvidenceCard``s. A leader model (the same
 Ternary-Bonsai-2-27B process as the critic) splits the question into claims and judges each claim against the
 cards only; the synthesizer writes from the supported and partial claims; the final text is audited once more
 and the sentences that lost their support are deleted (``drop_sentences``), never rewritten.
@@ -182,16 +182,6 @@ def evidence_from_search(cards: list[dict], refs: list[dict], quote_chars: int =
                 return out
     return out
 
-
-def number_doc_cards(cards: list[dict], quote_chars: int = 400, limit: int = 24) -> list[dict]:
-    """Local-document cards -> EvidenceCards numbered 1..n in reading order (one [n] per card)."""
-    out = []
-    for card in cards[:limit]:
-        n = len(out) + 1
-        out.append({**_card(f"e{n}", n, "file", card["locator"], card.get("title") or card["locator"],
-                            card.get("quote", ""), card.get("note", ""), bool(card.get("verified")), quote_chars),
-                    "chunk_id": card.get("chunk_id", "")})
-    return out
 
 
 def evidence_block(evidence: list[dict]) -> str:
