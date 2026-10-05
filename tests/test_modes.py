@@ -216,4 +216,3 @@ async def test_think_chat_still_thinks_within_the_time_budget():
                                  answer_min=512, temperature=0.6, stage="回答")
     assert sent[0]["reasoning_effort"] == "medium" and sent[0]["max_tokens"] == 1080
     assert thoughts == [{"stage": "回答", "text": "12=2^2*3"}]
-
