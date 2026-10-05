@@ -2,7 +2,7 @@
 
 ## v0.8.1 — CUI のディレクトリ名とドキュメント
 
-- CUI のソースのディレクトリを `cirka/` から `cui-client/` に変えた（cirka は固有名詞なので、クライアント側の CUI であることが分かる名前にした）。コマンド名 `cirka`、設定とデータの置き場（`%APPDATA%\cirka`、`.cirka/`）、`scripts/build-cirka.ps1`、`scripts/gen_cirka_art.py` はそのまま。ビルドは `cd cui-client; cargo build --release`。
+- CUI のソースのディレクトリを `cirka/` から `client/` に変えた（cirka は固有名詞なので、クライアント側のアプリであることが分かる汎用的な名前にした）。コマンド名 `cirka`、設定とデータの置き場（`%APPDATA%\cirka`、`.cirka/`）、`scripts/build-cirka.ps1`、`scripts/gen_cirka_art.py` はそのまま。ビルドは `cd client; cargo build --release`。
 - `docs/logo` に SVG 版のロゴ（icon / logo / image）を加えた（端末の絵は引き続き JPG から作る）。
 - README と AGENTS.md を v0.7.0〜v0.8.0 の内容に合わせて見直した: 設計書へのリンク、cirka のビルドに要る Rust、`/coder/turn` の起動とログ、cirka のトラブルシューティングと制約、AGENTS.md の CUI 経路の図・配置・禁止事項・作業規則。
 

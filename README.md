@@ -18,7 +18,7 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 検索の回答は、主張ごとに出典の抜粋と突き合わせ、支持された主張だけで書き、最後に文ごとに監査して支持されない文を削除します。
 「調べてから手順書にして」のように道具を順に使う依頼は、思考モード（または自動）で **自律モード** になり、27B が検索・文章・コード・画像タブ案内を結果を見ながら選び直します（最大 3 手。「4. 使い方 › 自律モード」）。
 
-端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux。ソースは `cui-client/`）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で実行します（既定の auto モードは確認なし。push や再帰的な削除など危険な操作だけ確認します）。画面は Claude Code に倣った形で、`docs/logo` のロゴを端末用の絵にして表示します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
+端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux。ソースは `client/`）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で実行します（既定の auto モードは確認なし。push や再帰的な削除など危険な操作だけ確認します）。画面は Claude Code に倣った形で、`docs/logo` のロゴを端末用の絵にして表示します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
@@ -502,16 +502,16 @@ reader を同時に増やすのではなく、ラウンドを増やします（�
 
 ### CUI（cirka）
 
-`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)。ソースはクライアント側の CUI として `cui-client/` にあり、できる実行ファイルの名前が `cirka` です）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
+`cirka` は、端末の作業ディレクトリで動くコーディングエージェントです（設計: [docs/locus-cui-design.md](docs/locus-cui-design.md)。ソースはクライアント側の CUI として `client/` にあり、できる実行ファイルの名前が `cirka` です）。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。モデルはこの端末（ホスト）の LM Studio の 27B で、LangGraph の `POST /coder/turn` を通して使います。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
 
 #### ビルドと配布
 
 Rust 1.85 以上が要ります。Windows / macOS / Linux の各 OS で同じソースからビルドします。
 
 ```powershell
-.\scripts\build-cirka.ps1            # cui-client\target\release\cirka.exe を作り、dist\cirka-<版>-<OS>-<CPU>.zip にまとめる
+.\scripts\build-cirka.ps1            # client\target\release\cirka.exe を作り、dist\cirka-<版>-<OS>-<CPU>.zip にまとめる
 # または
-cd cui-client; cargo build --release # macOS / Linux も同じ（target/release/cirka）
+cd client; cargo build --release     # macOS / Linux も同じ（target/release/cirka）
 ```
 
 できた `cirka`（`cirka.exe`）を PATH の通った場所に置きます。単一の実行ファイルで、ほかに要るものはありません（grep もファイル検索も内蔵）。
@@ -567,7 +567,7 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 
 画面（Claude Code に倣った形）:
 
-- 起動すると枠の中にロゴ（`docs/logo/cirka-icon.jpg` の鷹と円と「式」の札、`cirka-logo.jpg` の「cirka」と赤い点）と、作業ディレクトリ・接続先・モデルを出します。ロゴは端末で描けないので、`scripts/gen_cirka_art.py` が画像から作った小さなビットマップ（`cui-client/src/art_data.rs`）を半角ブロック（▀ ▄ █）で描きます。色は 24 ビット色が使える端末（Windows Terminal、`COLORTERM=truecolor` など）ではロゴの赤そのもの、ほかは端末の赤です。端末の幅と高さに合わせて大小を選び、狭いときは文字だけにします。
+- 起動すると枠の中にロゴ（`docs/logo/cirka-icon.jpg` の鷹と円と「式」の札、`cirka-logo.jpg` の「cirka」と赤い点）と、作業ディレクトリ・接続先・モデルを出します。ロゴは端末で描けないので、`scripts/gen_cirka_art.py` が画像から作った小さなビットマップ（`client/src/art_data.rs`）を半角ブロック（▀ ▄ █）で描きます。色は 24 ビット色が使える端末（Windows Terminal、`COLORTERM=truecolor` など）ではロゴの赤そのもの、ほかは端末の赤です。端末の幅と高さに合わせて大小を選び、狭いときは文字だけにします。
 - 入力は枠付きの欄で、Enter で送信、Shift+Enter / Alt+Enter / 行末の `\` で改行、↑↓ で履歴、Tab でコマンド補完、Ctrl-C で入力を消す（空なら 2 回で終了）。貼り付けた複数行はそのまま入ります。
 - 応答は `⏺` で始まるブロックとして流れ、ツール呼び出しは `⏺ Read(src/main.rs)` のように 1 行、結果は `⎿` の下に短く出ます。編集は色付きの差分（行番号付き）、タスク一覧は ☐ / ◼ / ☒ で出します。モデルの応答待ちとツールの実行中は、経過秒数付きのスピナーが回ります（Ctrl-C で中断）。
 
@@ -669,9 +669,9 @@ src/furry_agent/claim_nodes.py        主張の抽出 → 判定 → （統合�
 src/furry_agent/control_nodes.py      自律モード（controller → 道具の流れ → controller_record → finish）。判断の JSON、予算、重複の禁止
 src/furry_agent/coder_gate.py         cirka 向けの POST /coder/turn（LM Studio の tool calling を SSE で返す。ツールは実行しない）。coder_app.py が langgraph.json の http.app
 prompts/chat/controller.txt           自律モードの判断の system prompt
-cui-client/                           クライアント側の CUI（Rust。実行ファイル名 cirka）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs（許可と auto の確認一覧）、context.rs、session.rs、tui.rs（画面）、art.rs / art_data.rs（ロゴの絵）
+client/                               クライアント側の CUI（Rust。実行ファイル名 cirka）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs（許可と auto の確認一覧）、context.rs、session.rs、tui.rs（画面）、art.rs / art_data.rs（ロゴの絵）
 docs/logo/                            cirka のロゴ（cirka-icon / cirka-logo / cirka-design の JPG と、icon / logo / image の SVG）
-scripts/gen_cirka_art.py              docs/logo の JPG から cirka のロゴの絵（cui-client/src/art_data.rs）を作る
+scripts/gen_cirka_art.py              docs/logo の JPG から cirka のロゴの絵（client/src/art_data.rs）を作る
 scripts/build-cirka.ps1               cirka のリリースビルドと zip（dist/）
 src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
 src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定
@@ -788,7 +788,7 @@ outputs/  logs/  tools/  artifacts/   実行時に生成（git 管理外）
 uv sync
 uv run pytest                                  # Python と PowerShell スクリプトのテスト（Docker 実機のテストは Docker 起動中だけ）
 uv run python scripts\build_workflows.py       # prompts\ を変えたら workflows\ を再生成
-cd cui-client; cargo test                      # cirka（CUI）のテスト。ホストは立てない
+cd client; cargo test                          # cirka（CUI）のテスト。ホストは立てない
 uv run python scripts\gen_cirka_art.py         # docs\logo を変えたら cirka のロゴの絵を再生成
 ```
 

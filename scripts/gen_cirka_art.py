@@ -1,4 +1,4 @@
-"""Generate cirka's terminal art from docs/logo (cirka-icon.jpg, cirka-logo.jpg) -> cui-client/src/art_data.rs.
+"""Generate cirka's terminal art from docs/logo (cirka-icon.jpg, cirka-logo.jpg) -> client/src/art_data.rs.
 
 A terminal cannot show the JPEGs, so each logo is reduced to a small bitmap that cirka draws with half-block
 characters (one character cell = two pixels stacked, ▀ ▄ █), the way Claude Code and Grok's CLIs draw their marks:
@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 LOGO_DIR = ROOT / "docs" / "logo"
-OUT = ROOT / "cui-client" / "src" / "art_data.rs"
+OUT = ROOT / "client" / "src" / "art_data.rs"
 
 
 def classify(rgb: tuple[int, int, int]) -> str:
