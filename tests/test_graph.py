@@ -183,7 +183,7 @@ async def test_text_only_returns_image_and_saves(settings):
 async def test_ksampler_log_reports_gate_seen_before_split(settings, caplog):
     caplog.set_level("INFO", logger="furry_agent")
     await _run("テスト", FakeComfy(), settings)
-    assert "the LLM router unloaded at checkpoint load=[True]" in caplog.text
+    assert "LLM router unloaded at checkpoint load=[True]" in caplog.text
 
 
 async def test_single_image_is_i2i_basic_and_deduplicated(settings):

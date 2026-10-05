@@ -124,8 +124,8 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 
 ## ログ
 
-- `logs\furry_agent.log`（LangGraph 側）: チャットタブの経路・モデル・reader の所要時間・結果 URL（検索語の全文は残しません）、画像タブの投入（prompt_id / seed）、タグ、`ckpt gate: the LLM router unloaded=[True]`、
-  `KSampler started ... the LLM router unloaded at checkpoint load=[True]`、`eject verified`、保存先。
+- `logs\furry_agent.log`（LangGraph 側）: チャットタブの経路・モデル・reader の所要時間・結果 URL（検索語の全文は残しません）、画像タブの投入（prompt_id / seed）、タグ、`ckpt gate: LLM router unloaded=[True]`、
+  `KSampler started ... LLM router unloaded at checkpoint load=[True]`、`eject verified`、保存先。
 - ComfyUI のコンソール: `[furry_ja] eject: LLM router unloaded [...]`、`[furry_ja] split mode=json|fallback`、
   `[furry_ja] LLM router verified unloaded before checkpoint/KSampler`。
 - `/coder/turn`（cirka）: LangGraph のコンソールに `coder turn mode=… messages=… tools=… calls=… finish=… tokens=… seconds=…` だけを出します（会話やファイルの中身は残しません）。

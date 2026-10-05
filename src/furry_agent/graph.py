@@ -592,10 +592,10 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
     def on_event(kind: str, data: dict) -> None:
         if kind == "executed" and data.get("node") == "ckpt":
             gate.update(data.get("output") or {})
-            log.info("ckpt gate: the LLM router unloaded=%s forced_unload=%s",
+            log.info("ckpt gate: LLM router unloaded=%s forced_unload=%s",
                      gate.get("llm_unloaded"), gate.get("forced_unload"))
         elif kind == "executing" and data.get("node") == "sampler":
-            log.info("KSampler started prompt_id=%s; the LLM router unloaded at checkpoint load=%s",
+            log.info("KSampler started prompt_id=%s; LLM router unloaded at checkpoint load=%s",
                      job["prompt_id"], gate.get("llm_unloaded"))
 
     saved, blocks = [], []

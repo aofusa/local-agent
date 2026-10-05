@@ -1,6 +1,6 @@
 """The chat tab's control loop (docs/autonomous-controller-design.md).
 
-    controller         the 27B (llama.cpp router) (the Ternary-Bonsai-2-27B proxy when the LLM router is down) reads the user's
+    controller         the router's 27B (the Ternary-Bonsai-2-27B proxy when the router is down) reads the user's
                        request and the summaries of the tools used so far and returns one JSON Decision: the next
                        tool (search / write / code / image) with its request text, or the final answer
     controller_record  a tool's pipeline ended: its summary goes to ``control.trace`` (no hits, pages or file

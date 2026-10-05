@@ -249,8 +249,8 @@ async def _cleanup(token: str | None, llm: LlamaRouter | None = None, unload: bo
         if unload and llm is not None:
             try:
                 await llm.unload_all()
-            except Exception as exc:  # the LLM router down: nothing is loaded there anyway
-                log.warning("the LLM router unload failed: %s", exc)
+            except Exception as exc:  # router down: nothing is loaded there anyway
+                log.warning("LLM router unload failed: %s", exc)
     finally:
         if bonsai_worker.live_pids():
             log.error("llama-server still alive after cleanup: %s", bonsai_worker.live_pids())
@@ -366,7 +366,7 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
                context: int | None = None) -> tuple[Any, list[dict]]:
     """One free-text model call that fits the model's context window.
 
-    the LLM router loads the 27B with LLM_CONTEXT tokens (4096 from scripts/setup-llm.ps1: more does not fit
+    The router loads the 27B with LLM_CONTEXT tokens (4096 from scripts/setup-llm.ps1: more does not fit
     this machine's memory), and thinking tokens count against max_tokens. Thinking is used only in think mode
     and only when the window still leaves ``answer_min`` tokens plus a thinking budget; when the thoughts used
     everything and no answer came, the call is made once more without thinking (the thoughts are kept).

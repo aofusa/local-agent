@@ -141,7 +141,7 @@ class ChatSettings:
 
     llm_url: str = "http://127.0.0.1:8080/v1"
     llm_model: str = ""
-    # Context window of the 27B (llama.cpp router) (scripts/setup-llm.ps1 loads it with 4096: more does not fit).
+    # Context window of the router's 27B (scripts/setup-llm.ps1 loads it with 4096: more does not fit).
     llm_ctx: int = 4096
     # No response for this long ends a model call or a wait (AGENT_IDLE_TIMEOUT_S, 20 minutes). Model calls stream,
     # so every token counts as a response; a call that keeps producing tokens is never cut off.

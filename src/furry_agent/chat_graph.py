@@ -359,7 +359,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
                 if fit.width < min(len(intents), settings.fanout_width):
                     raise SelectionError("幅が足りません")
             except SelectionError as exc:
-                log.info("readers do not fit next to the 27B (llama.cpp router) (%s): unloading it", exc)
+                log.info("readers do not fit next to the router's 27B (%s): unloading it", exc)
                 await llm.unload_all()
                 mode = "proxy"
         else:
@@ -732,7 +732,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
             answer, label = "出典カードで確かめられた主張がありませんでした。", roles.get("critic") or ""
         else:
             client, label = await _leader_client(config, settings, state, "synthesize")
-            # Thinking tokens only on the 27B (llama.cpp router) (the proxy leader runs with --reasoning off, 8192 context).
+            # Thinking tokens only on the router's 27B (the proxy leader runs with --reasoning off, 8192 context).
             resident = search.get("mode") == "resident"
             user = sa.leader_input(search["question"], cards, refs, search if think else None)
             if block:
