@@ -205,6 +205,8 @@ def fallback_answer(control: dict) -> str:
         return "本文は上のメッセージに書きました。"
     if last.get("tool") == "code" and last.get("ok"):
         return "コードと実行結果は上のメッセージのとおりです。"
+    if last.get("tool") == "search" and last.get("ok"):
+        return "調べた結果は上のメッセージ（出典付き）のとおりです。"
     return "ここまでの結果:\n\n" + (last.get("summary") or "（結果がありません）")[:800]
 
 

@@ -117,7 +117,8 @@ async def test_same_text_twice_is_not_run_again(models_dir):
     assert state["control"]["stop_reason"] == "repeat"
     assert len(state["control"]["trace"]) == 1
     assert world.synth == ["bonsai-2-27b-abliterated"]  # one search only
-    assert "同じ依頼の繰り返し" in message.content and "まとめた回答です" in message.content
+    assert "同じ依頼の繰り返し" in message.content and "上のメッセージ" in message.content
+    assert "まとめた回答です" not in message.content  # the search answer is not posted twice
 
 
 async def test_max_steps_never_runs_another_tool(models_dir):
@@ -171,7 +172,7 @@ async def test_final_without_answer_is_asked_again_then_uses_the_last_summary(mo
                                 {"action": "final", "answer": " "}]
     state, message = await _run("Rust の最新版を調べてから要点を教えて", world, _settings(models_dir), mode="think")
     assert state["control"]["stop_reason"] == "final"
-    assert "ここまでの結果" in message.content and "まとめた回答です" in message.content
+    assert "上のメッセージ（出典付き）" in message.content
 
 
 async def test_failed_search_is_recorded_and_the_controller_answers(models_dir):
@@ -321,3 +322,9 @@ def test_controller_input_is_short():
 def test_route_kinds_for_tools():
     assert cn.KIND == {"search": SEARCH, "write": WRITE, "code": CODE}
     assert json.dumps(cn.control_task({"trace": [], "steps": 0}))
+
+
+def test_fallback_after_a_failed_tool_shows_its_summary():
+    control = {"trace": [{"tool": "search", "ok": False, "summary": "Tor に接続できません"}], "stop_reason": "wall_clock"}
+    text = cn.final_text(control)
+    assert "ここまでの結果" in text and "Tor に接続できません" in text and "時間の上限" in text
