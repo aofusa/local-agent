@@ -1,6 +1,6 @@
 # チャット制御ループ（自律ツール選択）設計書
 
-状態: 実装前
+状態: 実装済み（v0.7.0、末尾の §16 に実装記録）
 対象: `aofusa/local-agent` のチャットグラフ `chat`
 目的: チャット内容から、実装済みの検索・執筆・コード・画像引き渡しを自分で選び、結果を見て次の手を決める。Grok / Claude のエージェントループの縮小版。
 実装者向け。この文書だけで着手できる粒度にしてある。
@@ -333,3 +333,30 @@ class Decision(BaseModel):
 - 27B とチェックポイントの同時常駐がない。ロックの取り方が増えていない。
 - 失敗時に同じ道具を同じ文で再実行しない。
 - 画像タブの経路がバイト単位で変わっていない（`graph.py` の diff が空）。
+
+## 16. 実装記録（v0.7.0）
+
+状態: 段 1〜3 を実装した（第 4 段の画像グラフの道具化は範囲外のまま）。
+
+### 16.1 実装の形
+
+- ノード: `controller` / `controller_record` / `finish` を `src/furry_agent/control_nodes.py` に置き、`write_nodes` / `code_nodes` と同じ `add_nodes(builder)` で `chat` グラフに足した（§14 の「触ってよい」に新しいモジュールを 1 つ足した。`chat_graph.py` の肥大を避けるため）。`Decision` のスキーマも同じモジュールに置き、循環 import を避けた。
+- 入口: `router.is_compound`（`compound_kinds` が 2 種以上、または 1 種 + 接続語）と、思考モードであること。`ingest` が `control` を初期化し、`_after_ingest` が `controller` へ送る。ルータ（1.7B）を通る曖昧な文は、規則で道具の種類が 1 つも読めないので複合にならない（`_after_route` は変えていない）。
+- 「自動」: `modes.auto_mode` に `compound` を足し、複合なら思考を選ぶ（「手短に」の指定が先に効く）。
+- 道具の終端: 共通の `end_or_record(state)`（`chat_common.py`）が、`control.active` なら `controller_record`、そうでなければ `END` を返す。検索（`_to_search` / `_to_read` / `_after_reading` / `_after_critique` / `_after_synthesize` / `_after_drop`）、執筆（4 つの終端）、コード（5 つの終端）の `END` をこれに置き換えた。制御から入った検索は `search_first` を立てず、`_after_synthesize` も執筆へ直行しない。
+- 失敗: 道具の `_fail`（`StageError` を含む）は `error` を立てたまま `controller_record` に戻り、`ok=false` で `trace` に積んでから `error` を消して `controller` に戻す。章の確認やコンテナ実行の却下（`error` が `stopped` / `rejected`）は、その時点で制御も終える（`stop_reason=rejected`）。
+- メッセージ: 道具が出したメッセージは道具の `progress_id` のまま残す。`controller_record` が新しい `progress_id` を振り、以後の制御の進捗と最終回答は別のメッセージになる（同じ id だと道具の出力を上書きしてしまう）。
+- 道具への入力: `route` を道具向けに書き換える（`decision.text`）。利用者の原文は `messages` の最後の human から読む。コードの `code_plan` は会話履歴を入力にするため、制御から入ったときだけ最後に `decision.text` を user として足した（`code_nodes._generate`）。執筆は、直前の検索の答え（出典付き、1500 字まで）を `artifact.research` に置き、`search_first` を立てて `write_brief` に読ませる（`search_skipped` も立てる）。
+- 判断のモデル: LM Studio に届けば 27B、届かなければ代理リーダー（`_leader`）で、判断のあとすぐ止める。`ask_json`（JSON スキーマ付き、温度 0.2、最大 400 トークン）。`ask_json` 自体が 1 回だけ再問合せする。`final` の `answer` が空ならもう 1 回聞き、それでも空なら最後の要約で答える。
+- 最終回答: 文章が最後なら本文を繰り返さず、書いた旨だけ（モデルの答えが 300 字以内ならそれも）。検索や コードが最後で、モデルの最終回答が無いまま止まったときは「上のメッセージのとおり」とだけ書き、止まった理由を添える（検索の答えを二重に出さない）。失敗で止まったときだけ最後の要約を出す。
+- UI: `task_trace` に `kind: "control"`（手順ごとの道具・成否・理由・依頼文・要約、終了理由）を載せ、`TaskTraceView` を `control` に対応させた（1 箇所）。
+
+### 16.2 実測と設計との差分
+
+- この端末（27B IQ3_M、0.9〜1.5 トークン/秒）で「Rust の最新の安定版を調べてから、その要点を3行で教えて」（思考モード）: 判断 1 回目 111 秒で `search`（依頼文は英語の検索語に書き換えられた）→ 思考モードの検索（計画 7.6 分、2 ラウンド 6 ページ、主張の検証 4 + 一部 5）→ 検索の答えの時点で 20 分を超えたため `wall_clock` で終了（合計 1337 秒）。道具の答えは出典付きのメッセージとして残り、自律の手順に理由と要約が出た。
+- §10 の壁時計（`SEARCH_WALL_CLOCK_S` を超えない）は守った。この端末では思考モードの検索 1 回が 20 分近くかかるため、検索のあとに 2 回目の判断が回らないことが多い。上限を緩めるのは設計の制約に反するので変えず、README に書いた。2 回目以降の判断（検索 → 執筆 → final、重複の禁止、最大手数）はフェイクのモデルでのテストで確認した。
+- 判断は JSON だけを返す短い呼び出しだが、27B のロード込みで 1〜2 分かかる。
+
+### 16.3 テスト
+
+`tests/test_controller.py`（37 件）: 複合判定の表、接頭辞・添付・`/docs`・`task` は入らない、速いは入らない、自動は思考になる、`/search` は制御を通らない、検索 → final、要約にページ本文が入らない、同じ依頼文は `repeat`、最大手数、壁時計、`_after_synthesize` の分岐、JSON が壊れたら 1 回の再問合せで短い失敗文、空の final、検索の失敗が `ok=false` で残る、LM Studio が無いと代理で判断して止める、検索 → 執筆 → final（本文を二重に出さない、再検索しない）、章の却下で終了、コードの承認カードと戻り、実行の却下で終了、画像は `graph.py` を呼ばない、ノード名が `observe` と衝突しない、純関数。既存の検索・執筆・コードのテストは、フェイクの LLM に制御のプロンプトの応答を足しただけで、すべて通る。
