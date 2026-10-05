@@ -4,7 +4,7 @@ Candidates come from config/search_models.json (8 GGUFs run by the PrismML llama
 preference order; scripts/probe-bonsai.ps1 writes tools/bonsai/rank.json with what each model actually passed on
 this machine (tool call, JSON, verification, Japanese synthesis), its boot time and the memory it took. At run
 time the order is filtered by: the file exists, the probe passed (when a rank file exists), large 27B-class
-models are not started while the LM Studio 27B or a ComfyUI checkpoint is resident, and the free memory.
+models are not started while the 27B (llama.cpp router) or a ComfyUI checkpoint is resident, and the free memory.
 BONSAI_MODEL pins the worker model; a pinned model that does not fit is refused, never silently replaced.
 """
 
@@ -168,7 +168,7 @@ def select_model(task: str, catalog: Catalog, rank: Rank, available: dict[str, P
             skipped[model_id] = "検証に通っていません"
             continue
         if spec.large and leader_resident:
-            skipped[model_id] = "LM Studio の 27B が載っています"
+            skipped[model_id] = "27B（llama.cpp）が載っています"
             continue
         if spec.large and comfy_resident:
             skipped[model_id] = "ComfyUI がモデルを保持しています"

@@ -1,6 +1,6 @@
 """The chat tab's control loop (docs/autonomous-controller-design.md).
 
-    controller         the LM Studio 27B (the Ternary-Bonsai-2-27B proxy when LM Studio is down) reads the user's
+    controller         the router's 27B (the Ternary-Bonsai-2-27B proxy when the router is down) reads the user's
                        request and the summaries of the tools used so far and returns one JSON Decision: the next
                        tool (search / write / code / image) with its request text, or the final answer
     controller_record  a tool's pipeline ended: its summary goes to ``control.trace`` (no hits, pages or file
@@ -31,7 +31,7 @@ from furry_agent import search_agent as sa
 from furry_agent.bonsai_select import SelectionError
 from furry_agent.bonsai_worker import WorkerError
 from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, _cleanup, _fail, _final, _held, _kwargs,
-                                     _last_human, _leaders, _lmstudio, _lock, _progress, _prompt, _settings,
+                                     _last_human, _leaders, _llm, _lock, _progress, _prompt, _settings,
                                      _text_of, capped, log)
 from furry_agent.chat_models import LEADER_LABEL, _leader
 from furry_agent import writing
@@ -253,14 +253,14 @@ def _request(state: ChatState) -> str:
 
 async def _decide(state: ChatState, config: RunnableConfig, settings: ChatSettings, token: str,
                   control: dict) -> tuple[Decision | None, str]:
-    """One decision with the 27B (thinking off, JSON); the proxy leader when LM Studio is down. A final without
+    """One decision with the 27B (thinking off, JSON); the proxy leader when the LLM router is down. A final without
     an answer is asked once more."""
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     messages = [{"role": "system", "content": await _prompt(settings, PROMPT)},
                 {"role": "user", "content": controller_input(_request(state), control)}]
     proxy = False
-    if await lmstudio.reachable():
-        client, label = lmstudio, LEADER_LABEL
+    if await llm.reachable():
+        client, label = llm, LEADER_LABEL
     else:
         client, label = await _leader(config, settings, token, "synthesize")
         proxy = True
@@ -283,7 +283,7 @@ async def _decide(state: ChatState, config: RunnableConfig, settings: ChatSettin
 
 async def controller(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     control = dict(state.get("control") or {})
     token = state.get("lock_token")
     if over_clock(control):
@@ -293,7 +293,7 @@ async def controller(state: ChatState, config: RunnableConfig) -> dict:
         token = await _lock(state, config, settings)
         decision, label = await _decide(state, config, settings, token, control)
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
@@ -362,7 +362,7 @@ async def controller_record(state: ChatState, config: RunnableConfig) -> dict:
     token = state.get("lock_token")
     if token and job_lock.holds(token):
         # Every tool gives the lock back at its end; a failure path that did not is cleaned up here.
-        await _cleanup(token, _lmstudio(config, settings), unload=True)
+        await _cleanup(token, _llm(config, settings), unload=True)
     error = state.get("error")
     if error in ("stopped", "rejected"):
         control["stop_reason"] = "rejected"
@@ -388,7 +388,7 @@ async def finish(state: ChatState, config: RunnableConfig) -> dict:
     control = dict(state.get("control") or {})
     control.setdefault("stop_reason", "final")
     text = final_text(control)
-    # Like plain chat, the 27B stays loaded (LM Studio's TTL unloads it; the image workflow ejects it anyway).
+    # Like plain chat, the 27B stays loaded (the router's idle sleep unloads it; the image workflow ejects it anyway).
     await _cleanup(state.get("lock_token"))
     log.info("controller finished stop=%s steps=%d tools=%s", control.get("stop_reason"), control.get("steps", 0),
              [e.get("tool") for e in control.get("trace") or []])

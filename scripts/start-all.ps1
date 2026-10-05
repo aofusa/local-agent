@@ -1,8 +1,8 @@
-﻿# Start Tor (background), ComfyUI (if not already running), LangGraph and agent-chat-ui, each in its own window.
-# LM Studio must already be running (its server starts on launch; see README).
-# The search models (PrismML llama-server) are not started here: the chat tab starts them per search.
+﻿# Start Tor (background), the LLM router, ComfyUI, LangGraph and agent-chat-ui (those not already running), each in
+# its own window. The router holds no model until the first request; the search models (llama-server workers)
+# are not started here: the chat tab starts them per search.
 param(
-    [switch]$SkipComfyUI,   # use when ComfyUI is started from Comfy Desktop instead
+    [switch]$SkipComfyUI,   # ComfyUI already started some other way
     [switch]$SkipTor        # the chat tab's search needs Tor; the image tab does not
 )
 $ErrorActionPreference = "Stop"
@@ -23,8 +23,10 @@ function Wait-Port([int]$Port, [int]$TimeoutSec) {
     }
 }
 
-Write-Step "LM Studio"
-if (Test-Listening 1234) { Write-Ok "127.0.0.1:1234" } else { Write-Warn2 "LM Studio のサーバが起動していません（LM Studio を起動してください）" }
+Write-Step "LLM ルータ（llama.cpp）"
+$llmPort = [int](Get-DotEnvValue "LLM_PORT" "8080")
+if (Test-Listening $llmPort) { Write-Ok "already running (127.0.0.1:$llmPort)" }
+else { Start-InWindow "LLM router" (Join-Path $PSScriptRoot "start-llm.ps1"); Wait-Port $llmPort 60 }
 
 if (-not $SkipTor) {
     if (Get-DotEnvValue "TOR_EXE") {

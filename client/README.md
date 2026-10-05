@@ -4,7 +4,7 @@
 
 端末の作業ディレクトリで動く、コーディング用の CUI エージェントです。Claude Code と同じく、モデルが「次のツール呼び出し」か「最終回答」を返し、cirka がそのツールを **cirka を起動した PC の上で** 実行して結果を返す、を繰り返します。
 
-モデルは、LAN 上のホスト（[local-agent](../README.md)）の LM Studio で動く 27B です。cirka はホストの LangGraph に `POST /coder/turn` で 1 ターンずつ推論を頼むだけで、LM Studio・ComfyUI・Tor へ直接はつなぎません。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
+モデルは、LAN 上のホスト（[local-agent](../README.md)）の llama.cpp（ルータ）で動く 27B です。cirka はホストの LangGraph に `POST /coder/turn` で 1 ターンずつ推論を頼むだけで、LLM サーバ・ComfyUI・Tor へ直接はつなぎません。ホストはツールを実行せず、会話も保存しません（履歴は cirka のセッションファイルが持ちます）。
 
 このディレクトリ（`client/`）が cirka のソースです（Rust、単一バイナリ）。設計は [docs/locus-cui-design.md](../docs/locus-cui-design.md)（設計時の作業名は locus）にあります。
 
@@ -12,7 +12,7 @@
 利用者の PC                                   ホスト（local-agent）
 cirka ── ファイル操作・コマンド（手元で実行）
   │
-  ├── POST /coder/turn（推論 1 ターン）─────▶ LangGraph :2024 ──▶ LM Studio（ループバック）
+  ├── POST /coder/turn（推論 1 ターン）─────▶ LangGraph :2024 ──▶ llama.cpp ルータ（ループバック）
   └── POST /runs/stream（検索・画像）──────▶ LangGraph :2024 ──▶ Tor 検索 / ComfyUI
 ```
 
@@ -43,7 +43,7 @@ cargo build --release        # target/release/cirka（Windows は cirka.exe）
 cirka config set host http://192.168.1.20:2024        # ユーザー設定に保存
 cirka config set host http://gpu-box:2024 --project   # このディレクトリだけ（./.cirka/config.toml）
 cirka config show                                     # 実際に使われる値と、読み込んだ場所
-cirka status                                          # ホストに届くか、ゲート、LM Studio、モデル、文脈の大きさ
+cirka status                                          # ホストに届くか、ゲート、ホストの LLM、モデル、文脈の大きさ
 ```
 
 実行中に `/host http://… [--save]` でも切り替えられます。
@@ -179,7 +179,7 @@ cirka は「何も返ってこない時間」だけで打ち切ります。何�
 | 「ホストに届きません」 | `cirka status` で確認。`cirka config set host http://<LAN IP>:2024`（`localhost` は cirka を動かす PC 自身）。ホスト側の LangGraph の起動とファイアウォール（`scripts\open-firewall.ps1`）を確認 |
 | 「ホストに /coder/turn がありません」 | ホストの local-agent が v0.7.0 より古い。更新して LangGraph を再起動する |
 | 「… の処理を待っています」のまま | 画像タブやチャットタブが動いている。終われば自動で進む |
-| 「N 秒間応答がありません」 | ホストか LM Studio が止まっている可能性。`cirka status` で確認。重い処理で本当に長く無音になるなら `idle_timeout_s` を増やす |
+| 「N 秒間応答がありません」 | ホストか、ホストの LLM（llama.cpp ルータ）が止まっている可能性。`cirka status` で確認。重い処理で本当に長く無音になるなら `idle_timeout_s` を増やす |
 | 「文脈が溢れました」 | `/compact`、または依頼を小さくする |
 | ロゴや枠が崩れる・色が出ない | Windows Terminal など UTF-8 と 24 ビット色の使える端末で開く。色を消すなら `NO_COLOR=1`。端末が狭いと文字だけのロゴになる |
 

@@ -1,6 +1,6 @@
 """LangGraph agent (graph id ``agent``): chat input -> registered ComfyUI template -> image in chat.
 
-LangGraph never calls LM Studio. The ComfyUI workflow calls the LLM, ejects it, and only then loads
+LangGraph never calls the LLM router. The ComfyUI workflow calls the LLM, ejects it, and only then loads
 the checkpoint, IP-Adapter and ControlNet (design doc §4). This graph:
 
     ingest    read the message, normalize up to 4 reference images (or the previous output) into references;
@@ -513,7 +513,7 @@ async def submit(state: State, config: RunnableConfig) -> dict:
         "comfy_prompt_id": prompt_id,
         "messages": [_progress(state, (
             f"ComfyUI に投入しました（prompt_id {prompt_id}）。\n\n{job.get('summary', '')}\n\n"
-            f"{vision}LM Studio の Qwen3.8 27B で{making}を生成中です。モデルのロードを含め数分かかります…"
+            f"{vision}Qwen3.8 27B（llama.cpp）で{making}を生成中です。モデルのロードを含め数分かかります…"
         ))],
     }
 
@@ -559,7 +559,7 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
         # ckpt usually runs before split, so keep its unload check for the image phase.
         "job": {**job, "done": result.done, "gate": result.outputs.get("ckpt") or {}, "warnings": warnings},
         "messages": [_progress(state, (
-            f"{made}。LM Studio のモデルを unload してから画像を生成しています…\n\n"
+            f"{made}。LLM サーバのモデルを unload してから画像を生成しています…\n\n"
             f"**positive**: {tags['positive']}\n\n**negative**: {tags['negative']}"
         ))],
     }
@@ -592,11 +592,11 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
     def on_event(kind: str, data: dict) -> None:
         if kind == "executed" and data.get("node") == "ckpt":
             gate.update(data.get("output") or {})
-            log.info("ckpt gate: LM Studio unloaded=%s forced_unload=%s",
-                     gate.get("lmstudio_unloaded"), gate.get("forced_unload"))
+            log.info("ckpt gate: LLM router unloaded=%s forced_unload=%s",
+                     gate.get("llm_unloaded"), gate.get("forced_unload"))
         elif kind == "executing" and data.get("node") == "sampler":
-            log.info("KSampler started prompt_id=%s; LM Studio unloaded at checkpoint load=%s",
-                     job["prompt_id"], gate.get("lmstudio_unloaded"))
+            log.info("KSampler started prompt_id=%s; LLM router unloaded at checkpoint load=%s",
+                     job["prompt_id"], gate.get("llm_unloaded"))
 
     saved, blocks = [], []
     try:
@@ -604,9 +604,9 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
                                    idle_s=settings.timeout_s)
         outputs = result.outputs
         ckpt_ui = outputs.get("ckpt") or gate
-        if ckpt_ui.get("lmstudio_unloaded") != [True]:
-            raise ComfyError("チェックポイント読み込み前に LM Studio の unload を確認できませんでした")
-        log.info("eject verified prompt_id=%s: LM Studio had no model loaded before checkpoint/KSampler",
+        if ckpt_ui.get("llm_unloaded") != [True]:
+            raise ComfyError("チェックポイント読み込み前に LLM サーバ（llama.cpp）の unload を確認できませんでした")
+        log.info("eject verified prompt_id=%s: the LLM router had no model loaded before checkpoint/KSampler",
                  job["prompt_id"])
         images = (outputs.get("save") or {}).get("images") or []
         if not images:

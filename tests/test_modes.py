@@ -1,7 +1,8 @@
 import httpx
+import pytest
 
 from furry_agent import modes
-from furry_agent.llm_client import LMStudio, OpenAICompatClient, split_thinking
+from furry_agent.llm_client import LLMError, LlamaRouter, OpenAICompatClient, split_thinking
 from furry_agent.router import route
 
 
@@ -79,16 +80,16 @@ async def test_enable_thinking_follows_the_mode():
     assert body["chat_template_kwargs"] == {"enable_thinking": False}  # default stays off
 
 
-async def test_lm_studio_thinking_uses_reasoning_effort_and_separates_the_thoughts():
-    reply = {"choices": [{"message": {"content": "答え", "reasoning": "思考の中身"}}]}
-    body, result = await _body(LMStudio, True, reply)
-    assert body["reasoning_effort"] == "medium" and body["chat_template_kwargs"]["enable_thinking"] is True
+async def test_router_thinking_uses_chat_template_kwargs_and_separates_the_thoughts():
+    reply = {"choices": [{"message": {"content": "答え", "reasoning_content": "思考の中身"}}]}
+    body, result = await _body(LlamaRouter, True, reply)
+    assert body["chat_template_kwargs"]["enable_thinking"] is True and "reasoning_effort" not in body
     assert result.content == "答え" and result.reasoning == "思考の中身"
-    body, result = await _body(LMStudio, False, {"choices": [{"message": {"content": "<think>x</think>答え"}}]})
-    assert "reasoning_effort" not in body and result.content == "答え" and result.reasoning == "x"
+    body, result = await _body(LlamaRouter, False, {"choices": [{"message": {"content": "<think>x</think>答え"}}]})
+    assert body["chat_template_kwargs"]["enable_thinking"] is False and result.content == "答え" and result.reasoning == "x"
 
 
-# --- fitting LM Studio's 4096-token window ----------------------------------------------------------------------
+# --- fitting the LLM router's 4096-token window ----------------------------------------------------------------------
 
 
 class _Recorder:
@@ -117,7 +118,7 @@ async def test_ask_keeps_max_tokens_inside_the_window():
     reply, thoughts = await _ask(_state("think"), settings, llm, messages, base=3500, answer_min=1200,
                                  temperature=0.2, stage="コード")
     call = llm.calls[0]
-    assert call["thinking"] is True and call["max_tokens"] + prompt_tokens(messages) <= settings.lmstudio_ctx
+    assert call["thinking"] is True and call["max_tokens"] + prompt_tokens(messages) <= settings.llm_ctx
     assert reply.content == "答え" and thoughts == [{"stage": "コード", "text": "考え"}]
 
 
@@ -132,7 +133,7 @@ async def test_ask_turns_thinking_off_when_the_window_is_too_small_and_trims_his
     await _ask(_state("think"), settings, llm, messages, base=1536, answer_min=512, temperature=0.6, stage="回答")
     sent = llm.calls[0]["messages"]
     assert sent[0]["content"] == "s" and sent[-1]["content"] == "最後の質問" and len(sent) < len(messages)
-    assert prompt_tokens(sent) + llm.calls[0]["max_tokens"] <= settings.lmstudio_ctx
+    assert prompt_tokens(sent) + llm.calls[0]["max_tokens"] <= settings.llm_ctx
 
 
 async def test_ask_retries_without_thinking_when_no_answer_came():
@@ -156,17 +157,18 @@ async def test_ask_never_thinks_in_fast_mode():
     assert llm.calls[0]["thinking"] is False and llm.calls[0]["max_tokens"] == 1000
 
 
-async def test_model_unloaded_race_is_retried_once():
+async def test_router_error_is_reported_once_not_retried():
+    """The router loads the model on demand; a failed load (HTTP 500) is an error, not a reason to send again."""
     calls = []
 
     def handler(request: httpx.Request):
         calls.append(1)
-        if len(calls) == 1:
-            return httpx.Response(400, json={"error": "Model is unloaded."})
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        return httpx.Response(500, json={"error": {"message": "model name=qwen failed to load"}})
 
-    lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
-    assert (await lm.chat([{"role": "user", "content": "x"}])).content == "ok" and len(calls) == 2
+    lm = LlamaRouter("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMError, match="failed to load"):
+        await lm.chat([{"role": "user", "content": "x"}])
+    assert len(calls) == 1
 
 
 async def test_think_chat_budget_is_the_context_window_not_time():
@@ -183,9 +185,9 @@ async def test_think_chat_budget_is_the_context_window_not_time():
         sent.append(_json.loads(request.content))
         return httpx.Response(200, json={"choices": [{"message": {"content": "60", "reasoning": "12=2^2*3"}}]})
 
-    lm = LMStudio("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
+    lm = LlamaRouter("http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler))
     reply, thoughts = await _ask(_state("think"), ChatSettings(), lm, [{"role": "user", "content": "q"}], base=1536,
                                  answer_min=512, temperature=0.6, stage="回答")
     # No time cap any more (idle timeout): the reply may use what the 4096-token window leaves.
-    assert sent[0]["reasoning_effort"] == "medium" and sent[0]["max_tokens"] == 4040
+    assert sent[0]["chat_template_kwargs"] == {"enable_thinking": True} and sent[0]["max_tokens"] == 4040
     assert thoughts == [{"stage": "回答", "text": "12=2^2*3"}]

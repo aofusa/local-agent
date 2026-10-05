@@ -1,11 +1,11 @@
 ﻿<#
 .SYNOPSIS
-  Check that LM Studio, ComfyUI, Tor, the PrismML llama.cpp fork, LangGraph and agent-chat-ui are configured
+  Check that the LLM router (llama.cpp), ComfyUI, Tor, the search models, LangGraph and agent-chat-ui are configured
   and reachable. The chat tab's search checks are warnings: the image tab works without them.
   Exit code 1 when a required check fails.
 #>
 param(
-    [int]$LMStudioPort = 1234,
+    [int]$LLMPort = 0,
     [int]$ComfyPort = 8188,
     [int]$LangGraphPort = 2024,
     [int]$UIPort = 3000
@@ -37,23 +37,41 @@ function Assert-LoopbackOnly([int]$Port) {
 function Get-Json([string]$Url) { Invoke-RestMethod -Uri $Url -TimeoutSec 10 }
 
 $envValues = Read-DotEnv
-$modelKey = $envValues["LMSTUDIO_MODEL"]
+$modelKey = $envValues["LLM_MODEL"]
 $ckptName = $envValues["CKPT_NAME"]
 $workflow = Read-JsonFile (Join-Path (Get-RepoRoot) "workflows\furry_ja_api.json")
 if (-not $modelKey) { $modelKey = $workflow.llm_backend.inputs.model }
 if (-not $ckptName) { $ckptName = $workflow.ckpt.inputs.ckpt_name }
+if (-not $LLMPort) { $LLMPort = [int](Get-DotEnvValue "LLM_PORT" "8080") }
 
-Write-Step "LM Studio"
-Check "server is loopback only" { Assert-LoopbackOnly $LMStudioPort }
-Check "model $modelKey" {
-    $models = (Get-Json "http://127.0.0.1:$LMStudioPort/api/v1/models").models
-    $m = $models | Where-Object { $_.key -eq $modelKey } | Select-Object -First 1
-    if (-not $m) { throw "LM Studio にありません（scripts\setup-lmstudio.ps1 を実行）" }
-    if (-not $m.capabilities.vision) { throw "vision が無効（mmproj が無い）" }
-    "vision=True"
+Write-Step "LLM ルータ（llama.cpp）"
+Check "llama-server (LLM_SERVER)" {
+    $exe = Get-LlamaServer
+    if (-not $exe) { throw "未導入（scripts\setup-llamacpp.ps1）" }
+    (Invoke-Native $exe --version | Where-Object { $_ -match "version" } | Select-Object -First 1).Trim()
 }
-Check "workflow uses $modelKey" {
-    if ($workflow.llm_backend.inputs.model -ne $modelKey) { throw "workflows は $($workflow.llm_backend.inputs.model)" }
+Check "preset (LLM_PRESET)" {
+    $preset = Get-DotEnvValue "LLM_PRESET" (Join-Path (Get-RepoRoot) "tools\llm\models.ini")
+    if (-not (Test-Path $preset)) { throw "ありません（scripts\setup-llm.ps1）" }
+    $text = [IO.File]::ReadAllText($preset)
+    if ($text -notmatch "\[$([regex]::Escape($modelKey))\]") { throw "$modelKey の節がありません（scripts\setup-llm.ps1）" }
+    foreach ($key in "model", "mmproj") {
+        if ($text -match "(?m)^$key\s*=\s*(.+)$" -and -not (Test-Path $Matches[1].Trim())) { throw "$key のファイルがありません: $($Matches[1].Trim())" }
+    }
+    $preset
+}
+Check "router is loopback only" { Assert-LoopbackOnly $LLMPort }
+Check "model $modelKey" {
+    $models = @((Get-Json "http://127.0.0.1:$LLMPort/models").data)
+    $m = $models | Where-Object { $_.id -eq $modelKey } | Select-Object -First 1
+    if (-not $m) { throw "ルータのプリセットにありません（scripts\setup-llm.ps1 の後に start-llm.ps1 を再起動）" }
+    if ($m.architecture.input_modalities -notcontains "image") { throw "画像入力が無効（mmproj が無い）" }
+    "status=$($m.status.value), image input"
+}
+Check "workflow uses $modelKey at http://127.0.0.1:$LLMPort/v1" {
+    $backend = $workflow.llm_backend.inputs
+    if ($backend.model -ne $modelKey) { throw "workflows は $($backend.model)（scripts\setup-llm.ps1 が作り直します）" }
+    if ($backend.base_url -ne "http://127.0.0.1:$LLMPort/v1") { throw "workflows の接続先は $($backend.base_url)" }
     "ok"
 }
 
@@ -66,7 +84,7 @@ Check "node cache disabled (--cache-none)" {
 }
 Check "custom nodes" {
     $needed = "LMConnectLMStudioBackend", "LMConnectVision", "LMConnectPromptWithSystem",
-              "LMConnectEjectLMStudioModel", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject"
+              "FurryJaEjectLLM", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject"
     $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info"
     $absent = $needed | Where-Object { -not $info.PSObject.Properties[$_] }
     if ($absent) { throw "未登録: $($absent -join ', ')（setup-comfyui.ps1 の後に ComfyUI を再起動）" }
@@ -110,7 +128,7 @@ Check "Tor SOCKS 127.0.0.1:9050" {
     if (-not $socks.StartsWith("socks5h://")) { throw "TOR_SOCKS_URL は socks5h:// にしてください（DNS 漏れ）" }
     $addr
 } -Optional
-Check "PrismML llama-server (BONSAI_LLAMA_SERVER)" {
+Check "llama-server for the search workers (BONSAI_LLAMA_SERVER)" {
     $exe = Get-DotEnvValue "BONSAI_LLAMA_SERVER"
     if (-not $exe -or -not (Test-Path $exe)) { throw "未導入（scripts\setup-llamacpp.ps1）" }
     $version = (Invoke-Native $exe --version | Where-Object { $_ -match "version" } | Select-Object -First 1)
@@ -136,21 +154,25 @@ Check "probe rank (tools\bonsai\rank.json)" {
     ($rank.order.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value)[0])" }) -join " "
 } -Optional
 Check "no orphan llama-server" {
-    $orphans = @(Get-Process llama-server -ErrorAction SilentlyContinue)
+    # The 27B's router (listening on LLM_PORT) and the model processes it starts are not search workers.
+    $router = @(Get-NetTCPConnection -State Listen -LocalPort $LLMPort -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
+    $children = @(Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $router -contains $_.ParentProcessId } | ForEach-Object { $_.ProcessId })
+    $orphans = @(Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin ($router + $children) })
     if ($orphans) { throw "残っています: PID $($orphans.Id -join ', ')（検索中でなければ Stop-Process で止めてください）" }
     "none"
 } -Optional
 
 Write-Step "チャットタブのコード実行（Docker サンドボックス、思考モードのみ）"
-Check "Docker Desktop (Linux engine)" {
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "未導入（コードは書くが実行しない）" }
-    $os = & docker version --format "{{.Server.Os}}" 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "停止中（scripts\setup-sandbox.ps1 が起動します）" }
+Check "docker (Linux engine)" {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "docker コマンドが無い（コードは書くが実行しない。Docker Desktop も起動しない）" }
+    $os = Invoke-Native docker version --format "{{.Server.Os}}" | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0) { throw "エンジンに接続できない（承認した実行のときに Docker Desktop を起動します）" }
     if ("$os".Trim() -ne "linux") { throw "エンジンが $os（Linux コンテナに切り替え）" }
     "linux"
 } -Optional
 Check "image python:3.12-slim" {
-    & docker image inspect python:3.12-slim *> $null
+    Invoke-Native docker image inspect python:3.12-slim | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "未取得（scripts\setup-sandbox.ps1）" }
     "ok"
 } -Optional

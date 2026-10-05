@@ -1,6 +1,6 @@
 """One job at a time across the image tab and the chat tab (design doc §5.8).
 
-The image tab holds the lock while it submits to ComfyUI; the chat tab holds it from its first LM Studio call
+The image tab holds the lock while it submits to ComfyUI; the chat tab holds it from its first call to the LLM router
 until the last search worker is gone. A run spans several graph nodes, so the lock is token based (any task may
 release it) with a lease that frees a holder that disappeared (a cancelled run whose cleanup never ran).
 Waiting is bounded by JOB_LOCK_TIMEOUT_S when the holder is the other tab; there is no queue.

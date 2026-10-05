@@ -23,7 +23,7 @@ MAP = load_map("sdxl")
 TEMPLATE_IDS = sorted(MAP["templates"])
 KNOWN_TYPES = {
     "LMConnectLMStudioBackend", "PrimitiveStringMultiline", "LoadImage", "LMConnectVision", "StringConcatenate",
-    "LMConnectPromptWithSystem", "LMConnectEjectLMStudioModel", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject",
+    "LMConnectPromptWithSystem", "FurryJaEjectLLM", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject",
     "CLIPTextEncode", "ImageScaleToTotalPixels", "EmptyLatentImage", "VAEEncode", "KSampler", "VAEDecode", "SaveImage",
     "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "FurryJaImageAfter", "DWPreprocessor", "DiffControlNetLoader",
     "SetUnionControlNetType", "ControlNetApplyAdvanced", "PreviewImage", "ImageToMask", "SetLatentNoiseMask",

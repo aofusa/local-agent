@@ -1,6 +1,6 @@
 """Role resolution, template selection and parameter clamping (work instruction WI-IMG-MULTI-REF-001 §4).
 
-Everything here is a pure function. LangGraph never calls LM Studio (AGENTS.md), so ``classify_intent``
+Everything here is a pure function. LangGraph never calls the LLM router (AGENTS.md), so ``classify_intent``
 is a deterministic rule-based reader of the Japanese instruction: role keywords, ordinals
 ("1枚目", "画像2", "A/B/C") and vague words. The LLM still turns the instruction and the role-specific
 image tags into Danbooru tags inside the ComfyUI workflow.

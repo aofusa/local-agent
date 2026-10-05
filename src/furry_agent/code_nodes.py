@@ -1,6 +1,6 @@
 """The chat tab's code branch (docs/chat-deep-search-creative-sandbox.md §5).
 
-    code_plan     the LM Studio 27B writes the files and the command (think: thinking tokens on)
+    code_plan     the 27B (llama.cpp router) writes the files and the command (think: thinking tokens on)
     write_files   files go to artifacts/code/<run_id>/. fast ends here: files and intent, never a run. think
                   checks Docker (not running: the files and the reason, no run)
     confirm_run   interrupt with the HITL card (files and sizes, argv, image, network, timeout, memory).
@@ -28,7 +28,7 @@ from langgraph.types import interrupt
 
 from furry_agent import coding, sandbox
 from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, _cleanup, _conf, _decision, _edited_args, _fail,
-                                     _final, _held, _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock,
+                                     _final, _held, _hitl, _history, _image_tab_busy, _is_think, _llm, _lock,
                                      _progress, _prompt, _settings, controlled, end_or_record, log)
 from furry_agent.config import REPO_ROOT, ChatSettings, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
@@ -44,6 +44,14 @@ sandbox_lock = asyncio.Lock()
 def _runner(config: RunnableConfig | None):
     """sandbox's docker CLI runner; tests replace it (no Docker needed)."""
     return _conf(config).get("sandbox_runner")
+
+
+def _desktop(config: RunnableConfig | None) -> tuple:
+    """(Docker Desktop's executable or None, its launcher). A fake runner stands for a fake machine: its tests say
+    whether Docker Desktop is installed (``docker_desktop_exe``) instead of this machine's Program Files."""
+    conf = _conf(config)
+    exe = conf.get("docker_desktop_exe") if "sandbox_runner" in conf else sandbox.desktop_exe()
+    return exe, conf.get("docker_desktop_launcher")
 
 
 def _rel(path: Path) -> str:
@@ -73,7 +81,7 @@ def _task(code: dict, extra: list[dict] | None = None) -> dict:
 async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSettings, code: dict,
                     fix: bool) -> tuple[coding.CodePlan, list[dict]]:
     """Ask the 27B for the files (a first plan or a fix of the failed run). Holds the job lock only for the call."""
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     profile = sandbox.PROFILES[code["profile"]]
     system = (await _prompt(settings, "system_code_plan.txt")).replace("{image}", profile.image).replace(
         "{language}", profile.language.capitalize()).replace(
@@ -91,10 +99,10 @@ async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSett
     try:
         token = await _lock(state, config, settings)
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CODE_TOKENS, answer_min=ANSWER_MIN,
+            reply, thoughts = await _ask(state, settings, llm, messages, base=CODE_TOKENS, answer_min=ANSWER_MIN,
                                          temperature=0.2, stage="修正" if fix else "コード")
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     finally:
         # The container never needs the job lock (§5.5): give it back right after the model call.
@@ -120,8 +128,8 @@ async def code_plan(state: ChatState, config: RunnableConfig) -> dict:
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
     except (LLMError, OSError) as exc:
-        await _cleanup(None, _lmstudio(config, settings), unload=True)
-        return _fail(state, f"LM Studio に接続できないか、時間切れです（{exc}）", "code")
+        await _cleanup(None, _llm(config, settings), unload=True)
+        return _fail(state, f"LLM サーバ（llama.cpp）に接続できないか、時間切れです（{exc}）", "code")
     if not plan.files:
         return {**_fail(state, "コードを取り出せませんでした（" + "、".join(plan.problems) + "）", "code"), "code": code}
     code.update({"spec": plan.spec, "files": plan.files, "command": plan.command, "setup": plan.setup,
@@ -159,10 +167,13 @@ async def write_files(state: ChatState, config: RunnableConfig) -> dict:
     if not _is_think(state):
         text = _answer(code, "コードを書きました。速いモードでは実行しません（「思考」で送ると、承認のあと Docker コンテナで実行します）。")
         return {"code": code, "messages": [_final(state, text, task=_task(code))]}
-    ok, reason = await sandbox.docker_status(settings.docker_exe, _runner(config))
+    engine, reason = await sandbox.engine_state(settings.docker_exe, _runner(config))
+    ok = engine == sandbox.READY
     code["start_desktop"] = False
-    if not ok and await sandbox.desktop_cli(settings.docker_exe, _runner(config)):
-        # Installed but stopped: started after the approval, only for the run (sandbox_exec).
+    # The docker CLI is used with whatever engine it reaches. Only a CLI that reaches none makes Docker Desktop
+    # start, after the approval and only for the run (sandbox_exec); without a docker command nothing starts.
+    if engine == sandbox.STOPPED and await sandbox.can_start_desktop(settings.docker_exe, _runner(config),
+                                                                        _desktop(config)[0]):
         ok, code["start_desktop"] = True, True
     elif ok and not await sandbox.image_present(code["image"], settings.docker_exe, _runner(config)):
         ok, reason = False, (f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1"
@@ -291,7 +302,8 @@ async def sandbox_exec(state: ChatState, config: RunnableConfig) -> dict:
             # Docker Desktop was stopped (its VM holds ~1.5 GB the 27B and ComfyUI need on this machine): start it
             # for this approved run only and stop it again afterwards.
             started = True
-            ok, reason = await sandbox.start_desktop(settings.docker_exe, runner)
+            exe, launcher = _desktop(config)
+            ok, reason = await sandbox.start_desktop(settings.docker_exe, runner, exe=exe, launcher=launcher)
             if ok and not await sandbox.image_present(code["image"], settings.docker_exe, runner):
                 ok, reason = False, f"コンテナイメージ {code['image']} がありません（scripts\\setup-sandbox.ps1 で取得してください）"
             if not ok:

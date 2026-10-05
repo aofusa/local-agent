@@ -29,7 +29,7 @@ def test_large_model_never_chosen_while_leader_resident():
     rank = Rank()
     sel = select_model("synthesize", CATALOG, rank, ALL, 20000, leader_resident=True, reserve_mb=0)
     assert not sel.model.large
-    assert "LM Studio の 27B" in sel.skipped["bonsai-2-27b-abliterated"]
+    assert "27B（llama.cpp）" in sel.skipped["bonsai-2-27b-abliterated"]
     sel = select_model("synthesize", CATALOG, rank, ALL, 20000, leader_resident=False, reserve_mb=0)
     assert sel.model.id == "bonsai-2-27b-abliterated"
 

@@ -4,7 +4,7 @@
                 rules) and the mode: configurable.mode fast | think | auto (modes.choose; none = fast)
     route       only for messages the rules could not place: Qwen3-1.7B-heretic picks CHAT / SEARCH / WRITE /
                 CODE, rewrites a search query and says whether the request is deep (auto mode)
-    chat        the LM Studio Qwen3.8 27B answers directly (think mode: thinking tokens on)
+    chat        the Qwen3.8 27B (llama.cpp router) answers directly (think mode: thinking tokens on)
     plan        fast: 1 intent. think: the goal, 2-5 sub-questions and 1-3 intents. The 27B is unloaded when the
                 readers do not fit next to it, and the Ternary-Bonsai-2-27B abliterated (PTQ1_0, PrismML
                 llama-server) becomes the leader for critique and synthesis ("proxy" mode)
@@ -16,7 +16,7 @@
                 contradictions and writes the next intents; search_agent.next_round decides another round
                 (up to 4 rounds, 12 pages, SEARCH_WALL_CLOCK_S) or the stop reason
     synthesize  the leader writes one answer from the cards with [n] citations, the open sub-questions, the
-                contradictions and the stop reason; every llama-server is gone, LM Studio is unloaded, the shared
+                contradictions and the stop reason; every llama-server is gone, the LLM router is unloaded, the shared
                 job lock is released. A writing request that needed facts goes on to the writer instead.
     write_*     write_nodes: brief/outline -> draft -> revise (-> chapter confirmation)
     code_*      code_nodes: code_plan -> write_files -> confirm_run -> sandbox_exec -> observe
@@ -47,7 +47,7 @@ from furry_agent.bonsai_select import Catalog, Selection, SelectionError, select
 from furry_agent.bonsai_worker import Ledger, WorkerError, run_reader
 from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, StageError, _ask, capped, _cleanup, _conf,
                                      _fail, _final, _held, _history, _is_think, _last_human, _leaders, _ledgers,
-                                     _lmstudio, _lock, _progress, _prompt, _settings, _text_of, controlled,
+                                     _llm, _lock, _progress, _prompt, _settings, _text_of, controlled,
                                      end_or_record, log)
 from furry_agent.chat_models import (LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
                                      _catalog, _ensure_tor, _free_mb, _leader, _leader_client, _run_model, _search_client,
@@ -211,7 +211,7 @@ def _after_ingest(state: ChatState) -> str:
 async def route(state: ChatState, config: RunnableConfig) -> dict:
     """Qwen3-1.7B-heretic: chat, search, write or code? Also rewrites a search query and says "deep"."""
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     try:
         token = await _lock(state, config, settings)
     except JobLockBusy as exc:
@@ -226,7 +226,7 @@ async def route(state: ChatState, config: RunnableConfig) -> dict:
         decision, selection = await _run_model(config, settings, "route", PORT_ROUTE, ask, leader_resident=False)
         label = selection.model.label
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio))
+        await asyncio.shield(_cleanup(token, llm))
         raise
     except (SelectionError, WorkerError, OSError) as exc:
         log.info("router model unavailable, plain chat: %s", exc)
@@ -259,26 +259,26 @@ def _after_route(state: ChatState) -> str:
 
 async def chat(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     token = state.get("lock_token")
     try:
         token = await _lock(state, config, settings)
         messages = [{"role": "system", "content": await _prompt(settings, "system_chat.txt")},
                     *_history(state, settings.history_turns)]
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CHAT_TOKENS, answer_min=CHAT_ANSWER_MIN,
+            reply, thoughts = await _ask(state, settings, llm, messages, base=CHAT_TOKENS, answer_min=CHAT_ANSWER_MIN,
                                          temperature=0.6, stage="回答")
         text = reply.content or "（空の応答でした）"
         log.info("chat answered mode=%s", state.get("mode"))
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
     except (LLMError, OSError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
-        return _fail(state, f"LM Studio に接続できないか、時間切れです（{exc}）", "chat")
-    # Plain chat keeps the 27B loaded (LM Studio's JIT TTL unloads it); the image workflow ejects it anyway.
+        await _cleanup(token, llm, unload=True)
+        return _fail(state, f"LLM サーバ（llama.cpp）に接続できないか、時間切れです（{exc}）", "chat")
+    # Plain chat keeps the 27B loaded (the router's idle sleep unloads it); the image workflow ejects it anyway.
     await _cleanup(token)
     return {"messages": [_final(state, text, thoughts=thoughts)], "lock_token": None}
 
@@ -292,7 +292,7 @@ def _question(state: ChatState) -> str:
 
 async def plan(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     question = _question(state)
     urls = state["route"].get("urls") or []
     token = state.get("lock_token")
@@ -321,13 +321,13 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         schema = sa.DeepPlan if think else sa.Plan
         planner_messages = [{"role": "system", "content": await _prompt(settings, prompt)},
                             {"role": "user", "content": question}]
-        use_lmstudio = settings.search_planner == "lmstudio" and await lmstudio.reachable()
+        use_llm = settings.search_planner == "llm" and await llm.reachable()
         parsed, planner = None, None
-        if use_lmstudio:
+        if use_llm:
             # The user's requirement: the Qwen3.8 27B does the first step (the plan) ...
             async with _held(token):
-                parsed = await sa.ask_json(lmstudio, planner_messages, schema,
-                                           max_tokens=capped(settings, lmstudio, PLAN_TOKENS_THINK if think else PLAN_TOKENS))
+                parsed = await sa.ask_json(llm, planner_messages, schema,
+                                           max_tokens=capped(settings, llm, PLAN_TOKENS_THINK if think else PLAN_TOKENS))
             planner = LEADER_LABEL
         if parsed is None:
             try:
@@ -349,7 +349,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
 
         # ... and is unloaded when the readers do not fit next to it (measured: 0.4 GB free with the IQ3_M 27B).
         stage = "worker"
-        resident = use_lmstudio and bool(await lmstudio.loaded())
+        resident = use_llm and bool(await llm.loaded())
         mode = "resident"
         if resident:
             try:
@@ -359,8 +359,8 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
                 if fit.width < min(len(intents), settings.fanout_width):
                     raise SelectionError("幅が足りません")
             except SelectionError as exc:
-                log.info("readers do not fit next to the LM Studio 27B (%s): unloading it", exc)
-                await lmstudio.unload_all()
+                log.info("readers do not fit next to the router's 27B (%s): unloading it", exc)
+                await llm.unload_all()
                 mode = "proxy"
         else:
             mode = "proxy"
@@ -373,12 +373,12 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         log.info("search plan mode=%s chat_mode=%s planner=%s intents=%s subquestions=%d", mode, state.get("mode"),
                  planner, [i["tool"] for i in intents], len(search["subquestions"]))
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
     except (StageError, SelectionError, TorUnavailable, SearchError, LLMError, WorkerError, OSError, ValueError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
+        await _cleanup(token, llm, unload=True)
         return _fail(state, exc, getattr(exc, "stage", stage))
     lines = "\n".join(f"- {i['tool']}: `{i['q']}`（{i.get('why') or '―'}）" for i in intents)
     leader_note = ("27B は載せたまま統合します" if mode == "resident" else
@@ -436,7 +436,7 @@ async def search(payload: dict, config: RunnableConfig) -> dict:
 async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
     """Bonsai-4B drops irrelevant results; then choose the reader model and how many readers run."""
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     token = state.get("lock_token")
     job_lock.renew(token)
     search = dict(state["search"])
@@ -499,10 +499,10 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
         search["roles"] = roles
         search["rejected"] = rejected[-60:]
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except (SelectionError, OSError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
+        await _cleanup(token, llm, unload=True)
         return _fail(state, exc, "worker", _trace(state, search))
     readers = len(search["slots"])
     prefix = f"第 {search['round'] + 1} ラウンド: " if _is_think(state) else ""
@@ -595,7 +595,7 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
                 logs.append(entry)
     except asyncio.CancelledError:
         # The run was stopped from the UI: every branch is cancelled, so free everything here.
-        await asyncio.shield(_cleanup(token, _lmstudio(config, settings), unload=True))
+        await asyncio.shield(_cleanup(token, _llm(config, settings), unload=True))
         raise
     except (TimeoutError, WorkerError, LLMError, OSError) as exc:
         logs.append({"intent_id": payload["jobs"][0]["intent"]["id"], "kind": "read", "error": str(exc)[:300] or "時間切れ"})
@@ -622,7 +622,7 @@ async def judge(state: ChatState, config: RunnableConfig) -> dict:
 async def critique(state: ChatState, config: RunnableConfig) -> dict:
     """Think mode: score the sub-questions and decide on another round (§3.3). It never writes the answer."""
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     token = state.get("lock_token")
     job_lock.renew(token)
     search = dict(state["search"])
@@ -645,7 +645,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
                     sa.Reflect, max_tokens=capped(settings, client, CRITIQUE_TOKENS), temperature=0.2)
             roles["critic"] = label
         except asyncio.CancelledError:
-            await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+            await asyncio.shield(_cleanup(token, llm, unload=True))
             raise
         except (WorkerError, SelectionError, LLMError) as exc:
             log.info("critique failed: %s", exc)
@@ -691,7 +691,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
     from the supported and partial claims only and then audited (claim_audit keeps the leader and the lock);
     otherwise every model is freed here."""
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     search = dict(state["search"])
     token = state.get("lock_token")
     job_lock.renew(token)
@@ -720,7 +720,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
             if errors:
                 text += f"\n\n（{errors[:400]}）"
             search["stop_reason"] = "no_hits"
-            await _cleanup(token, lmstudio, unload=True)
+            await _cleanup(token, llm, unload=True)
             if then_write:
                 artifact = {**(state.get("artifact") or {}), "research": ""}
                 return {"lock_token": None, "search": search, "artifact": artifact,
@@ -732,7 +732,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
             answer, label = "出典カードで確かめられた主張がありませんでした。", roles.get("critic") or ""
         else:
             client, label = await _leader_client(config, settings, state, "synthesize")
-            # Thinking tokens only on the LM Studio 27B (the proxy leader runs with --reasoning off, 8192 context).
+            # Thinking tokens only on the router's 27B (the proxy leader runs with --reasoning off, 8192 context).
             resident = search.get("mode") == "resident"
             user = sa.leader_input(search["question"], cards, refs, search if think else None)
             if block:
@@ -749,10 +749,10 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
             if state.get("verify_error"):  # CLAIM_VERIFY_FAIL_OPEN=1: the unaudited synthesis, marked (§5.3)
                 answer = "（突き合わせ失敗。以下は主張の監査を通していない統合です）\n\n" + answer
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except (LLMError, WorkerError, SelectionError, OSError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
+        await _cleanup(token, llm, unload=True)
         return _fail(state, exc, "chat", _trace(state, search))
     search["roles"] = roles
     search["answer"] = answer
@@ -765,7 +765,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
         return {**update, "messages": [_progress(view, "回答の各文を出典と照合しています（監査）…",
                                                  _trace(view, search))]}
     # Every llama-server is killed and the 27B unloaded so the image tab gets the memory back (design doc §5.8).
-    await _cleanup(token, lmstudio, unload=True)
+    await _cleanup(token, llm, unload=True)
     update["lock_token"] = None
     return {**update, **await finish_answer({**state, **update}, config)}
 

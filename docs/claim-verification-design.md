@@ -1,5 +1,7 @@
 # 主張単位の検証 設計
 
+> v0.11.0 から LM Studio は使っていない。本文の「LM Studio」「`LMSTUDIO_*`」は、llama.cpp のルータ（`LLM_*`。[llamacpp-router-design.md](llamacpp-router-design.md)）と読み替える。
+
 - 注記（v0.8.0）: 本文の `/docs`（ローカル文書）の経路は削除した。主張の検証は検索の回答だけに掛かる。
 - 文書種別: 改修設計（実装前）
 - 版: 0.1（2026-10-04）

@@ -1,0 +1,27 @@
+{
+  "_comment": "The 27B served by the llama.cpp router (scripts/setup-llm.ps1, scripts/start-llm.ps1) for the ComfyUI workflow, the chat tab and /coder/turn. The source GGUF is downloaded from Hugging Face (sha256 from its LFS metadata, checked after download) and requantized to 'quant' with llama-quantize so it fits in ~24 GB of shared memory; 'name' is the model name of the router's preset (LLM_MODEL) that the workflows and the chat tab send.",
+  "name": "qwen3.8-27b-abliterated",
+  "repo": "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+  "file": "Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_S.gguf",
+  "size": 15624084384,
+  "sha256": "f10c26c7d07b056bccc60e09ec427a0861a7df554519e97ffd115f5f45900176",
+  "mmproj": {
+    "file": "mmproj-model-bf16.gguf",
+    "size": 931145888,
+    "sha256": "c9a09064683620bea3d3bfed5d4462e1a97a7d2fff7e5045d6862a0a85eeb5b5"
+  },
+  "quant": "IQ3_M",
+  "quantized": {
+    "IQ3_M": {
+      "file": "Huihui-Qwen3.8-27B-abliterated-IQ3_M.gguf",
+      "size": 12768332704,
+      "sha256": "2554601c23a2bf30d9c7db83847ae3e5ecab2cd4d1fa394c1782d75f5b3595a4"
+    }
+  },
+  "gpu_offload": 0.45,
+  "context": 4096,
+  "temperature": 0.4,
+  "repeat_penalty": 1.1,
+  "sleep_idle_s": 300,
+  "port": 8080
+}

@@ -249,21 +249,49 @@ def _exec(argv: list[str], timeout_s: float) -> subprocess.CompletedProcess:
                           creationflags=_flags())
 
 
-async def docker_status(docker: str = "docker", runner=None) -> tuple[bool, str]:
-    """(ok, reason). Docker Desktop's Linux engine must be running."""
+# --- the engine ------------------------------------------------------------------------------------------------
+# The docker CLI comes first: whatever engine it reaches (Docker Desktop, Docker Engine, a remote context) is used
+# as it is. Only when the CLI is installed but cannot reach an engine is Docker Desktop started, for one approved
+# run. Without a docker command nothing is started at all.
+
+READY, STOPPED, MISSING, WRONG_OS = "ready", "stopped", "missing", "wrong_os"
+
+
+async def engine_state(docker: str = "docker", runner=None) -> tuple[str, str]:
+    """(state, reason): READY, STOPPED (CLI present, no engine), MISSING (no docker command) or WRONG_OS."""
     runner = runner or _exec
     try:
         out = await asyncio.to_thread(runner, [docker, "version", "--format", "{{.Server.Os}}"], 20)
     except FileNotFoundError:
-        return False, "Docker がインストールされていません（Docker Desktop を入れてください）"
+        return MISSING, "docker コマンドがありません（Docker を入れると実行できます。Docker Desktop の起動も試みません）"
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"Docker に接続できません（{exc}）"
+        return STOPPED, f"Docker に接続できません（{exc}）"
     os_name = tail(out.stdout).strip()
     if out.returncode != 0:
-        return False, "Docker Desktop が起動していません（起動してから送り直してください）"
+        return STOPPED, "Docker のエンジンに接続できません（Docker Desktop などのエンジンを起動してから送り直してください）"
     if os_name and os_name != "linux":
-        return False, f"Docker のエンジンが Linux ではありません（{os_name}）。Linux コンテナに切り替えてください"
-    return True, "ok"
+        return WRONG_OS, f"Docker のエンジンが Linux ではありません（{os_name}）。Linux コンテナに切り替えてください"
+    return READY, "ok"
+
+
+async def docker_status(docker: str = "docker", runner=None) -> tuple[bool, str]:
+    """(ok, reason): the engine the docker CLI reaches runs Linux containers."""
+    state, reason = await engine_state(docker, runner)
+    return state == READY, reason
+
+
+def desktop_exe() -> Path | None:
+    """Docker Desktop's executable on this machine (Windows / macOS), or None."""
+    import os
+
+    candidates = []
+    if sys.platform == "win32":
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432")):
+            if base:
+                candidates.append(Path(base) / "Docker" / "Docker" / "Docker Desktop.exe")
+    elif sys.platform == "darwin":
+        candidates.append(Path("/Applications/Docker.app/Contents/MacOS/Docker Desktop"))
+    return next((c for c in candidates if c.is_file()), None)
 
 
 async def desktop_cli(docker: str = "docker", runner=None) -> bool:
@@ -276,13 +304,32 @@ async def desktop_cli(docker: str = "docker", runner=None) -> bool:
     return out.returncode == 0
 
 
-async def start_desktop(docker: str = "docker", runner=None, timeout_s: int = DESKTOP_START_S) -> tuple[bool, str]:
+async def can_start_desktop(docker: str = "docker", runner=None, exe: Path | None = None) -> bool:
+    """Docker Desktop can be started: through the CLI plugin, else its executable ``exe``."""
+    return await desktop_cli(docker, runner) or exe is not None
+
+
+def _launch(exe: Path) -> None:
+    flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             if sys.platform == "win32" else 0)
+    subprocess.Popen([str(exe)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=flags, close_fds=True)
+
+
+async def start_desktop(docker: str = "docker", runner=None, timeout_s: int = DESKTOP_START_S, *,
+                        exe: Path | None = None, launcher=None) -> tuple[bool, str]:
     """Start Docker Desktop for one approved run (its VM holds ~1.5 GB this machine needs for the 27B and
-    ComfyUI the rest of the time) and wait for the Linux engine."""
+    ComfyUI the rest of the time) and wait for the Linux engine. ``docker desktop start`` when the CLI plugin is
+    there, else Docker Desktop's executable ``exe``."""
     runner = runner or _exec
     log.info("starting Docker Desktop for a sandbox run")
     try:
-        await asyncio.to_thread(runner, [docker, "desktop", "start", "--timeout", str(timeout_s)], timeout_s + 30)
+        if await desktop_cli(docker, runner):
+            await asyncio.to_thread(runner, [docker, "desktop", "start", "--timeout", str(timeout_s)], timeout_s + 30)
+        elif exe is not None:
+            await asyncio.to_thread(launcher or _launch, exe)
+        else:
+            return False, "Docker Desktop を起動する手段がありません"
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"Docker Desktop を起動できません（{exc}）"
     deadline = time.monotonic() + timeout_s
@@ -294,7 +341,11 @@ async def start_desktop(docker: str = "docker", runner=None, timeout_s: int = DE
 
 
 async def stop_desktop(docker: str = "docker", runner=None) -> None:
+    """Stop Docker Desktop again after a run it was started for (needs the CLI plugin; without it, it stays up)."""
     runner = runner or _exec
+    if not await desktop_cli(docker, runner):
+        log.warning("docker desktop CLI plugin missing: Docker Desktop is left running")
+        return
     try:
         await asyncio.to_thread(runner, [docker, "desktop", "stop", "--timeout", "120"], 150)
         log.info("stopped Docker Desktop after the sandbox run")

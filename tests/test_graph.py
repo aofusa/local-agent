@@ -18,7 +18,7 @@ from furry_agent.config import Settings
 ROOT = Path(__file__).resolve().parent.parent
 NODE_TYPES = {
     "LMConnectLMStudioBackend", "PrimitiveStringMultiline", "LoadImage", "LMConnectVision", "StringConcatenate",
-    "LMConnectPromptWithSystem", "LMConnectEjectLMStudioModel", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject",
+    "LMConnectPromptWithSystem", "FurryJaEjectLLM", "FurryJaSplitTags", "FurryJaCheckpointLoaderAfterEject",
     "CLIPTextEncode", "ImageScaleToTotalPixels", "EmptyLatentImage", "VAEEncode", "KSampler", "VAEDecode", "SaveImage",
     "IPAdapterUnifiedLoader", "IPAdapterAdvanced", "FurryJaImageAfter", "DWPreprocessor", "DiffControlNetLoader",
     "SetUnionControlNetType", "ControlNetApplyAdvanced", "PreviewImage", "ImageToMask", "SetLatentNoiseMask",
@@ -102,7 +102,7 @@ class FakeComfy:
                 raise ComfyError("FurryJaSplitTags (split): [LM Connect Error] HTTP Error 400")
             if self.fail_at == "timeout":
                 raise ComfyError("ComfyUI の完了待ちがタイムアウトしました（10 分）")
-            return WaitResult(done=False, outputs={"ckpt": {"lmstudio_unloaded": [self.gate_ok]}, "split": {
+            return WaitResult(done=False, outputs={"ckpt": {"llm_unloaded": [self.gate_ok]}, "split": {
                 "positive": ["masterpiece, 1girl, anthro, wolf, white fur, kimono, sunset, beach"],
                 "negative": ["worst quality"], "split_mode": ["json"]}})
         self.calls.append("wait_done")
@@ -112,7 +112,7 @@ class FakeComfy:
         if self.submitted and "pose_preview" in self.submitted:
             outputs["pose_preview"] = {"images": [{"filename": "p_00001_.png", "subfolder": "", "type": "temp"}]}
         if until_node is None and self.fail_at == "refetch":
-            outputs["ckpt"] = {"lmstudio_unloaded": [True]}
+            outputs["ckpt"] = {"llm_unloaded": [True]}
         return WaitResult(done=True, outputs=outputs)
 
     async def view(self, filename, subfolder="", folder_type="output"):
@@ -183,7 +183,7 @@ async def test_text_only_returns_image_and_saves(settings):
 async def test_ksampler_log_reports_gate_seen_before_split(settings, caplog):
     caplog.set_level("INFO", logger="furry_agent")
     await _run("テスト", FakeComfy(), settings)
-    assert "LM Studio unloaded at checkpoint load=[True]" in caplog.text
+    assert "LLM router unloaded at checkpoint load=[True]" in caplog.text
 
 
 async def test_single_image_is_i2i_basic_and_deduplicated(settings):

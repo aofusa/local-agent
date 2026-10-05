@@ -1,4 +1,4 @@
-"""POST /coder/turn (docs/locus-cui-design.md §6.1) with a fake LM Studio stream: no LM Studio needed."""
+"""POST /coder/turn (docs/locus-cui-design.md §6.1) with a fake the LLM router stream: no the LLM router needed."""
 
 import asyncio
 import json
@@ -10,9 +10,9 @@ import pytest
 from furry_agent import coder_gate as gate
 from furry_agent.config import ChatSettings
 from furry_agent.job_lock import job_lock
-from furry_agent.llm_client import LMStudio
+from furry_agent.llm_client import LlamaRouter
 
-SETTINGS = replace(ChatSettings(), lmstudio_ctx=4096, lmstudio_model="qwen")
+SETTINGS = replace(ChatSettings(), llm_ctx=4096, llm_model="qwen")
 
 
 def _chunks(*deltas, finish="stop", usage=None):
@@ -27,7 +27,7 @@ def _chunks(*deltas, finish="stop", usage=None):
 
 
 class LM:
-    """A streaming LM Studio: records each request body and answers with the next canned stream."""
+    """A streaming the LLM router: records each request body and answers with the next canned stream."""
 
     def __init__(self, *streams, status=200):
         self.streams, self.bodies, self.status = list(streams), [], status
@@ -50,7 +50,7 @@ class Comfy:
 def _app(lm, comfy=None):
     app = gate.app
     app.state.chat_settings = SETTINGS
-    app.state.lmstudio = LMStudio("http://lm.test/v1", "qwen", 30)
+    app.state.llm = LlamaRouter("http://lm.test/v1", "qwen", 30)
     app.state.transport = httpx.MockTransport(lm)
     app.state.comfy_config = {"configurable": {"comfy_client": comfy}}
     return app
@@ -116,7 +116,6 @@ async def test_think_mode_streams_thinking_apart_from_the_answer():
     status, raw = await _post(_app(lm), {"mode": "think", "messages": MESSAGES})
     events = _events(raw)
     assert ("thinking", {"text": "考え中"}) in events and ("token", {"text": "答え"}) in events
-    assert lm.bodies[0]["reasoning_effort"] == "medium"
     assert lm.bodies[0]["chat_template_kwargs"] == {"enable_thinking": True}
 
 
@@ -158,7 +157,7 @@ async def test_lm_studio_refusal_is_retried_once_then_reported():
     lm = LM(status=500)
     status, raw = await _post(_app(lm), {"mode": "fast", "messages": MESSAGES})
     events = _events(raw)
-    assert len(lm.bodies) == 2 and events[-1][0] == "error" and events[-1][1]["code"] == "lmstudio"
+    assert len(lm.bodies) == 2 and events[-1][0] == "error" and events[-1][1]["code"] == "llm"
     assert not any(e == "tool_call" for e, _ in events) and job_lock.holder is None
 
 
@@ -202,15 +201,15 @@ async def test_health():
     async def reachable():
         return True
 
-    app.state.lmstudio.reachable = reachable
+    app.state.llm.reachable = reachable
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://host") as client:
         data = (await client.get("/coder/health")).json()
-    assert data["ok"] and data["gate"] == "coder" and data["context"] == 4096 and data["lmstudio"] is True
+    assert data["ok"] and data["gate"] == "coder" and data["context"] == 4096 and data["llm"] is True
 
 
 @pytest.fixture(autouse=True)
 def _reset_state():
     yield
-    for name in ("chat_settings", "lmstudio", "transport", "comfy_config"):
+    for name in ("chat_settings", "llm", "transport", "comfy_config"):
         if hasattr(gate.app.state, name):
             delattr(gate.app.state, name)

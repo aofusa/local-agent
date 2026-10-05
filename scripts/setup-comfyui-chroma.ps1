@@ -18,7 +18,7 @@
   .\scripts\setup-comfyui-chroma.ps1
 #>
 param(
-    [string]$ModelsDir = "",           # default: <ComfyUI base or main dir>\models
+    [string]$ModelsDir = "",           # default: tools\comfyui\models
     [switch]$NoConvert                 # keep only the BF16 file (machines with 32 GB+ RAM)
 )
 $ErrorActionPreference = "Stop"
@@ -26,41 +26,32 @@ $ErrorActionPreference = "Stop"
 Initialize-DotEnv | Out-Null
 
 $layout = Get-ComfyLayout
-if (-not $ModelsDir) {
-    if (-not $layout) { throw "ComfyUI の場所が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
-    $root = if ($layout.BaseDir) { $layout.BaseDir } else { $layout.MainDir }
-    $ModelsDir = Join-Path $root "models"
-}
+if (-not $layout) { throw "ComfyUI の場所が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
+if (-not $ModelsDir) { $ModelsDir = $layout.ModelsDir }
 
-function Get-Model([string]$Url, [string]$Path) {
-    if ((Test-Path $Path) -and (Get-Item $Path).Length -gt 0) { Write-Ok "exists: $Path"; return }
-    New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
-    $partial = "$Path.partial"
-    Write-Host "    downloading $Url"
-    Invoke-Native curl.exe -L --fail --retry 3 -C - -o $partial $Url | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "ダウンロードに失敗しました: $Url" }
-    Move-Item -Force $partial $Path
-    Write-Ok "saved: $Path"
+function Get-Model([string]$Repo, [string]$File, [string]$Folder, [string]$Name) {
+    # tools\comfyui\models, or the model folders of an earlier ComfyUI on this machine (hard-linked in), may have it.
+    $found = Import-ComfyModel $layout @($Folder) $Name (Get-KnownModelDirs)
+    if ($found) { Write-Ok "exists: $found"; return }
+    Get-HfFile $Repo $File (Join-Path $ModelsDir "$Folder\$Name")   # through the Hugging Face cache
 }
 
 Write-Step "Chroma1-HD のテキストエンコーダと VAE（$ModelsDir）"
-$hf = "https://huggingface.co"
-Get-Model "$hf/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" `
-    (Join-Path $ModelsDir "text_encoders\t5xxl_fp8_e4m3fn.safetensors")
-Get-Model "$hf/lodestones/Chroma1-HD/resolve/main/vae/diffusion_pytorch_model.safetensors" `
-    (Join-Path $ModelsDir "vae\ae.safetensors")
+Get-Model "comfyanonymous/flux_text_encoders" "t5xxl_fp8_e4m3fn.safetensors" "text_encoders" "t5xxl_fp8_e4m3fn.safetensors"
+Get-Model "lodestones/Chroma1-HD" "vae/diffusion_pytorch_model.safetensors" "vae" "ae.safetensors"
 
 $unet = Get-DotEnvValue "CHROMA_UNET_NAME" "chroma_v10HD.safetensors"
-$found = @("diffusion_models", "unet", "checkpoints") | ForEach-Object { Join-Path $ModelsDir "$_\$unet" } | Where-Object { Test-Path $_ }
+$found = Import-ComfyModel $layout @("diffusion_models", "unet", "checkpoints") $unet (Get-KnownModelDirs)
 if ($found) {
     $source = @($found)[0]
     Write-Ok "diffusion model: $source"
     $stem = [IO.Path]::GetFileNameWithoutExtension($unet)
     if (-not $NoConvert -and -not $stem.EndsWith("_fp8_e4m3fn")) {
+        $existing = Import-ComfyModel $layout @("diffusion_models") "$($stem)_fp8_e4m3fn.safetensors" (Get-KnownModelDirs)
         $target = Join-Path $ModelsDir "diffusion_models\$($stem)_fp8_e4m3fn.safetensors"
-        if (Test-Path $target) { Write-Ok "exists: $target" }
+        if ($existing) { Write-Ok "exists: $existing" }
         else {
-            if (-not $layout -or -not $layout.Python) { throw "ComfyUI の python が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
+            if (-not $layout.Python) { throw "ComfyUI の python が分かりません。先に .\scripts\setup-comfyui.ps1 を実行してください。" }
             Write-Step "fp8 へ変換（数分）: $target"
             Invoke-Native $layout.Python (Join-Path $PSScriptRoot "convert_chroma_fp8.py") $source $target | Write-Host
             if ($LASTEXITCODE -ne 0) { throw "fp8 への変換に失敗しました" }

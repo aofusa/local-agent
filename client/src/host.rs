@@ -1,5 +1,5 @@
 //! The local-agent host: the model gate (`POST /coder/turn`, SSE) and the existing graphs (`POST /runs/stream`:
-//! `chat` for web search through Tor, `agent` for image generation). cirka never talks to LM Studio, ComfyUI or
+//! `chat` for web search through Tor, `agent` for image generation). cirka never talks to the LLM router, ComfyUI or
 //! Tor directly; they stay on the host's loopback.
 
 use std::time::Duration;
@@ -72,7 +72,7 @@ pub enum HostError {
     Unreachable(String),
     /// The prompt does not fit the host's context window: compact and try again.
     ContextOverflow(String),
-    /// The gate said no (LM Studio down, busy for too long, bad request).
+    /// The gate said no (the host's LLM down, busy for too long, bad request).
     Refused { message: String, code: String },
     Interrupted,
 }
@@ -101,7 +101,8 @@ pub struct TurnRequest {
 pub struct Health {
     pub ok: bool,
     pub gate: bool,
-    pub lmstudio: bool,
+    /// The host's LLM (the llama.cpp router) answers.
+    pub llm: bool,
     pub context: u32,
     pub model: String,
     pub busy: Option<String>,
@@ -291,7 +292,7 @@ impl HostClient {
             Ok(r) if r.status().is_success() => {
                 if let Ok(v) = r.json::<Value>().await {
                     h.gate = v.get("gate").and_then(Value::as_str) == Some("coder");
-                    h.lmstudio = v.get("lmstudio").and_then(Value::as_bool).unwrap_or(false);
+                    h.llm = llm_ready(&v);
                     h.context = v.get("context").and_then(Value::as_u64).unwrap_or(4096) as u32;
                     h.model = v.get("model").and_then(Value::as_str).unwrap_or("").to_string();
                     h.busy = v.get("busy").and_then(Value::as_str).map(String::from);
@@ -432,8 +433,22 @@ impl HostClient {
     }
 }
 
+/// The model flag of /coder/health: "llm" since local-agent 0.11 (llama.cpp router), "lmstudio" before.
+pub fn llm_ready(health: &Value) -> bool {
+    health.get("llm").or_else(|| health.get("lmstudio")).and_then(Value::as_bool).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn llm_flag_reads_the_new_and_the_old_name() {
+        use serde_json::json;
+        assert!(super::llm_ready(&json!({"llm": true, "lmstudio": true})));
+        assert!(super::llm_ready(&json!({"lmstudio": true})));
+        assert!(!super::llm_ready(&json!({"llm": false, "lmstudio": true})));
+        assert!(!super::llm_ready(&json!({"gate": "coder"})));
+    }
+
     use super::*;
 
     #[test]

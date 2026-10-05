@@ -1,5 +1,5 @@
 ﻿# Start the LangGraph dev server (graph id "agent") reachable from other hosts.
-# ComfyUI (127.0.0.1:8188) and LM Studio (127.0.0.1:1234) must already be running.
+# ComfyUI (127.0.0.1:8188) and the LLM router (127.0.0.1:8080, scripts\start-llm.ps1) must already be running.
 param(
     [int]$Port = 2024
 )

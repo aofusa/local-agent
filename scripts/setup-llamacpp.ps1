@@ -1,16 +1,18 @@
 ﻿<#
 .SYNOPSIS
-  Install the PrismML llama.cpp fork (Vulkan) used by the chat tab's search workers (idempotent).
+  Install the PrismML llama.cpp fork (Vulkan): the 27B's router and the chat tab's search workers (idempotent).
 
 .DESCRIPTION
-  Bonsai's Q1_0 / PTQ1_0 / PQ2_0 kernels exist only in the PrismML fork, so the search agent never uses
-  LM Studio or stock llama.cpp for these models. Two ways to get llama-server.exe:
+  Bonsai's Q1_0 / PTQ1_0 / PQ2_0 kernels exist only in the PrismML fork, so the search agent never uses stock
+  llama.cpp for these models. The same build also runs the Qwen3.8 27B in router mode (scripts\setup-llm.ps1,
+  scripts\start-llm.ps1) and provides llama-quantize. Two ways to get llama-server.exe:
 
     release (default)  download the fork's prebuilt Windows Vulkan zip (config\search_models.json llama_release)
     -FromSource        clone the fork's "prism" branch and build llama-server with -DGGML_VULKAN=ON
                        (needs Visual Studio C++ tools, CMake, Ninja and the Vulkan SDK)
 
-  The result goes under tools\llama-prism\ (git ignored) and its path is saved to .env as BONSAI_LLAMA_SERVER.
+  The result goes under tools\llama-prism\ (git ignored) and its path is saved to .env as BONSAI_LLAMA_SERVER
+  (search workers) and LLM_SERVER (the 27B's router).
   ROCm/HIP builds are not used: on the ROG Ally X only the Vulkan build is supported (design doc §4.2).
 
 .EXAMPLE
@@ -67,7 +69,7 @@ if ($FromSource) {
     if (-not $vs) { throw "Visual Studio の C++ ビルドツールが見つかりません" }
     $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
     $build = Join-Path $src "build-vulkan"
-    $cmd = "call `"$vcvars`" >nul && cmake -S `"$src`" -B `"$build`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF && cmake --build `"$build`" --target llama-server -j"
+    $cmd = "call `"$vcvars`" >nul && cmake -S `"$src`" -B `"$build`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF && cmake --build `"$build`" --target llama-server llama-quantize -j"
     Invoke-Native cmd.exe /c $cmd | Select-Object -Last 5 | ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました（$build）" }
     $exe = Get-ChildItem $build -Recurse -Filter "llama-server.exe" | Select-Object -First 1
@@ -108,4 +110,5 @@ if ($FromSource) {
 
 Test-LlamaServer $server
 Set-DotEnvValue "BONSAI_LLAMA_SERVER" $server
-Write-Ok "BONSAI_LLAMA_SERVER を .env に保存しました"
+Set-DotEnvValue "LLM_SERVER" $server
+Write-Ok "BONSAI_LLAMA_SERVER と LLM_SERVER を .env に保存しました"

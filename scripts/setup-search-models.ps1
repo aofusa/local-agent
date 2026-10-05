@@ -6,7 +6,7 @@
   Bonsai-8B, Ternary-Bonsai-8B, Bonsai-4B, Ternary-Bonsai-2-27B, Ternary-Bonsai-2-27B abliterated (PTQ1_0),
   Qwen3.5-4B-heretic Q4_K_M, Qwen3-1.7B-heretic and Qwen3-0.6B-heretic (config\search_models.json).
   About 20 GB in total. They are run only by the PrismML llama.cpp fork (scripts\setup-llamacpp.ps1);
-  they are not added to LM Studio or ComfyUI.
+  they are not added to the 27B's router preset or ComfyUI.
 
   Every download is checked against the SHA-256 in the catalog (Hugging Face's LFS hash) before it is used;
   -Verify re-checks files that are already there. The folder is saved to .env as BONSAI_MODELS_DIR
@@ -48,11 +48,9 @@ foreach ($m in $selected) {
         if ($Verify -and (Get-FileSha256 $path) -ne $m.sha256) { throw "SHA-256 が一致しません: $path（削除して再実行してください）" }
         Write-Ok "取得済み: $path"; continue
     }
-    $url = "https://huggingface.co/$($m.repo)/resolve/main/$($m.file)"
+    # Through the Hugging Face cache: a model `hf download` already fetched is linked, not downloaded again.
     $part = "$path.part"
-    # -C - resumes a partial download.
-    & curl.exe -L --fail --retry 5 --retry-delay 5 -C - -o $part $url
-    if ($LASTEXITCODE -ne 0) { throw "ダウンロードに失敗しました: $url" }
+    Get-HfFile $m.repo $m.file $part $m.sha256 ([int64]$m.size)
     if ((Get-Item $part).Length -ne [int64]$m.size) { throw "サイズが一致しません: $part（期待 $($m.size)）" }
     $actual = Get-FileSha256 $part
     if ($actual -ne $m.sha256) { Remove-Item $part; throw "SHA-256 が一致しません: $($m.file)（期待 $($m.sha256) / 実際 $actual）" }

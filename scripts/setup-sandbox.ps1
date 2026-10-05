@@ -8,11 +8,12 @@
   read-only root, artifacts\code\<run_id> as /work, 2 GB, 2 CPUs, 60 s. Containers are started with
   --pull never, so the images are fetched here, not during a chat run.
 
-  This script checks that Docker Desktop is installed and its Linux engine is running (it starts Docker Desktop
-  when it is installed but stopped), then pulls python:3.12-slim and, with -Rust, rust:1.88-slim. Docker Desktop
-  started here is stopped again at the end (-KeepRunning keeps it): its VM takes about 1.5 GB, and the chat tab
-  starts it by itself for an approved run and stops it afterwards.
-  Without Docker the chat tab still writes the files and says why it did not run them.
+  The docker CLI comes first: whatever Linux engine it reaches (Docker Desktop, Docker Engine, another context) is
+  used as it is. Only when the CLI is installed but reaches no engine does this script start Docker Desktop
+  ("docker desktop start", else Docker Desktop.exe), and stops it again at the end (-KeepRunning keeps it): its VM
+  takes about 1.5 GB, and the chat tab starts it by itself for an approved run and stops it afterwards.
+  Without a docker command nothing is started: the script says so and exits, and the chat tab still writes the
+  files and says why it did not run them.
 
 .EXAMPLE
   .\scripts\setup-sandbox.ps1
@@ -29,7 +30,8 @@ $ErrorActionPreference = "Stop"
 Write-Step "Docker"
 $docker = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $docker) {
-    throw "docker が見つかりません。Docker Desktop を入れてください（https://www.docker.com/products/docker-desktop/）"
+    Write-Warn2 "docker コマンドがありません。コードの実行は使えません（Docker Engine か Docker Desktop を入れてから再実行してください）"
+    return
 }
 Write-Ok $docker
 
@@ -41,12 +43,18 @@ function Test-DockerEngine {
 
 $os = Test-DockerEngine
 $startedHere = $false
+$desktopCli = $false
+& docker desktop version *> $null
+if ($LASTEXITCODE -eq 0) { $desktopCli = $true }
 if (-not $os) {
     $startedHere = $true
     $desktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
-    if (-not (Test-Path $desktop)) { throw "Docker のエンジンが動いていません。Docker Desktop を起動してください" }
+    if (-not $desktopCli -and -not (Test-Path $desktop)) {
+        throw "docker がエンジンに接続できません。Docker のエンジンを起動してから再実行してください"
+    }
     Write-Warn2 "Docker Desktop を起動します（最大 $WaitSeconds 秒待ちます）"
-    Start-Process -FilePath $desktop | Out-Null
+    if ($desktopCli) { & docker desktop start --timeout $WaitSeconds | Out-Null }
+    else { Start-Process -FilePath $desktop | Out-Null }
     $deadline = (Get-Date).AddSeconds($WaitSeconds)
     while (-not ($os = Test-DockerEngine)) {
         if ((Get-Date) -gt $deadline) { throw "Docker のエンジンが $WaitSeconds 秒以内に起動しませんでした" }
@@ -76,7 +84,7 @@ Write-Ok "$probe"
 
 # Docker Desktop's VM holds about 1.5 GB that the 27B and ComfyUI need on this machine. The chat tab starts it
 # for an approved run and stops it afterwards, so it is stopped again here unless it was already running.
-if ($startedHere -and -not $KeepRunning) {
+if ($startedHere -and -not $KeepRunning -and $desktopCli) {
     Write-Step "Docker Desktop を止めます（チャットタブが実行のときだけ起動します。-KeepRunning で起動したまま）"
     & docker desktop stop --timeout 120 | Out-Null
     Write-Ok "stopped"

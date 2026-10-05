@@ -15,13 +15,13 @@ from langchain_core.runnables import RunnableConfig
 
 from furry_agent.bonsai_select import Catalog, Rank, Selection, available_models, free_memory_mb, select_model
 from furry_agent.bonsai_worker import LlamaServer, WorkerError, free_port
-from furry_agent.chat_common import ChatState, _conf, _leaders, _lmstudio, log
+from furry_agent.chat_common import ChatState, _conf, _leaders, _llm, log
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.llm_client import OpenAICompatClient
 from furry_agent.search_client import TorSearchClient
 from furry_agent.tor_service import ensure_tor
 
-LEADER_LABEL = "Qwen3.8 27B abliterated（LM Studio）"
+LEADER_LABEL = "Qwen3.8 27B abliterated（llama.cpp）"
 PROXY_LABEL = "Ternary-Bonsai-2-27B abliterated（代理、llama.cpp）"
 PORT_ROUTE, PORT_FILTER, PORT_LEADER = 7, 8, 9  # offsets from BONSAI_BASE_PORT; readers use 0..2
 # The proxy leader's llama-server context (_server: large models get at least this much).
@@ -112,5 +112,5 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
 
 async def _leader_client(config, settings: ChatSettings, state: ChatState, task: str):
     if (state.get("search") or {}).get("mode") == "resident":
-        return _lmstudio(config, settings), LEADER_LABEL
+        return _llm(config, settings), LEADER_LABEL
     return await _leader(config, settings, state["lock_token"], task)

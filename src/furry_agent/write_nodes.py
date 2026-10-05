@@ -10,7 +10,7 @@
                      the image tab's confirmation. approve = next chapter, edit = next chapter with an instruction,
                      reject = stop ("続きを書いて" resumes from the next chapter)
 
-The writer is always the LM Studio 27B; the search models and the image prompts are never used for writing.
+The writer is always the 27B (llama.cpp router); the search models and the image prompts are never used for writing.
 The job lock is released before every interrupt so the image tab is not blocked while the user reads.
 When the control loop called the writer, every end goes to controller_record instead of END (the interrupts stay).
 """
@@ -27,7 +27,7 @@ from langgraph.types import interrupt
 from furry_agent import search_agent as sa, writing
 from furry_agent.config import env_int
 from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, capped, _cleanup, _decision, _edited_args, _fail,
-                                     _final, _held, _hitl, _is_think, _lmstudio, _lock, _progress, _prompt, _settings,
+                                     _final, _held, _hitl, _is_think, _llm, _lock, _progress, _prompt, _settings,
                                      _usage, end_or_record, log)
 from furry_agent.job_lock import JobLockBusy
 from furry_agent.llm_client import LLMError
@@ -66,7 +66,7 @@ def _chapter(artifact: dict) -> dict | None:
 
 async def write_brief(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     route = state["route"]
     request = route["text"]
     old = dict(state.get("artifact") or {})
@@ -91,18 +91,18 @@ async def write_brief(state: ChatState, config: RunnableConfig) -> dict:
         if artifact["long"]:
             user += "\n\n章立てが必要な依頼です。outline は章ごとに 1 要素にしてください。"
         async with _held(token):
-            parsed = await sa.ask_json(lmstudio, [
+            parsed = await sa.ask_json(llm, [
                 {"role": "system", "content": await _prompt(settings, "system_write_outline.txt")},
-                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, lmstudio, OUTLINE_TOKENS),
+                {"role": "user", "content": user}], writing.Outline, max_tokens=capped(settings, llm, OUTLINE_TOKENS),
                 temperature=0.2)
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
     except (LLMError, OSError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
-        return _fail(state, f"LM Studio に接続できないか、時間切れです（{exc}）", "write")
+        await _cleanup(token, llm, unload=True)
+        return _fail(state, f"LLM サーバ（llama.cpp）に接続できないか、時間切れです（{exc}）", "write")
     brief, outline, open_ = writing.outline_from(parsed, request, artifact["long"])
     artifact.update({"brief": brief, "outline": outline, "open": open_, "status": "outline"})
     if artifact["long"] and len(outline) < 2:
@@ -121,7 +121,7 @@ def _after_brief(state: ChatState) -> str:
 
 async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     route = state["route"]
     artifact = dict(state["artifact"])
     think = _is_think(state)
@@ -134,18 +134,18 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
         user = writing.draft_input(artifact, route["text"], chapter=chapter, continuation=continuation,
                                    instruction=instruction)
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio,
+            reply, thoughts = await _ask(state, settings, llm,
                                          [{"role": "system", "content": await _prompt(settings, "system_write_draft.txt")},
                                           {"role": "user", "content": user}],
                                          base=DRAFT_TOKENS, answer_min=ANSWER_MIN, temperature=0.7, stage="本文")
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")
     except (LLMError, OSError) as exc:
-        await _cleanup(token, lmstudio, unload=True)
-        return _fail(state, f"LM Studio に接続できないか、時間切れです（{exc}）", "write")
+        await _cleanup(token, llm, unload=True)
+        return _fail(state, f"LLM サーバ（llama.cpp）に接続できないか、時間切れです（{exc}）", "write")
     piece = writing.clean_piece(reply.content)
     if not piece:
         await _cleanup(token)
@@ -174,7 +174,7 @@ def _after_draft(state: ChatState) -> str:
 
 async def write_revise(state: ChatState, config: RunnableConfig) -> dict:
     settings = _settings(config)
-    lmstudio = _lmstudio(config, settings)
+    llm = _llm(config, settings)
     artifact = dict(state["artifact"])
     token = state.get("lock_token")
     piece = artifact.get("last_piece", "")
@@ -183,13 +183,13 @@ async def write_revise(state: ChatState, config: RunnableConfig) -> dict:
         token = await _lock(state, config, settings)
         async with _held(token):
             # The draft and the brief go in; only edits come back (never a full rewrite, §4.2).
-            revision = await sa.ask_json(lmstudio, [
+            revision = await sa.ask_json(llm, [
                 {"role": "system", "content": (await _prompt(settings, "system_write_revise.txt"))
                  .replace("最大 8 件", f"最大 {writing.MAX_EDITS} 件")},
                 {"role": "user", "content": writing.revise_input(artifact, piece)}],
-                writing.Revision, max_tokens=capped(settings, lmstudio, REVISE_TOKENS), temperature=0.2)
+                writing.Revision, max_tokens=capped(settings, llm, REVISE_TOKENS), temperature=0.2)
     except asyncio.CancelledError:
-        await asyncio.shield(_cleanup(token, lmstudio, unload=True))
+        await asyncio.shield(_cleanup(token, llm, unload=True))
         raise
     except JobLockBusy as exc:
         return _fail(state, exc, "lock")

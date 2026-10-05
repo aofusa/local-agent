@@ -6,7 +6,7 @@ so re-run this script after editing a prompt:
 
     uv run python scripts/build_workflows.py
 
-LMSTUDIO_MODEL / CKPT_NAME environment variables override the model key and checkpoint name.
+LLM_MODEL / CKPT_NAME environment variables override the model key and checkpoint name.
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ from furry_agent.workflow import build_prompt  # noqa: E402
 PROMPTS = ROOT / "prompts"
 WORKFLOWS = ROOT / "workflows"
 
-LMSTUDIO_URL = "http://127.0.0.1:1234/v1"
-# scripts/setup-lmstudio.ps1 sets LMSTUDIO_MODEL to the key LM Studio assigned on this machine.
-LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL") or "huihui-qwen3.8-27b-abliterated@iq3_m"
+# The llama.cpp router (scripts/start-llm.ps1) and the model name of its preset (scripts/setup-llm.ps1 writes both
+# to .env and regenerates the workflows when they differ).
+LLM_URL = os.environ.get("LLM_URL") or "http://127.0.0.1:8080/v1"
+LLM_MODEL = os.environ.get("LLM_MODEL") or "qwen3.8-27b-abliterated"
 CKPT_NAME = os.environ.get("CKPT_NAME") or "yiffInHell_yihVANTABLACK.safetensors"
 REF_PLACEHOLDER = "furry_ja_ref.png"
 REF_JOIN_DELIMITER = "\n\n[Reference image tags]\n"
@@ -47,16 +48,18 @@ DEFAULT_NEGATIVE = (
 )
 
 
-def _backend(auto_eject: bool) -> dict:
+def _backend() -> dict:
+    """LM Connect's backend node used as a plain OpenAI-compatible client of the router. Its own auto-eject speaks
+    LM Studio's REST API, so it stays off: the `eject` node (FurryJaEjectLLM) unloads the model."""
     return {
-        "base_url": LMSTUDIO_URL,
-        "model": LMSTUDIO_MODEL,
+        "base_url": LLM_URL,
+        "model": LLM_MODEL,
         "connect_timeout_seconds": 10,
         "read_timeout_seconds": 600,
         "stream": True,
         "max_retries": 0,
         "health_check": True,
-        "auto_eject_after_run": auto_eject,
+        "auto_eject_after_run": False,
         "disable_thinking": True,
         "debug_logging": True,
     }
@@ -68,10 +71,9 @@ def api_workflow() -> dict:
     system_vision = (PROMPTS / "system_vision_caption.txt").read_text(encoding="utf-8").strip()
 
     nodes = {
-        # Auto-eject is on for the tag call (design §4.1). The vision call keeps the
-        # model loaded so prompt_node does not have to reload the 27B.
-        "llm_backend": ("LMConnectLMStudioBackend", "LM Studio Backend", _backend(True)),
-        "llm_backend_vision": ("LMConnectLMStudioBackend", "LM Studio Backend (vision, no auto-eject)", _backend(False)),
+        # The vision call and the tag call share the loaded 27B; `eject` unloads it after the tag call (design §4.1).
+        "llm_backend": ("LMConnectLMStudioBackend", "LLM Backend (llama.cpp router)", _backend()),
+        "llm_backend_vision": ("LMConnectLMStudioBackend", "LLM Backend (vision)", _backend()),
         "user_prompt": ("PrimitiveStringMultiline", "user_prompt (日本語指示)", {"value": "夕焼けの海辺に立つ、白い毛並みの狼獣人の女性、和服"}),
         "ref_image": ("LoadImage", "ref_image", {"image": REF_PLACEHOLDER}),
         "ref_image_2": ("LoadImage", "ref_image_2", {"image": REF_PLACEHOLDER}),
@@ -82,7 +84,7 @@ def api_workflow() -> dict:
             "image_2": ["ref_image_2", 0],
             "max_image_dimension": 768,
             "backend": ["llm_backend_vision", 0],
-            "base_url": LMSTUDIO_URL,
+            "base_url": LLM_URL,
             "model": "",
             "temperature": 0.2,
             "max_tokens": 200,
@@ -96,14 +98,14 @@ def api_workflow() -> dict:
             "system_prompt": system_tags,
             "prompt": ["prompt_join", 0],
             "backend": ["llm_backend", 0],
-            "base_url": LMSTUDIO_URL,
+            "base_url": LLM_URL,
             "model": "",
             "temperature": 0.4,
             "max_tokens": 320,
         }),
-        "eject": ("LMConnectEjectLMStudioModel", "eject", {
+        "eject": ("FurryJaEjectLLM", "eject", {
             "passthrough": ["prompt_node", 0],
-            "base_url": LMSTUDIO_URL,
+            "base_url": LLM_URL,
             "model": "",
             "debug_logging": True,
         }),
@@ -115,7 +117,7 @@ def api_workflow() -> dict:
         "ckpt": ("FurryJaCheckpointLoaderAfterEject", "ckpt", {
             "ckpt_name": CKPT_NAME,
             "after": ["eject", 0],
-            "lmstudio_base_url": LMSTUDIO_URL,
+            "llm_base_url": LLM_URL,
         }),
         "positive": ("CLIPTextEncode", "positive", {"text": ["split", 0], "clip": ["ckpt", 1]}),
         "negative": ("CLIPTextEncode", "negative", {"text": ["split", 1], "clip": ["ckpt", 1]}),
@@ -157,9 +159,9 @@ UI_SPECS = {
     "LMConnectVision": ([("image_1", "IMAGE"), ("image_2", "IMAGE"), ("image_3", "IMAGE"), ("backend", "LMC_BACKEND")], ["system_prompt", "prompt", "max_image_dimension", "base_url", "model", "temperature", "max_tokens"], [("response", "STRING")]),
     "StringConcatenate": ([], ["string_a", "string_b", "delimiter"], [("STRING", "STRING")]),
     "LMConnectPromptWithSystem": ([("backend", "LMC_BACKEND")], ["system_prompt", "prompt", "base_url", "model", "temperature", "max_tokens"], [("response", "STRING")]),
-    "LMConnectEjectLMStudioModel": ([("passthrough", "*")], ["base_url", "model", "debug_logging"], [("*", "*")]),
+    "FurryJaEjectLLM": ([("passthrough", "*")], ["base_url", "model", "debug_logging"], [("*", "*")]),
     "FurryJaSplitTags": ([("text", "*")], ["quality_prefix", "default_negative"], [("positive", "STRING"), ("negative", "STRING")]),
-    "FurryJaCheckpointLoaderAfterEject": ([("after", "*")], ["ckpt_name", "lmstudio_base_url"], [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")]),
+    "FurryJaCheckpointLoaderAfterEject": ([("after", "*")], ["ckpt_name", "llm_base_url"], [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")]),
     "CLIPTextEncode": ([("clip", "CLIP")], ["text"], [("CONDITIONING", "CONDITIONING")]),
     "ImageScaleToTotalPixels": ([("image", "IMAGE")], ["upscale_method", "megapixels", "resolution_steps"], [("IMAGE", "IMAGE")]),
     "EmptyLatentImage": ([], ["width", "height", "batch_size"], [("LATENT", "LATENT")]),
@@ -485,20 +487,20 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
     system_vision = (PROMPTS / "system_vision_caption.txt").read_text(encoding="utf-8").strip()
     d = CHROMA_DEFAULTS
     nodes = {
-        "llm_backend": ("LMConnectLMStudioBackend", "LM Studio Backend", _backend(True)),
+        "llm_backend": ("LMConnectLMStudioBackend", "LLM Backend (llama.cpp router)", _backend()),
         "user_prompt": ("PrimitiveStringMultiline", "user_prompt (日本語指示)", {"value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"}),
         "prompt_node": ("LMConnectPromptWithSystem", "prompt_node", {
             "system_prompt": system, "prompt": ["user_prompt", 0], "backend": ["llm_backend", 0],
-            "base_url": LMSTUDIO_URL, "model": "", "temperature": 0.3, "max_tokens": 400,
+            "base_url": LLM_URL, "model": "", "temperature": 0.3, "max_tokens": 400,
         }),
-        "eject": ("LMConnectEjectLMStudioModel", "eject", {
-            "passthrough": ["prompt_node", 0], "base_url": LMSTUDIO_URL, "model": "", "debug_logging": True,
+        "eject": ("FurryJaEjectLLM", "eject", {
+            "passthrough": ["prompt_node", 0], "base_url": LLM_URL, "model": "", "debug_logging": True,
         }),
         "split": ("FurryJaSplitTags", "split", {
             "text": ["eject", 0], "quality_prefix": "", "default_negative": CHROMA_NEGATIVE, "prompt_style": "prose",
         }),
         "ckpt": ("FurryJaDiffusionLoaderAfterEject", "ckpt", {
-            **CHROMA_MODELS, "after": ["eject", 0], "lmstudio_base_url": LMSTUDIO_URL,
+            **CHROMA_MODELS, "after": ["eject", 0], "llm_base_url": LLM_URL,
         }),
         # Official: "min_padding 1 is the official way".
         "t5_options": ("T5TokenizerOptions", "t5_options", {"clip": ["ckpt", 1], "min_padding": 1, "min_length": 0}),
@@ -532,11 +534,11 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
         raise ValueError(f"flux has no template {template_id}")
     # img2img: the base image is captioned (tags) for the LLM, which rewrites everything as prose.
     prompt.update({
-        "llm_backend_vision": _node("LMConnectLMStudioBackend", "LM Studio Backend (vision, no auto-eject)", _backend(False)),
+        "llm_backend_vision": _node("LMConnectLMStudioBackend", "LLM Backend (vision)", _backend()),
         "ref_image": _node("LoadImage", "ref_image", {"image": REF_PLACEHOLDER}),
         "vision": _node("LMConnectVision", "vision", {
             "system_prompt": system_vision, "prompt": VISION_USER_PROMPT, "image_1": ["ref_image", 0],
-            "max_image_dimension": 768, "backend": ["llm_backend_vision", 0], "base_url": LMSTUDIO_URL,
+            "max_image_dimension": 768, "backend": ["llm_backend_vision", 0], "base_url": LLM_URL,
             "model": "", "temperature": 0.2, "max_tokens": 200,
         }),
         "prompt_join": _node("StringConcatenate", "prompt_join (指示 + 参照タグ)", {

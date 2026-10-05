@@ -18,7 +18,7 @@ from furry_agent import chat_common, comfy_client
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import ChatSettings, Settings, idle_timeout_from_env
 from furry_agent.job_lock import job_lock
-from furry_agent.llm_client import LLMError, LMStudio, OpenAICompatClient
+from furry_agent.llm_client import LLMError, LlamaRouter, OpenAICompatClient
 
 
 # --- settings ----------------------------------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def test_a_slow_server_gets_the_full_token_budget():
     # The old cap (tokens that fit in 20 minutes at the measured speed) is gone; only the context window limits.
     chat_common._speeds["http://127.0.0.1:9/v1"] = 0.1
     try:
-        assert chat_common.capped(ChatSettings(), LMStudio("http://127.0.0.1:9/v1"), 3500) == 3500
+        assert chat_common.capped(ChatSettings(), LlamaRouter("http://127.0.0.1:9/v1"), 3500) == 3500
     finally:
         chat_common._speeds.clear()
 
