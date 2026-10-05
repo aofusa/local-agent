@@ -33,6 +33,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from furry_agent.config import env_int
+
 log = logging.getLogger("furry_agent.sandbox")
 
 TIMEOUT_S = 60
@@ -40,12 +42,12 @@ MEMORY = "2g"
 CPUS = "2"
 PIDS_LIMIT = 256
 TMPFS = "/tmp:rw,size=64m"
-TAIL_BYTES = 8192
+TAIL_BYTES = env_int("SANDBOX_TAIL_BYTES", 8192, 256)  # output kept of a run
 WORKDIR = "/work"
-MAX_FILES = 20
-MAX_FILE_BYTES = 200_000
+MAX_FILES = env_int("SANDBOX_MAX_FILES", 20, 1, 1000)
+MAX_FILE_BYTES = env_int("SANDBOX_MAX_FILE_BYTES", 200_000, 1000)
 MAX_RUNS = 2  # first run + one fix (§5.1)
-DESKTOP_START_S = 180
+DESKTOP_START_S = env_int("SANDBOX_DESKTOP_START_S", 180, 10)
 
 # Tokens that only mean something to a shell. An argv element equal to one of them, or containing a command
 # substitution, is refused: the container never sees a shell string.

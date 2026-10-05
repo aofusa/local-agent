@@ -13,6 +13,12 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from furry_agent.config import env_float
+
+# A holder that disappeared (a cancelled run whose cleanup never ran) frees the lock after this long; a holder that
+# works renews it every JOB_LOCK_RENEW_S.
+LEASE_S = env_float("JOB_LOCK_LEASE_S", 900.0, 30.0)
+
 TAB_LABELS = {"image": "画像タブ", "chat": "チャットタブ", "coder": "CUI（cirka）"}
 
 
@@ -32,7 +38,7 @@ class _Holder:
 
 
 class JobLock:
-    def __init__(self, lease_s: float = 900.0, poll_s: float = 0.2):
+    def __init__(self, lease_s: float = LEASE_S, poll_s: float = 0.2):
         self.lease_s = lease_s
         self.poll_s = poll_s
         self._holder: _Holder | None = None

@@ -18,8 +18,8 @@ def test_env_values(monkeypatch):
     monkeypatch.setenv("CLAIM_MAX", "40")
     monkeypatch.setenv("CONTROLLER_MAX_STEPS", "9")
     s = ChatSettings.from_env()
-    assert not s.claim_verify and s.claim_fail_open and s.claim_max == 12  # capped at the design's 12
-    assert s.controller_max_steps == 4
+    assert not s.claim_verify and s.claim_fail_open and s.claim_max == 40  # .env may go past the design's 12
+    assert s.controller_max_steps == 9
 
 
 async def test_from_env_does_not_touch_the_disk_on_the_event_loop(monkeypatch):

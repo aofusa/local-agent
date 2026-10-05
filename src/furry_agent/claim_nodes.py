@@ -32,14 +32,15 @@ from furry_agent.bonsai_worker import WorkerError
 from furry_agent.chat_common import (RESET, ChatState, _cleanup, _held, _lmstudio, _progress, _prompt, _settings,
                                      log)
 from furry_agent.chat_models import _leader_client
-from furry_agent.config import ChatSettings
+from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LLMError
 
 T = TypeVar("T", bound=BaseModel)
 # Measured: 12 verdicts with short notes take ~1100 tokens; 1100 cut the reply (finish_reason=length).
-EXTRACT_TOKENS, VERIFY_TOKENS = 1200, 2000
-AUDIT_MAX = 24  # sentences judged; later ones are kept as written
+EXTRACT_TOKENS = env_int("CLAIM_EXTRACT_TOKENS", 1200, 64)
+VERIFY_TOKENS = env_int("CLAIM_VERIFY_TOKENS", 2000, 64)
+AUDIT_MAX = env_int("CLAIM_AUDIT_MAX", 24, 1, 1000)  # sentences judged; later ones are kept as written
 _CITED = re.compile(r"\[(\d+)\]")
 REPAIR = ("直前の出力は指定の JSON として読めませんでした。説明や前置きを付けず、指定の形の JSON オブジェクト 1 つだけを"
           "返し直してください。")

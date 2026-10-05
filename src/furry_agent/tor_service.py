@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-from furry_agent.config import REPO_ROOT, ChatSettings
+from furry_agent.config import REPO_ROOT, ChatSettings, env_float
 from furry_agent.search_client import tor_listening
 
 log = logging.getLogger("furry_agent.tor")
@@ -48,7 +48,10 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
 
 
-async def ensure_tor(settings: ChatSettings, timeout_s: float = 90.0) -> str:
+BOOTSTRAP_TIMEOUT_S = env_float("TOR_BOOTSTRAP_TIMEOUT_S", 90.0, 5.0)
+
+
+async def ensure_tor(settings: ChatSettings, timeout_s: float | None = None) -> str:
     """Return a short status; raise TorUnavailable when the SOCKS port cannot be reached."""
     if await asyncio.to_thread(tor_listening, settings.tor_socks_url):
         return "running"
@@ -63,7 +66,7 @@ async def ensure_tor(settings: ChatSettings, timeout_s: float = 90.0) -> str:
         # File work and the process start run in a thread (langgraph dev fails runs that block the loop).
         process = await asyncio.to_thread(_spawn, settings.tor_exe, Path(settings.logs_dir))
         log.info("started tor pid=%s", process.pid)
-        deadline = time.monotonic() + timeout_s
+        deadline = time.monotonic() + (BOOTSTRAP_TIMEOUT_S if timeout_s is None else timeout_s)
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise TorUnavailable(f"Tor が終了しました（{log_file}）")

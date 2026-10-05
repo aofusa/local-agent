@@ -35,7 +35,7 @@ from starlette.routing import Route
 
 from furry_agent import modes
 from furry_agent.chat_common import _image_tab_busy, prompt_tokens
-from furry_agent.config import ChatSettings
+from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LMStudio, idle_timeout
 from furry_agent.router import CHAT, Route as ChatRoute
@@ -43,8 +43,8 @@ from furry_agent.router import CHAT, Route as ChatRoute
 log = logging.getLogger("furry_agent.coder")
 
 ROLES = ("system", "user", "assistant", "tool")
-DEFAULT_MAX_TOKENS = 2048
-MIN_ROOM = 256          # less room than this for the reply: the CUI must compact (context_overflow)
+DEFAULT_MAX_TOKENS = env_int("CODER_MAX_TOKENS", 2048, 64)  # when the CUI does not send max_tokens
+MIN_ROOM = env_int("CODER_MIN_ROOM", 256, 16)  # less room than this for the reply: the CUI must compact (context_overflow)
 STATUS_EVERY_S = 5.0
 
 

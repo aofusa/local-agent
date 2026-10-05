@@ -22,7 +22,7 @@ from furry_agent import bonsai_worker, claim_verify as cv
 from furry_agent.bonsai_worker import Ledger, LlamaServer
 from furry_agent.bonsai_select import Selection
 from furry_agent.comfy_client import ComfyClient
-from furry_agent.config import ChatSettings
+from furry_agent.config import ChatSettings, env_float, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LMStudio
 from furry_agent.modes import THINK
@@ -30,10 +30,11 @@ from furry_agent.modes import THINK
 log = logging.getLogger("furry_agent.chat")
 
 RESET = "__reset__"
-RENEW_EVERY_S = 60.0
+RENEW_EVERY_S = env_float("JOB_LOCK_RENEW_S", 60.0, 1.0)
+HISTORY_CHARS = env_int("CHAT_HISTORY_CHARS", 4000, 100)  # one earlier turn sent back to the model
 # The least room left for thinking before think mode turns it on (the rest of max_tokens is shared with the
 # answer; when the thoughts use everything, _ask answers again without thinking).
-THINK_RESERVE = 256
+THINK_RESERVE = env_int("CHAT_THINK_RESERVE", 256, 0)
 _ledgers: dict[str, Ledger] = {}
 _leaders: dict[str, tuple[LlamaServer, Selection]] = {}
 
@@ -157,7 +158,7 @@ def _history(state: ChatState, turns: int) -> list[dict]:
             continue  # this run's own progress text is not a turn of the conversation
         text, _ = _text_of(message)
         if text:
-            out.append({"role": "user" if kind == "human" else "assistant", "content": text[:4000]})
+            out.append({"role": "user" if kind == "human" else "assistant", "content": text[:HISTORY_CHARS]})
     return out[-turns * 2:]
 
 

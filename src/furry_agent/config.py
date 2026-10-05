@@ -92,7 +92,11 @@ class Settings:
         return {k: v for k, v in self.chroma_models.items() if k != "ckpt_name"}
 
 
-def _int(name: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+def env_int(name: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+    """An integer from the environment (.env), clamped to [lo, hi]. Empty = the default.
+
+    Module constants use this too (read once at import: langgraph dev loads .env before it imports the graphs).
+    """
     raw = os.environ.get(name, "").strip()
     value = int(raw) if raw else default
     if lo is not None:
@@ -102,9 +106,21 @@ def _int(name: str, default: int, lo: int | None = None, hi: int | None = None) 
     return value
 
 
-def _float(name: str, default: float) -> float:
+def env_float(name: str, default: float, lo: float | None = None, hi: float | None = None) -> float:
     raw = os.environ.get(name, "").strip()
-    return float(raw) if raw else default
+    value = float(raw) if raw else default
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
+_int = env_int
+
+
+def _float(name: str, default: float) -> float:
+    return env_float(name, default)
 
 
 
@@ -139,6 +155,8 @@ class ChatSettings:
     search_fetch_pages: int = 1
     # One HTTP request through Tor (a search page, a result page): a stalled page is skipped, the run goes on.
     search_timeout_s: float = 30.0
+    # One search intent (a query tried on the providers in turn; 0 = 3 x SEARCH_TIMEOUT_S).
+    search_intent_timeout_s: float = 0.0
     # Optional budget of one reader over all its pages (0 = no limit; its model calls use the idle timeout).
     search_total_timeout_s: float = 0.0
     fanout_width: int = 3
@@ -193,6 +211,10 @@ class ChatSettings:
         return min(limits) if limits else 0.0
 
     @property
+    def intent_timeout_s(self) -> float:
+        return self.search_intent_timeout_s if self.search_intent_timeout_s > 0 else self.search_timeout_s * 3
+
+    @property
     def lock_wait_s(self) -> float:
         """How long to wait for the other tab's job (JOB_LOCK_TIMEOUT_S, else the idle timeout)."""
         return self.job_lock_timeout_s if self.job_lock_timeout_s is not None else self.idle_timeout_s
@@ -217,15 +239,17 @@ class ChatSettings:
             tor_required=os.environ.get("TOR_REQUIRED", "1").strip() != "0",
             tor_exe=os.environ.get("TOR_EXE", "").strip(),
             tor_autostart=os.environ.get("TOR_AUTOSTART", "1").strip() != "0",
-            search_max_results=_int("SEARCH_MAX_RESULTS", 5, 1, 8),
-            search_fetch_pages=_int("SEARCH_FETCH_PAGES", 1, 0, 2),
+            search_max_results=_int("SEARCH_MAX_RESULTS", 5, 1, 30),
+            search_fetch_pages=_int("SEARCH_FETCH_PAGES", 1, 0, 10),
             search_timeout_s=_float("SEARCH_TIMEOUT_S", 30.0),
+            search_intent_timeout_s=_float("SEARCH_INTENT_TIMEOUT_S", 0.0),
             search_total_timeout_s=_float("SEARCH_TOTAL_TIMEOUT_S", 0.0),
-            fanout_width=_int("SEARCH_FANOUT_WIDTH", 3, 1, 3),
-            search_max_rounds=_int("SEARCH_MAX_ROUNDS", 4, 1, 4),
-            search_max_pages=_int("SEARCH_MAX_PAGES", 12, 1, 12),
+            # Readers use the ports BONSAI_BASE_PORT + 0..6 (7..9 are the router, the filter and the leader).
+            fanout_width=_int("SEARCH_FANOUT_WIDTH", 3, 1, 7),
+            search_max_rounds=_int("SEARCH_MAX_ROUNDS", 4, 1, 50),
+            search_max_pages=_int("SEARCH_MAX_PAGES", 12, 1, 500),
             search_wall_clock_s=_float("SEARCH_WALL_CLOCK_S", 0.0),
-            hits_per_intent=_int("SEARCH_HITS_PER_INTENT", 4, 1, 8),
+            hits_per_intent=_int("SEARCH_HITS_PER_INTENT", 4, 1, 30),
             think_tokens=_int("CHAT_THINK_TOKENS", 3072, 0, 16384),
             docker_exe=os.environ.get("SANDBOX_DOCKER", "").strip() or "docker",
             sandbox_user=os.environ.get("SANDBOX_USER", "").strip() or "10001:10001",
@@ -248,10 +272,10 @@ class ChatSettings:
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             comfyui_url=os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"),
             claim_verify=os.environ.get("CLAIM_VERIFY", "1").strip() != "0",
-            claim_max=_int("CLAIM_MAX", 12, 1, 12),
-            claim_quote_chars=_int("CLAIM_QUOTE_CHARS", 400, 80, 400),
+            claim_max=_int("CLAIM_MAX", 12, 1, 200),
+            claim_quote_chars=_int("CLAIM_QUOTE_CHARS", 400, 80, 20000),
             claim_timeout_s=_float("CLAIM_TIMEOUT_S", 0.0),
             claim_fail_open=os.environ.get("CLAIM_VERIFY_FAIL_OPEN", "0").strip() == "1",
-            controller_max_steps=_int("CONTROLLER_MAX_STEPS", 3, 1, 4),
+            controller_max_steps=_int("CONTROLLER_MAX_STEPS", 3, 1, 50),
             controller_wall_clock_s=_float("CONTROLLER_WALL_CLOCK_S", 0.0),
         )

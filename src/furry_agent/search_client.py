@@ -18,14 +18,15 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from furry_agent.config import env_int
 from furry_agent.html_text import SearchHit, html_to_text, parse_ddg
 
 log = logging.getLogger("furry_agent.search")
 
 USER_AGENT = "local-image-gen-agent/search"
-MAX_REDIRECTS = 3
+MAX_REDIRECTS = env_int("SEARCH_MAX_REDIRECTS", 3, 0, 20)
 MAX_BYTES = int(1.5 * 1024 * 1024)
-TEXT_LIMIT = 4000
+TEXT_LIMIT = env_int("SEARCH_PAGE_TEXT_CHARS", 4000, 500, 1000000)  # text kept of one fetched page
 PROVIDERS = (
     ("ddg_lite", "https://lite.duckduckgo.com/lite/"),
     ("ddg_html", "https://html.duckduckgo.com/html/"),  # only when Lite came back empty

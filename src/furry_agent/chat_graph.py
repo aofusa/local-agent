@@ -52,6 +52,7 @@ from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, StageErro
 from furry_agent.chat_models import (LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
                                      _catalog, _ensure_tor, _free_mb, _leader, _leader_client, _run_model, _search_client,
                                      _server)
+from furry_agent.config import env_int
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
@@ -63,6 +64,16 @@ from furry_agent.tor_service import TorUnavailable
 __all__ = ["graph", "ChatState", "WorkerError", "RESET"]
 
 HITS_PER_INTENT = 4  # default of SEARCH_HITS_PER_INTENT
+# max_tokens of each step (.env). The context window still caps every call (chat_common.capped).
+CHAT_TOKENS = env_int("CHAT_TOKENS", 1536, 64)
+CHAT_ANSWER_MIN = env_int("CHAT_ANSWER_MIN", 512, 16)
+PLAN_TOKENS = env_int("SEARCH_PLAN_TOKENS", 400, 64)
+PLAN_TOKENS_THINK = env_int("SEARCH_PLAN_TOKENS_THINK", 700, 64)
+CARD_TOKENS = env_int("SEARCH_CARD_TOKENS", 700, 64)
+CRITIQUE_TOKENS = env_int("SEARCH_CRITIQUE_TOKENS", 900, 64)
+SYNTH_TOKENS = env_int("SEARCH_SYNTH_TOKENS", 1200, 64)
+SYNTH_TOKENS_THINK = env_int("SEARCH_SYNTH_TOKENS_THINK", 1600, 64)
+SYNTH_ANSWER_MIN = env_int("SEARCH_SYNTH_ANSWER_MIN", 800, 16)
 ROUTER_KINDS = {"SEARCH": SEARCH, "WRITE": WRITE, "CODE": CODE, "CHAT": CHAT}  # the router never sends to the image tab
 
 
@@ -255,7 +266,7 @@ async def chat(state: ChatState, config: RunnableConfig) -> dict:
         messages = [{"role": "system", "content": await _prompt(settings, "system_chat.txt")},
                     *_history(state, settings.history_turns)]
         async with _held(token):
-            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=1536, answer_min=512,
+            reply, thoughts = await _ask(state, settings, lmstudio, messages, base=CHAT_TOKENS, answer_min=CHAT_ANSWER_MIN,
                                          temperature=0.6, stage="回答")
         text = reply.content or "（空の応答でした）"
         log.info("chat answered mode=%s", state.get("mode"))
@@ -316,12 +327,12 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
             # The user's requirement: the Qwen3.8 27B does the first step (the plan) ...
             async with _held(token):
                 parsed = await sa.ask_json(lmstudio, planner_messages, schema,
-                                           max_tokens=capped(settings, lmstudio, 700 if think else 400))
+                                           max_tokens=capped(settings, lmstudio, PLAN_TOKENS_THINK if think else PLAN_TOKENS))
             planner = LEADER_LABEL
         if parsed is None:
             try:
                 client, planner = await _leader(config, settings, token, "plan")
-                parsed = await sa.ask_json(client, planner_messages, schema, max_tokens=700 if think else 400)
+                parsed = await sa.ask_json(client, planner_messages, schema, max_tokens=PLAN_TOKENS_THINK if think else PLAN_TOKENS)
             except (WorkerError, SelectionError) as exc:
                 log.warning("local planner unavailable: %s", exc)
         router_query = state["route"].get("router_query", "")
@@ -408,7 +419,7 @@ async def search(payload: dict, config: RunnableConfig) -> dict:
             client.allow(intent["q"])
             hits = [{"intent_id": intent["id"], "title": intent["q"], "url": intent["q"], "snippet": ""}]
         else:
-            async with asyncio.timeout(settings.search_timeout_s * 3):
+            async with asyncio.timeout(settings.intent_timeout_s):
                 result = await client.search(intent["q"], intent["tool"], fetch_pages=0)
             hits = [{"intent_id": intent["id"], "title": h.title, "url": h.url, "snippet": h.snippet}
                     for h in result.hits]
@@ -560,7 +571,7 @@ async def read(payload: dict, config: RunnableConfig) -> dict:
             llm = server.client(settings.idle_timeout_s)
 
             async def ask_cards(llm_client, messages):
-                return await sa.ask_json(llm_client, messages, sa.Cards, max_tokens=700, temperature=0.1)
+                return await sa.ask_json(llm_client, messages, sa.Cards, max_tokens=CARD_TOKENS, temperature=0.1)
 
             for job in payload["jobs"]:
                 intent, hits = job["intent"], job["hits"]
@@ -631,7 +642,7 @@ async def critique(state: ChatState, config: RunnableConfig) -> dict:
                 reflect = await sa.ask_json(client, [
                     {"role": "system", "content": await _prompt(settings, "system_search_critique.txt")},
                     {"role": "user", "content": sa.reflect_input(search, cards, refs)}],
-                    sa.Reflect, max_tokens=capped(settings, client, 900), temperature=0.2)
+                    sa.Reflect, max_tokens=capped(settings, client, CRITIQUE_TOKENS), temperature=0.2)
             roles["critic"] = label
         except asyncio.CancelledError:
             await asyncio.shield(_cleanup(token, lmstudio, unload=True))
@@ -731,7 +742,7 @@ async def synthesize(state: ChatState, config: RunnableConfig) -> dict:
                     state, settings, client,
                     [{"role": "system", "content": await _prompt(settings, "system_search.txt")},
                      {"role": "user", "content": user}],
-                    base=1600 if think else 1200, answer_min=800, temperature=0.4, stage="統合", thinking=resident,
+                    base=SYNTH_TOKENS_THINK if think else SYNTH_TOKENS, answer_min=SYNTH_ANSWER_MIN, temperature=0.4, stage="統合", thinking=resident,
                     context=None if resident else LEADER_CTX)
             answer = reply.content or "（統合モデルの応答が空でした）"
             roles["synthesizer"] = label
