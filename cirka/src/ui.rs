@@ -5,12 +5,19 @@ use crate::tools::Todo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiEvent {
+    /// A model turn begins (the spinner starts until the first token).
+    TurnStart,
+    /// Time passes while waiting (the spinner moves).
+    Tick,
     Token(String),
     Thinking(String),
     /// A one-line state that replaces the previous one (host waiting, search progress).
     Status(String),
     ToolStart { name: String, summary: String },
-    ToolEnd { name: String, ok: bool, preview: String },
+    /// The tool's result as sent to the model; the terminal shows a short summary of it.
+    ToolEnd { name: String, ok: bool, content: String },
+    /// A file change that ran without an approval prompt (auto / accept-edits): shown like Claude Code's Update.
+    Diff { rel: String, diff: String },
     Todos(Vec<Todo>),
     Info(String),
     Warn(String),

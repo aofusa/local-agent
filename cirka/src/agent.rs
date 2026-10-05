@@ -34,6 +34,7 @@ impl Brain for HostBrain {
             TurnEvent::Token(t) => ui.event(UiEvent::Token(t.clone())),
             TurnEvent::Thinking(t) => ui.event(UiEvent::Thinking(t.clone())),
             TurnEvent::Status(s) => ui.event(UiEvent::Status(s.clone())),
+            TurnEvent::Tick => ui.event(UiEvent::Tick),
             _ => {}
         };
         let cancelled = || cancel.load(Ordering::SeqCst);
@@ -195,6 +196,7 @@ impl<B: Brain> Agent<B> {
                     fit.compressed, fit.dropped
                 )));
             }
+            ui.event(UiEvent::TurnStart);
             match self.brain.turn(&request, ui, &self.cancel).await {
                 Ok(reply) => return Ok(reply),
                 Err(HostError::ContextOverflow(m)) => {
@@ -222,8 +224,18 @@ impl<B: Brain> Agent<B> {
             let summary = tools::summary(call);
             ui.event(UiEvent::ToolStart { name: call.name.clone(), summary: summary.clone() });
             let planned = tools::plan(&self.tools, call);
+            let change = match &planned {
+                Planned::FileChange { rel, diff, .. } => Some((rel.clone(), diff.clone())),
+                _ => None,
+            };
             let out = match self.permit(call, &planned, ui) {
-                Ok(()) => tools::execute(&mut self.tools, planned, ui).await,
+                Ok(asked) => {
+                    let out = tools::execute(&mut self.tools, planned, ui).await;
+                    if let (Some((rel, diff)), false, true) = (change, asked, out.ok) {
+                        ui.event(UiEvent::Diff { rel, diff });
+                    }
+                    out
+                }
                 Err((out, quit)) => {
                     if quit {
                         stop = Some(StopReason::PermissionDenied);
@@ -232,8 +244,7 @@ impl<B: Brain> Agent<B> {
                 }
             };
             let out = self.note_repeat(call, out);
-            let preview: String = out.content.lines().take(3).collect::<Vec<_>>().join(" ⏎ ").chars().take(160).collect();
-            ui.event(UiEvent::ToolEnd { name: call.name.clone(), ok: out.ok, preview });
+            ui.event(UiEvent::ToolEnd { name: call.name.clone(), ok: out.ok, content: out.content.clone() });
             self.push(Msg::tool(&call.id, out.content));
         }
         if self.cancel.load(Ordering::SeqCst) && stop.is_none() {
@@ -242,17 +253,17 @@ impl<B: Brain> Agent<B> {
         stop
     }
 
-    /// The permission gate. Err((result for the model, quit the request)).
-    fn permit(&mut self, call: &ToolCall, planned: &Planned, ui: &mut dyn Frontend) -> Result<(), (ToolOutput, bool)> {
+    /// The permission gate: Ok(the user was asked) or Err((result for the model, quit the request)).
+    fn permit(&mut self, call: &ToolCall, planned: &Planned, ui: &mut dyn Frontend) -> Result<bool, (ToolOutput, bool)> {
         if matches!(planned, Planned::Invalid(_)) {
-            return Ok(()); // the tool reports its own error
+            return Ok(false); // the tool reports its own error
         }
         let command = match planned {
             Planned::Command { command, .. } => Some(command.as_str()),
             _ => None,
         };
         match self.policy.check(&call.name, command) {
-            Verdict::Allow => Ok(()),
+            Verdict::Allow => Ok(false),
             Verdict::Deny(why) => Err((ToolOutput::err(why), false)),
             Verdict::Ask(why) => {
                 let (mut title, detail) = match planned {
@@ -269,10 +280,10 @@ impl<B: Brain> Agent<B> {
                     title = format!("{title} — {why}");
                 }
                 match ui.approve(&ApprovalRequest { tool: call.name.clone(), title, detail }) {
-                    Answer::Yes => Ok(()),
+                    Answer::Yes => Ok(true),
                     Answer::Always => {
                         self.policy.remember(&call.name);
-                        Ok(())
+                        Ok(true)
                     }
                     Answer::No => Err((ToolOutput::err("利用者が拒否しました。別の方法を考えるか、理由を聞いてください"), false)),
                     Answer::Quit => Err((ToolOutput::err("利用者が依頼を止めました"), true)),

@@ -1,214 +1,22 @@
-//! The streaming REPL (design §9): tokens as they arrive, tools as short blocks, the task list when it changes,
-//! permission prompts that take the input, slash commands.
+//! The REPL: the welcome box, the input box loop, slash commands, and one agent request per message.
+//! Presentation lives in `tui.rs`; this file decides what happens.
 
-use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crossterm::style::Stylize;
 use serde_json::json;
 
 use crate::agent::{Agent, HostBrain, StopReason};
 use crate::config::{self, Config, Mode, Permission};
-use crate::host::{HostClient, Msg};
+use crate::host::{HostClient, Msg, ToolCall};
 use crate::platform;
+use crate::policy;
 use crate::session::{self, Session};
-use crate::host::ToolCall;
-use crate::tools::{self, ToolCtx, fs as tool_fs, todo};
+use crate::tools::{self, ToolCtx, fs as tool_fs};
+use crate::tui::{self, Input, Terminal, WelcomeInfo};
 use crate::ui::{Answer, ApprovalRequest, Frontend, UiEvent};
 use crate::workspace::Workspace;
-
-pub struct Terminal {
-    pub interactive: bool,
-    color: bool,
-    at_line_start: bool,
-    status_shown: bool,
-    thinking: bool,
-}
-
-impl Terminal {
-    pub fn new(interactive: bool) -> Terminal {
-        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-        if color {
-            let _ = crossterm::ansi_support::supports_ansi();
-        }
-        Terminal { interactive, color, at_line_start: true, status_shown: false, thinking: false }
-    }
-
-    fn paint(&self, text: &str, style: &str) -> String {
-        if !self.color {
-            return text.to_string();
-        }
-        match style {
-            "dim" => text.dark_grey().to_string(),
-            "tool" => text.cyan().to_string(),
-            "ok" => text.green().to_string(),
-            "err" => text.red().to_string(),
-            "warn" => text.yellow().to_string(),
-            "bold" => text.bold().to_string(),
-            "add" => text.green().to_string(),
-            "del" => text.red().to_string(),
-            _ => text.to_string(),
-        }
-    }
-
-    fn clear_status(&mut self) {
-        if self.status_shown {
-            print!("\r{}\r", " ".repeat(100));
-            self.status_shown = false;
-        }
-    }
-
-    fn newline_if_needed(&mut self) {
-        self.clear_status();
-        if !self.at_line_start {
-            println!();
-            self.at_line_start = true;
-        }
-    }
-
-    pub fn line(&mut self, text: &str) {
-        self.newline_if_needed();
-        println!("{text}");
-    }
-
-    pub fn styled(&mut self, text: &str, style: &str) {
-        let painted = self.paint(text, style);
-        self.line(&painted);
-    }
-
-    fn read_line(&mut self, prompt: &str) -> Option<String> {
-        self.newline_if_needed();
-        print!("{prompt}");
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        match std::io::stdin().lock().read_line(&mut line) {
-            Ok(0) => None,
-            Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
-            Err(_) => Some(String::new()),
-        }
-    }
-
-    fn diff(&self, text: &str) -> String {
-        text.lines()
-            .map(|l| {
-                if l.starts_with('+') && !l.starts_with("+++") {
-                    self.paint(l, "add")
-                } else if l.starts_with('-') && !l.starts_with("---") {
-                    self.paint(l, "del")
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-}
-
-impl Frontend for Terminal {
-    fn event(&mut self, event: UiEvent) {
-        match event {
-            UiEvent::Token(t) => {
-                self.clear_status();
-                if self.thinking {
-                    println!();
-                    self.thinking = false;
-                }
-                print!("{t}");
-                self.at_line_start = t.ends_with('\n');
-                let _ = std::io::stdout().flush();
-            }
-            UiEvent::Thinking(t) => {
-                self.clear_status();
-                if !self.thinking {
-                    if !self.at_line_start {
-                        println!();
-                    }
-                    print!("{}", self.paint("（思考）", "dim"));
-                    self.thinking = true;
-                }
-                print!("{}", self.paint(&t, "dim"));
-                self.at_line_start = false;
-                let _ = std::io::stdout().flush();
-            }
-            UiEvent::Status(s) => {
-                if !self.at_line_start {
-                    println!();
-                    self.at_line_start = true;
-                }
-                let s: String = s.chars().take(90).collect();
-                print!("\r{}{}", self.paint(&format!("⋯ {s}"), "dim"), " ".repeat(8));
-                let _ = std::io::stdout().flush();
-                self.status_shown = true;
-            }
-            UiEvent::ToolStart { name, summary } => {
-                self.thinking = false;
-                let text = self.paint(&format!("● {name}({summary})"), "tool");
-                self.line(&text);
-            }
-            UiEvent::ToolEnd { ok, preview, .. } => {
-                let mark = if ok { self.paint("⎿", "ok") } else { self.paint("⎿ ✗", "err") };
-                let text = format!("  {mark} {}", self.paint(&preview, "dim"));
-                self.line(&text);
-            }
-            UiEvent::Todos(todos) => {
-                let text = self.paint("タスク:", "bold");
-                self.line(&text);
-                for l in todo::render(&todos).lines() {
-                    let style = if l.starts_with("[x]") { "dim" } else if l.starts_with("[>]") { "warn" } else { "" };
-                    let text = format!("  {}", self.paint(l, style));
-                    self.line(&text);
-                }
-            }
-            UiEvent::Info(i) => self.styled(&i, "dim"),
-            UiEvent::Warn(w) => self.styled(&w, "warn"),
-            UiEvent::TurnEnd => {
-                self.thinking = false;
-                self.newline_if_needed();
-            }
-        }
-    }
-
-    fn approve(&mut self, request: &ApprovalRequest) -> Answer {
-        let title = format!("許可が要ります: {}", request.title);
-        self.styled(&title, "warn");
-        let detail = if request.tool == "bash" { request.detail.clone() } else { self.diff(&request.detail) };
-        self.line(&detail);
-        if !self.interactive {
-            self.styled("（非対話モードなので拒否しました。--permission で許可できます）", "dim");
-            return Answer::No;
-        }
-        loop {
-            let Some(answer) = self.read_line("[y] 実行 / [n] 拒否 / [a] 以後この種類は許可 / [q] 依頼を止める > ") else {
-                return Answer::Quit;
-            };
-            match answer.trim().to_ascii_lowercase().as_str() {
-                "y" | "yes" => return Answer::Yes,
-                "n" | "no" => return Answer::No,
-                "a" | "always" => return Answer::Always,
-                "q" | "quit" => return Answer::Quit,
-                _ => {}
-            }
-        }
-    }
-
-    fn ask(&mut self, question: &str, options: &[String]) -> String {
-        let q = format!("質問: {question}");
-        self.styled(&q, "warn");
-        for (n, o) in options.iter().enumerate() {
-            self.line(&format!("  {}. {o}", n + 1));
-        }
-        if !self.interactive {
-            return "（回答なし: 非対話モード）".into();
-        }
-        let answer = self.read_line("> ").unwrap_or_default();
-        match answer.trim().parse::<usize>() {
-            Ok(n) if n >= 1 && n <= options.len() => options[n - 1].clone(),
-            _ => answer,
-        }
-    }
-}
 
 /// OS, shell, cwd, git branch and a short status (design §7.3). Never a full diff.
 pub fn env_snapshot(root: &Path, config: &Config) -> String {
@@ -243,6 +51,8 @@ pub struct App {
     pub ui: Terminal,
     pub busy: Arc<AtomicBool>,
     gate_ok: bool,
+    model: String,
+    problem: Option<String>,
 }
 
 const HELP: &str = "\
@@ -250,9 +60,10 @@ const HELP: &str = "\
 /status               接続先、モデル、モード、許可、タスク
 /host [URL] [--save]  接続先を表示 / 変更（--save でユーザー設定に保存）
 /mode fast|think|auto ホストの思考予算
-/plan                 以降、変更とコマンドは提案だけ（/default で戻す）
-/accept-edits         ワークスペース内の編集を自動で許可（コマンドは都度）
-/default              許可を既定（編集もコマンドも確認）に戻す
+/auto                 確認なしで実行（既定。危険な操作だけ確認）
+/default              編集とコマンドの前に確認する
+/accept-edits         編集は自動、コマンドは確認
+/plan                 変更とコマンドは提案だけ
 /cd <path>            ワークスペースを変える（確認あり）
 /undo                 直前のエージェントの編集を戻す
 /compact              会話を要約して文脈を空ける
@@ -261,56 +72,76 @@ const HELP: &str = "\
 /todos                タスク一覧
 /resume               このディレクトリの直前のセッションを再開
 /forget               いまのセッションのログを消して新しく始める
-/quit                 終了（Ctrl-C は実行中の処理を止める。待機中に 2 回で終了）";
+/logo                 ロゴを表示
+/clear                画面を消してウェルカム画面を出し直す
+/quit                 終了
+キー: enter で送信、shift+enter・alt+enter・行末の \\ で改行、shift+tab で許可モード切替、
+      ↑↓ で履歴、tab でコマンド補完、ctrl+c は実行中なら中断・入力中は 2 回で終了";
 
 impl App {
     pub async fn start(config: Config, root: &Path, interactive: bool, cancel: Arc<AtomicBool>) -> Result<App, String> {
         let ws = Workspace::new(root).map_err(|e| format!("{} を開けません: {e}", root.display()))?;
         let host = HostClient::new(&config);
-        let mut ui = Terminal::new(interactive);
+        let ui = Terminal::new(interactive);
         let health = host.health().await;
         let gate_ok = health.ok && health.gate && health.lmstudio;
         let context = if health.context > 0 { health.context } else { 4096 };
+        let problem = if !health.ok {
+            Some(format!("ホストに届きません（{}）。cirka config set host <URL>", health.error.unwrap_or_default()))
+        } else if !health.gate {
+            Some("ホストに /coder/turn がありません（local-agent が古い）。/search と /image だけ使えます".into())
+        } else if !health.lmstudio {
+            Some("ホストの LM Studio が応答しません。ファイル作業はできません".into())
+        } else {
+            None
+        };
         let tools = ToolCtx::new(ws, config.clone(), Some(host.clone()), cancel.clone());
         let mut agent = Agent::new(HostBrain { host: host.clone() }, tools, config.permission, config.mode, config.max_turns, context);
         agent.env_snapshot = env_snapshot(&agent.tools.ws.root, &config);
-        let header = format!("cirka {} — {}", env!("CARGO_PKG_VERSION"), agent.tools.ws.root.display());
-        ui.styled(&header, "bold");
-        ui.styled(&format!("ホスト {}  モード {}  許可 {}", config.host, config.mode.as_str(), config.permission.as_str()), "dim");
-        if !health.ok {
-            ui.styled(&format!("ホストに届きません（{}）。cirka config set host <URL> で接続先を設定してください", health.error.unwrap_or_default()), "err");
-        } else if !health.gate {
-            ui.styled("ホストに /coder/turn がありません（local-agent が古い）。ファイル作業は止め、/search と /image だけ使えます", "warn");
-        } else if !health.lmstudio {
-            ui.styled("ホストの LM Studio が応答しません。ファイル作業はできません", "warn");
-        } else {
-            ui.styled(&format!("モデル {}（文脈 {} トークン）", health.model, context), "dim");
+        let mut app = App { config, agent, ui, busy: Arc::new(AtomicBool::new(false)), gate_ok, model: health.model, problem };
+        app.welcome();
+        Ok(app)
+    }
+
+    pub fn welcome(&mut self) {
+        let (w, h) = crossterm::terminal::size().map(|(w, h)| (w as usize, h as usize)).unwrap_or((100, 40));
+        let info = WelcomeInfo {
+            version: env!("CARGO_PKG_VERSION").into(),
+            cwd: self.agent.tools.ws.root.display().to_string(),
+            host: self.config.host.clone(),
+            model: self.model.clone(),
+            context: self.agent.context_window,
+            problem: self.problem.clone(),
+        };
+        for line in tui::welcome(&info, &self.ui.theme, w, h) {
+            self.ui.line(&line);
         }
-        ui.styled("信頼できる LAN だけで使ってください（認証なし。読んだファイルの断片とコマンド出力がホストへ送られます）", "dim");
-        Ok(App { config, agent, ui, busy: Arc::new(AtomicBool::new(false)), gate_ok })
+        let t = self.ui.theme;
+        self.ui.line(&t.dim("  信頼できる LAN だけで使ってください（認証なし。読んだファイルの断片とコマンド出力がホストへ送られます）"));
+        self.ui.blank();
     }
 
     pub fn new_session(&mut self) {
         match Session::create(&platform::sessions_dir(), &self.agent.tools.ws.root, &self.config.host) {
             Ok(s) => self.agent.session = Some(s),
-            Err(e) => self.ui.styled(&format!("セッションを記録できません: {e}"), "warn"),
+            Err(e) => self.ui.styled(&format!("  ⚠ セッションを記録できません: {e}"), "warn"),
         }
     }
 
     fn report(&mut self, stop: &StopReason) {
         match stop {
             StopReason::Completed => {}
-            StopReason::MaxTurns => self.ui.styled(&format!("最大ターン数（{}）で止めました。続けるなら指示してください", self.agent.max_turns), "warn"),
-            StopReason::Interrupted => self.ui.styled("中断しました", "warn"),
-            StopReason::PermissionDenied => self.ui.styled("依頼を止めました", "warn"),
-            StopReason::HostError(e) => self.ui.styled(&format!("ホストのエラーで止まりました: {e}"), "err"),
-            StopReason::ContextOverflow => self.ui.styled("文脈に入りきりません。/compact してから続けてください", "err"),
+            StopReason::MaxTurns => self.ui.styled(&format!("  ⚠ 最大ターン数（{}）で止めました。続けるなら指示してください", self.agent.max_turns), "warn"),
+            StopReason::Interrupted => self.ui.styled("  ⎿  中断しました", "warn"),
+            StopReason::PermissionDenied => self.ui.styled("  ⎿  依頼を止めました", "warn"),
+            StopReason::HostError(e) => self.ui.styled(&format!("  ✗ ホストのエラーで止まりました: {e}"), "err"),
+            StopReason::ContextOverflow => self.ui.styled("  ✗ 文脈に入りきりません。/compact してから続けてください", "err"),
         }
     }
 
     pub async fn request(&mut self, text: &str) -> StopReason {
         if !self.gate_ok {
-            self.ui.styled("ホストのモデルが使えないため実行できません（/status で確認、/host で接続先を変更）", "err");
+            self.ui.styled("  ✗ ホストのモデルが使えないため実行できません（/status で確認、/host で接続先を変更）", "err");
             return StopReason::HostError("gate unavailable".into());
         }
         self.agent.env_snapshot = env_snapshot(&self.agent.tools.ws.root, &self.config);
@@ -329,7 +160,11 @@ impl App {
         let planned = tools::plan(&self.agent.tools, &call);
         let out = tools::execute(&mut self.agent.tools, planned, &mut self.ui).await;
         self.busy.store(false, Ordering::SeqCst);
-        self.ui.line(&out.content);
+        self.ui.event(UiEvent::ToolEnd { name: name.into(), ok: out.ok, content: out.content.clone() });
+        let t = self.ui.theme;
+        for l in out.content.lines() {
+            self.ui.line(&format!("     {}", if out.ok { l.to_string() } else { t.err(l) }));
+        }
         // The model sees it on the next request.
         let user = Msg::user(format!("{label}（利用者がホストの道具を直接使いました）"));
         let reply = Msg::assistant(format!("{name} の結果:\n{}", tools::clip(&out.content, 2000)), vec![]);
@@ -353,39 +188,42 @@ impl App {
                 if health.context > 0 {
                     self.agent.set_context_window(health.context);
                 }
-                let state = if self.gate_ok { "利用できます".to_string() } else {
-                    format!("モデルは使えません（{}）", health.error.unwrap_or_else(|| "LM Studio 停止か /coder がない".into()))
+                self.model = health.model.clone();
+                self.problem = if self.gate_ok { None } else {
+                    Some(health.error.clone().unwrap_or_else(|| "LM Studio 停止か /coder がない".into()))
                 };
-                self.ui.styled(&format!("接続先: {host} — {state}"), if self.gate_ok { "ok" } else { "warn" });
+                let state = if self.gate_ok { "利用できます".to_string() } else {
+                    format!("モデルは使えません（{}）", self.problem.clone().unwrap_or_default())
+                };
+                self.ui.note(&format!("接続先: {host} — {state}"));
                 if save {
                     match platform::user_config_path() {
                         Some(path) => match config::write_key(&path, "host", Some(&host)) {
-                            Ok(_) => self.ui.styled(&format!("{} に保存しました", path.display()), "dim"),
-                            Err(e) => self.ui.styled(&e.to_string(), "err"),
+                            Ok(_) => self.ui.note(&format!("{} に保存しました", path.display())),
+                            Err(e) => self.ui.styled(&format!("  ✗ {e}"), "err"),
                         },
-                        None => self.ui.styled("ユーザー設定の場所が分かりません", "err"),
+                        None => self.ui.styled("  ✗ ユーザー設定の場所が分かりません", "err"),
                     }
                 }
             }
-            Err(e) => self.ui.styled(&e.to_string(), "err"),
+            Err(e) => self.ui.styled(&format!("  ✗ {e}"), "err"),
         }
     }
 
     async fn status(&mut self) {
         let host = HostClient::new(&self.config);
         let h = host.health().await;
-        let lines = [
+        let text = [
             format!("ワークスペース: {}", self.agent.tools.ws.root.display()),
             format!("ホスト: {}（到達 {}、ゲート {}、LM Studio {}、使用中 {}）", self.config.host, h.ok, h.gate, h.lmstudio,
                     h.busy.unwrap_or_else(|| "なし".into())),
             format!("モデル: {}（文脈 {} トークン）", h.model, self.agent.context_window),
-            format!("モード: {}  許可: {}  最大ターン: {}", self.agent.mode.as_str(), self.agent.policy.mode.as_str(), self.agent.max_turns),
+            format!("思考: {}  許可: {}  最大ターン: {}", self.agent.mode.as_str(), self.agent.policy.mode.as_str(), self.agent.max_turns),
             format!("会話: {} 件  編集の取り消し: {} 件", self.agent.history.len(), self.agent.tools.undo.len()),
             format!("セッション: {}", self.agent.session.as_ref().map(|s| s.path.display().to_string()).unwrap_or_else(|| "なし".into())),
-        ];
-        for l in lines {
-            self.ui.line(&l);
-        }
+        ]
+        .join("\n");
+        self.ui.note(&text);
         if !self.agent.tools.todos.is_empty() {
             self.ui.event(UiEvent::Todos(self.agent.tools.todos.clone()));
         }
@@ -404,11 +242,11 @@ impl App {
                         let _ = old.forget(); // the empty session of this start
                     }
                     self.agent.session = Some(Session::open(&path));
-                    self.ui.styled(&format!("{} を再開しました（{n} 件）", path.display()), "ok");
+                    self.ui.note(&format!("{} を再開しました（{n} 件）", path.display()));
                 }
-                Err(e) => self.ui.styled(&format!("読めません: {e}"), "err"),
+                Err(e) => self.ui.styled(&format!("  ✗ 読めません: {e}"), "err"),
             },
-            None => self.ui.styled("このディレクトリの前回のセッションはありません", "warn"),
+            None => self.ui.note("このディレクトリの前回のセッションはありません"),
         }
     }
 
@@ -418,15 +256,12 @@ impl App {
         let (cmd, arg) = line.split_once(char::is_whitespace).map(|(c, a)| (c, a.trim())).unwrap_or((line, ""));
         match cmd {
             "/quit" | "/exit" => return false,
-            "/help" => {
-                let help = HELP.to_string();
-                self.ui.line(&help);
-            }
+            "/help" => self.ui.note(HELP),
             "/status" => self.status().await,
             "/host" => {
                 if arg.is_empty() {
                     let text = format!("接続先: {}（{}）", self.config.host, self.config.sources.join(" < "));
-                    self.ui.line(&text);
+                    self.ui.note(&text);
                 } else {
                     let save = arg.split_whitespace().any(|a| a == "--save");
                     let url = arg.split_whitespace().find(|a| *a != "--save").unwrap_or("");
@@ -437,25 +272,26 @@ impl App {
                 Some(m) => {
                     self.agent.mode = m;
                     self.config.mode = m;
-                    self.ui.styled(&format!("モード: {}", m.as_str()), "ok");
+                    self.ui.note(&format!("思考モード: {}", m.as_str()));
                 }
-                None => self.ui.styled("/mode fast|think|auto", "warn"),
+                None => self.ui.note("/mode fast|think|auto"),
             },
+            "/auto" => self.set_permission(Permission::Auto),
             "/plan" => self.set_permission(Permission::Plan),
             "/accept-edits" => self.set_permission(Permission::AcceptEdits),
             "/default" => self.set_permission(Permission::Default),
             "/undo" => match tool_fs::undo_last(&mut self.agent.tools) {
-                Ok(m) => self.ui.styled(&m, "ok"),
-                Err(e) => self.ui.styled(&e, "warn"),
+                Ok(m) => self.ui.note(&m),
+                Err(e) => self.ui.note(&e),
             },
             "/compact" => {
                 self.busy.store(true, Ordering::SeqCst);
                 let r = self.agent.compact(&mut self.ui).await;
                 self.busy.store(false, Ordering::SeqCst);
                 match r {
-                    Ok(s) if s.is_empty() => self.ui.styled("要約する会話がありません", "dim"),
-                    Ok(_) => self.ui.styled("会話を要約しました", "ok"),
-                    Err(e) => self.ui.styled(&e.to_string(), "err"),
+                    Ok(s) if s.is_empty() => self.ui.note("要約する会話がありません"),
+                    Ok(_) => self.ui.note("会話を要約しました"),
+                    Err(e) => self.ui.styled(&format!("  ✗ {e}"), "err"),
                 }
             }
             "/search" if !arg.is_empty() => self.direct_tool("web_search", json!({"query": arg}), &format!("/search {arg}")).await,
@@ -463,7 +299,7 @@ impl App {
             "/todos" => {
                 let todos = self.agent.tools.todos.clone();
                 if todos.is_empty() {
-                    self.ui.styled("タスクはありません", "dim");
+                    self.ui.note("タスクはありません");
                 } else {
                     self.ui.event(UiEvent::Todos(todos));
                 }
@@ -473,16 +309,27 @@ impl App {
                 if let Some(s) = self.agent.session.take() {
                     let path = s.path.clone();
                     match s.forget() {
-                        Ok(()) => self.ui.styled(&format!("{} を削除しました", path.display()), "ok"),
-                        Err(e) => self.ui.styled(&format!("削除できません: {e}"), "err"),
+                        Ok(()) => self.ui.note(&format!("{} を削除しました", path.display())),
+                        Err(e) => self.ui.styled(&format!("  ✗ 削除できません: {e}"), "err"),
                     }
                 }
                 self.agent.history.clear();
                 self.agent.tools.todos.clear();
                 self.new_session();
             }
+            "/logo" => {
+                let theme = self.ui.theme;
+                for l in tui::logo(&theme) {
+                    self.ui.line(&l);
+                }
+            }
+            "/clear" => {
+                let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                                            crossterm::cursor::MoveTo(0, 0));
+                self.welcome();
+            }
             "/cd" if !arg.is_empty() => self.cd(arg),
-            _ => self.ui.styled("知らないコマンドです（/help）", "warn"),
+            _ => self.ui.note("知らないコマンドです（/help）"),
         }
         true
     }
@@ -490,7 +337,8 @@ impl App {
     fn set_permission(&mut self, p: Permission) {
         self.agent.policy.mode = p;
         self.config.permission = p;
-        self.ui.styled(&format!("許可: {}", p.as_str()), "ok");
+        let line = tui::mode_line(&self.ui.theme, p, self.agent.mode, None);
+        self.ui.line(&line);
     }
 
     fn cd(&mut self, arg: &str) {
@@ -499,7 +347,7 @@ impl App {
             if p.is_absolute() { p } else { self.agent.tools.ws.root.join(p) }
         };
         let Ok(ws) = Workspace::new(&target) else {
-            self.ui.styled(&format!("ディレクトリを開けません: {}", target.display()), "err");
+            self.ui.styled(&format!("  ✗ ディレクトリを開けません: {}", target.display()), "err");
             return;
         };
         if self.ui.interactive {
@@ -512,45 +360,36 @@ impl App {
         self.agent.tools.read_files.clear();
         self.agent.env_snapshot = env_snapshot(&self.agent.tools.ws.root, &self.config);
         let text = format!("ワークスペース: {}", self.agent.tools.ws.root.display());
-        self.ui.styled(&text, "ok");
+        self.ui.note(&text);
     }
 
     pub async fn repl(&mut self) {
-        let mut buffer = String::new();
         loop {
-            let prompt = match self.agent.policy.mode {
-                Permission::Plan => "cirka[plan]> ",
-                Permission::AcceptEdits => "cirka[edits]> ",
-                Permission::Bypass => "cirka[bypass]> ",
-                Permission::Default => "cirka> ",
-                Permission::Auto => "cirka[auto]> ",
-            };
-            let prompt = if buffer.is_empty() { prompt } else { "... " };
-            let painted = self.ui.paint(prompt, "bold");
-            let Some(line) = self.ui.read_line(&painted) else { break };
-            if let Some(stripped) = line.strip_suffix('\\') {
-                buffer.push_str(stripped);
-                buffer.push('\n');
-                continue;
-            }
-            buffer.push_str(&line);
-            let text = std::mem::take(&mut buffer);
-            let text = text.trim();
-            if text.is_empty() {
-                continue;
-            }
-            if text.starts_with('/') {
-                if !self.command(text).await {
-                    break;
+            let status = tui::mode_line(&self.ui.theme, self.agent.policy.mode, self.agent.mode, None);
+            match self.ui.read_input(&status, "依頼を書いてください（/help でコマンド一覧）") {
+                Input::Eof => break,
+                Input::CycleMode => {
+                    let next = policy::next_mode(self.agent.policy.mode);
+                    self.agent.policy.mode = next;
+                    self.config.permission = next;
                 }
-                continue;
+                Input::Line(text) => {
+                    let text = text.trim();
+                    if text.starts_with('/') {
+                        if !self.command(text).await {
+                            break;
+                        }
+                    } else {
+                        self.request(text).await;
+                    }
+                    self.ui.blank();
+                }
             }
-            self.request(text).await;
         }
     }
 }
 
-/// Ctrl-C: stops the running tool or turn; at the prompt, twice within 2 seconds ends cirka.
+/// Ctrl-C outside the input box (while a turn or a tool runs): stops it. The input box reads Ctrl-C itself.
 pub fn install_ctrl_c(cancel: Arc<AtomicBool>, busy: Arc<AtomicBool>) {
     let presses = Arc::new(AtomicU32::new(0));
     tokio::spawn(async move {

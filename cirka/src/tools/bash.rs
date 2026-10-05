@@ -109,7 +109,12 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
     let started = Instant::now();
     let limit = Duration::from_secs(timeout_s);
     let mut stopped: Option<&str> = None;
+    let mut last_tick = Instant::now();
     let status = loop {
+        if last_tick.elapsed() >= Duration::from_millis(250) {
+            ui.event(UiEvent::Tick);
+            last_tick = Instant::now();
+        }
         tokio::select! {
             status = child.wait() => break status.ok(),
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -145,7 +150,6 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
     if out_dropped + err_dropped > 0 {
         text.push_str(&format!("（出力の上限 64 KiB を超えた {} バイトを捨てました）\n", out_dropped + err_dropped));
     }
-    ui.event(UiEvent::Info(format!("{} {}", crate::platform::shell_label(shell), text.lines().next().unwrap_or(""))));
     ToolOutput { content: text.trim_end().to_string(), ok: stopped.is_none() && code == Some(0) }
 }
 

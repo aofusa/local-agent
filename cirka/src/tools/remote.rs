@@ -28,9 +28,7 @@ fn mime_of(path: &Path) -> Option<&'static str> {
 fn progress<'a>(ui: &'a mut dyn Frontend) -> impl FnMut(&str) + Send + 'a {
     move |text: &str| {
         let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(100).collect::<String>();
-        if !line.is_empty() {
-            ui.event(UiEvent::Status(line));
-        }
+        if line.is_empty() { ui.event(UiEvent::Tick) } else { ui.event(UiEvent::Status(line)) }
     }
 }
 

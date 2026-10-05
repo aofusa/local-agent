@@ -3,6 +3,8 @@
 
 mod agent;
 mod app;
+mod art;
+mod art_data;
 mod config;
 mod context;
 mod host;
@@ -10,6 +12,7 @@ mod platform;
 mod policy;
 mod session;
 mod tools;
+mod tui;
 mod ui;
 mod workspace;
 
@@ -59,6 +62,8 @@ enum Command {
     },
     /// 接続先のホストの状態を表示する
     Status,
+    /// ロゴを表示する（docs/logo から作った端末用の絵）
+    Logo,
 }
 
 #[derive(Subcommand)]
@@ -184,6 +189,14 @@ async fn main() -> ExitCode {
     };
     if let Some(Command::Status) = &cli.command {
         return status(&config).await;
+    }
+    if let Some(Command::Logo) = &cli.command {
+        let theme = tui::Theme { mode: art::ColorMode::detect(std::io::IsTerminal::is_terminal(&std::io::stdout())) };
+        let _ = crossterm::ansi_support::supports_ansi();
+        for line in tui::logo(&theme) {
+            println!("{line}");
+        }
+        return ExitCode::SUCCESS;
     }
     let cancel = Arc::new(AtomicBool::new(false));
     let interactive = cli.prompt.is_none();

@@ -53,6 +53,8 @@ pub enum TurnEvent {
     ToolCall(ToolCall),
     Done { finish_reason: String, input_tokens: u64, output_tokens: u64 },
     Error { message: String, code: String },
+    /// Nothing arrived for a moment (not from the host: lets the terminal animate its spinner).
+    Tick,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -183,7 +185,7 @@ pub fn fold_events(events: &[TurnEvent]) -> Result<TurnReply, HostError> {
                     HostError::Refused { message: message.clone(), code: code.clone() }
                 });
             }
-            TurnEvent::Status(_) | TurnEvent::Thinking(_) => {}
+            TurnEvent::Status(_) | TurnEvent::Thinking(_) | TurnEvent::Tick => {}
         }
     }
     if !done {
@@ -336,6 +338,7 @@ impl HostClient {
                     if last_activity.elapsed() > self.idle {
                         return Err(HostError::Unreachable(format!("{} 秒間応答がありません", self.idle.as_secs())));
                     }
+                    on_event(&TurnEvent::Tick);
                     continue;
                 }
                 Ok(None) => break,
@@ -395,7 +398,10 @@ impl HostClient {
                 return Err(HostError::Unreachable(format!("{} 秒で打ち切りました", timeout.as_secs())));
             }
             let chunk = match tokio::time::timeout(Duration::from_millis(250), stream.next()).await {
-                Err(_) => continue,
+                Err(_) => {
+                    on_progress(&shown); // keeps the spinner moving
+                    continue;
+                }
                 Ok(None) => break,
                 Ok(Some(Err(e))) => return Err(HostError::Unreachable(e.to_string())),
                 Ok(Some(Ok(b))) => b,
