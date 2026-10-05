@@ -92,6 +92,7 @@ Qwen3.8 27B（`qwen35` アーキテクチャ）と mmproj を読み込め、ル�
 - **unload**: `POST /models/unload` はすぐに `{"success":true}` を返し、子プロセスは数秒後に終わる。そのため unload の後は `GET /models` で状態が `unloaded` になるまで待つ。
 - **アイドル sleep**: `sleep-idle-seconds` を過ぎると状態が `sleeping` になり、子プロセスのメモリが 14GB から 0.2GB に減った。`sleeping` も常駐として扱い、unload の対象にする。
 - **一覧の余分な項目**: ルータの `/models` は Hugging Face のキャッシュにあるモデルも `unloaded` で並べる。常駐の判定には影響しない。
+- **モデルは変更前と同じ**: LM Studio が使っていた IQ3_M（同じ Q4_K_S から LM Studio 用のセットアップが再量子化したもの）と、`setup-llm.ps1` が作った `tools/models/llm/Huihui-Qwen3.8-27B-abliterated-IQ3_M.gguf` は SHA-256 が一致した（`2554601c…95a4`、12,768,332,704 バイト）。mmproj も同じファイル。context 4096、GPU 29 / 64 層（offload 0.45）、flash attention、thinking off、temperature 0.4 も変更前と同じで、変わったのは実行するサーバだけ。
 - **GPU 層数**: Qwen3.8 27B の GGUF は `block_count` 65（うち 1 つは llama.cpp が使わない MTP 層）。64 層 × 0.45 = 29 層を GPU に置く（LM Studio の offload 0.45 と同じ）。
 - **繰り返し罰則**: llama-server の既定（repeat penalty 1.0）では、タグ生成で 27B が negative のタグを延々と並べ、`max_tokens`（320）で切れて JSON が閉じず、`split` が生文字列に落ちた（positive に JSON ごと入る）。LM Studio の既定と同じ `repeat-penalty = 1.1` をプリセットに入れた。
 - **ComfyUI**: Comfy Desktop が入れていたものと同じ ComfyUI のコミットと ROCm 版 PyTorch（`2.9.1+rocmsdk20260116`）を `tools\comfyui` に入れた。既存のモデルは `-ModelsDir` で読む。
