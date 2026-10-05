@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.0 — 自律モード（制御ループ）と CUI cirka
+
+- チャットタブの自律モード（`docs/autonomous-controller-design.md`）: 思考モードで、検索・文章・コードのうち 2 つ以上、または「調べてから」「根拠を確認して」「動くか試して直して」のように結果で次が決まる依頼は、27B が 1 手ずつ JSON で次の道具（検索 / 文章 / コード / 画像タブ案内）か最終回答を選ぶ。道具は既存の流れ（`plan` / `write_brief` / `code_plan`）にそのまま入り、終わると要約だけが制御へ戻る（`controller_record`）。上限は 3 手（`CONTROLLER_MAX_STEPS`、最大 4）と 20 分（`SEARCH_WALL_CLOCK_S` 以内、`CONTROLLER_WALL_CLOCK_S`）。同じ道具を同じ依頼文で二度呼ばない。JSON が読めなければ 1 回だけ聞き直し、だめなら短い失敗文で終える。章の確認とコンテナ実行の承認カードは残り、却下すると制御も終わる。画像は生成せず画像タブへ案内する（`graph.py` は呼ばない）。「自動」はこの形の依頼で思考を選ぶ。接頭辞、添付、`/docs`、続き、速いモードは今までどおり 1 つの道具で処理する。グラフは増やしていない。
+- agent-chat-ui: 自律モードのメッセージに「自律の手順」（選んだ道具、理由、依頼文、結果の要約、終了理由）を、執筆・コードの手順と同じ折りたたみで出す（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を追加）。
+- CUI `cirka`（`cirka/`、Rust、`docs/locus-cui-design.md`）: 作業ディレクトリで起動し、ホストの 27B が次のツール呼び出しを決め、cirka がそのツールを手元で実行する。`list_dir` / `glob` / `grep` / `read_file` / `edit_file`（一意な原文の置換、未読は不可）/ `write_file` / `bash`（タイムアウト、出力上限、プロセスツリーごと停止）/ `todo_write` / `ask_user`、ホストの `web_search`（チャットタブの検索）と `image_generate`（画像タブ、結果は `cirka-outputs/`）。許可は default / accept-edits / plan / bypass、差分とコマンドを見せて確認、`/undo`、`/compact`、セッションの再開。ワークスペースの外と秘密ファイルは扱わず、鍵らしい文字列は送る前に伏せる。context 4096 に収まるように毎ターン組み立てる。
+- 接続先は設定できる: `cirka config set host http://<LAN IP>:2024`（ユーザー設定、`--project` でディレクトリごと）、`CIRKA_HOST`、`--host`、実行中の `/host`。`cirka status` で到達・モデル・文脈を確認する。`scripts/build-cirka.ps1` でリリースビルドと zip。
+- モデルゲート `POST /coder/turn` と `GET /coder/health`（`src/furry_agent/coder_gate.py`、`langgraph.json` の `http.app`）: cirka のメッセージとツール定義を LM Studio の tool calling に渡し、SSE で返す。ツールは実行せず、会話を保存しない。共有ロック（tab `coder`）を握り、画像タブ・チャットタブの実行中は待つ（待ちを status で知らせる）。
+- 確認: pytest、cargo test、この端末での実行（下の実装記録）、SDXL / Chroma1-HD の画像生成と Tor 検索の退行確認、LAN アドレス経由の UI 表示。
+- 画像タブ（graph `agent`）、ComfyUI のワークフローとノード ID、eject の順は変えていない（`graph.py`、`workflows/`、`comfyui_nodes/` は `main` から差分なし）。
+
 ## v0.6.0 — 主張単位の検証とローカル文書の `/docs`
 
 - 主張の突き合わせ（`docs/claim-verification-design.md`）: 検索の回答を、批評（速いモードは読解）のあと「主張の抽出 → 主張の判定 → 支持された主張だけで統合 → 文ごとの監査 → 支持されない文の削除」の順で作る。抽出・判定・統合・監査は、批評と同じ代理リーダー（Ternary-Bonsai-2-27B abliterated）の 1 プロセスで行う。採否はオーケストレータの門が決める（引用カードの実在、抜粋との 20 字一致または数値・日付・固有名詞、カードに無い数値は不可、引用未確認のカードだけなら「一部」まで）。削除した文は言い換えない。

@@ -234,6 +234,13 @@ def final_text(control: dict) -> str:
 # --- nodes --------------------------------------------------------------------------------------------------------
 
 
+def _own(state: ChatState, **changes) -> dict:
+    """The view for the loop's own messages: the claim table, the /docs trace and the thinking belong to the
+    tool's message and are not shown a second time under the loop's."""
+    return {**state, "claims": [], "claim_audit": [], "verify_error": None, "doc_root_hit": "", "thinking": [],
+            **changes}
+
+
 def _request(state: ChatState) -> str:
     human = _last_human(state)
     return _text_of(human)[0] if human is not None else ""
@@ -320,7 +327,7 @@ async def controller(state: ChatState, config: RunnableConfig) -> dict:
                       "search_skipped": any(e.get("tool") == "search" for e in control.get("trace") or [])})
         update = {"artifact": {**(state.get("artifact") or {}), "research": research}}
     note = f"{TOOL_LABELS[tool]}を使います（{decision.reason[:120] or '次の手'}）…"
-    view = {**state, "control": control}
+    view = _own(state, control=control)
     return {**update, "control": control, "route": {**(state.get("route") or {}), **route}, "lock_token": token,
             "error": None, "messages": [_progress(view, note, task=control_task(control))]}
 
@@ -361,7 +368,7 @@ async def controller_record(state: ChatState, config: RunnableConfig) -> dict:
     # The tool's last message keeps its id (it stays in the thread as it was); the loop's next messages get a
     # new one so they never replace it.
     progress_id = f"progress-{uuid.uuid4()}"
-    view = {**state, "control": control, "progress_id": progress_id}
+    view = _own(state, control=control, progress_id=progress_id)
     text = ("結果を確認して次の手を考えています…" if not control.get("stop_reason") else "まとめています…")
     return {"control": control, "error": None, "lock_token": None, "progress_id": progress_id,
             "messages": [AIMessage(id=progress_id, content=text,
@@ -381,7 +388,7 @@ async def finish(state: ChatState, config: RunnableConfig) -> dict:
     log.info("controller finished stop=%s steps=%d tools=%s", control.get("stop_reason"), control.get("steps", 0),
              [e.get("tool") for e in control.get("trace") or []])
     return {"control": control, "lock_token": None,
-            "messages": [_final({**state, "control": control}, text, task=control_task(control))]}
+            "messages": [_final(_own(state, control=control), text, task=control_task(control))]}
 
 
 def add_nodes(builder: Any) -> None:

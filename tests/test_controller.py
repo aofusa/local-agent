@@ -328,3 +328,18 @@ def test_fallback_after_a_failed_tool_shows_its_summary():
     control = {"trace": [{"tool": "search", "ok": False, "summary": "Tor に接続できません"}], "stop_reason": "wall_clock"}
     text = cn.final_text(control)
     assert "ここまでの結果" in text and "Tor に接続できません" in text and "時間の上限" in text
+
+
+async def test_the_loop_message_does_not_repeat_the_claim_table(models_dir, monkeypatch):
+    import test_claims_docs_graph as claims
+    from test_chat_graph import FakeLLM
+
+    monkeypatch.setattr(FakeLLM, "chat", claims._chat)
+    world = claims._world()
+    world.answer = "page text for https://alpha.example/0 によると要点はこうだ [1]。"
+    state, message = await _run("Rust の最新版を調べてから要点を教えて", world, _settings(models_dir, claim_verify=True),
+                                mode="think")
+    search_message = next(m for m in state["messages"] if "claim_trace" in m.additional_kwargs)
+    assert "claim_trace" in search_message.additional_kwargs
+    assert "claim_trace" not in message.additional_kwargs and "thinking" not in message.additional_kwargs
+    assert message.additional_kwargs["task_trace"]["kind"] == "control"
