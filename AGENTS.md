@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索と `/docs` の回答の主張単位の検証（`docs/claim-verification-design.md`）とローカル文書の map-reduce `/docs`（`docs/local-doc-mapreduce-design.md`、v0.6.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。構成、セットアップ、起動、確認の手順は `README.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -27,8 +27,9 @@
 | `docs/chat-search-tor-design-bonsai-tabs.md` | 画像 / チャットのタブと、Tor 経由検索（Bonsai ワーカー）の設計 |
 | `docs/chat-search-tor-bonsai-work-instruction.md` | 上の実装記録。追加要件、設計書との差分、実測、モデルと役割の対応 |
 | `docs/chat-deep-search-creative-sandbox.md` | チャットタブの深い検索、文章、コードと Docker サンドボックス、速い / 思考 / 自動。末尾に実装記録 |
-| `docs/claim-verification-design.md` | 検索と `/docs` の回答を主張単位で出典と照らす段（抽出・判定・統合・監査・削除）。末尾に実装記録 |
-| `docs/local-doc-mapreduce-design.md` | チャットタブの `/docs`（許可ルート内のローカル文書を検索と同じチームで読む）。末尾に実装記録 |
+| `docs/claim-verification-design.md` | 検索の回答を主張単位で出典と照らす段（抽出・判定・統合・監査・削除）。末尾に実装記録 |
+| `docs/autonomous-controller-design.md` | チャットタブの自律モード（思考モードの複合依頼で、27B が検索・文章・コード・画像案内を選び直す制御ループ）。末尾に実装記録 |
+| `docs/locus-cui-design.md` | CUI `cirka`（設計書の作業名は locus）と、そのモデルゲート `POST /coder/turn`。末尾に実装記録 |
 
 ComfyUI と LM Studio の呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
 
@@ -64,7 +65,7 @@ ComfyUI が LLM を unload してから KSampler
 - ComfyUI は、設計書のワークフローで参照画像の取り込み、LM Studio の呼び出し、モデルの eject、タグの分割、チェックポイントによる静止画生成、Save Image を行う。
 - LM Studio の LLM は、日本語と参照画像から Danbooru / e621 系タグの JSON を返す。画素は作らない。画素を作るのは ComfyUI のチェックポイントと KSampler である。
 
-LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）だけである。チャットタブは会話と検索の計画・統合のために LM Studio を直接呼び、検索の前後で unload する。画像タブ（graph `agent`）の経路は変えない。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
+LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）と cirka のモデルゲート（`POST /coder/turn`）だけである。チャットタブは会話と検索の計画・統合のために LM Studio を直接呼び、検索の前後で unload する。モデルゲートは cirka の 1 ターン分の補完（tool calling）だけを LM Studio に渡し、ツールは実行せず、`job_lock`（tab `coder`）を握るあいだだけ呼ぶ。画像タブ（graph `agent`）の経路は変えない。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
 
 ## 待受と到達範囲
 
@@ -79,6 +80,7 @@ LangGraph から LM Studio を直接呼んで、タグ生成や画像生成の�
 | Tor | `127.0.0.1:9050`（SOCKS） | この端末の LangGraph（チャットタブの検索）だけ |
 | PrismML llama-server | `127.0.0.1:18181〜18190` | この端末の LangGraph だけ。検索中だけ起動する |
 | Docker サンドボックス | 待受なし（`--network none`、ポートを公開しない） | この端末の LangGraph が承認後に起動する。Docker Desktop は実行のときだけ起動して止める |
+| cirka（CUI） | 待受なし（クライアント） | 利用者の端末で動き、LangGraph の `/coder/turn`・`/coder/health`・`/runs/stream` へ接続する。接続先は設定（`cirka config set host` など）で決める |
 
 ComfyUI は `--listen 127.0.0.1 --port 8188` のままにする。LM Studio、Tor、llama-server もループバックのままにする。他ホストへ開くのは LangGraph と agent-chat-ui だけである。検索の外向き通信は Tor の出口だけを通る（`socks5h://`）。
 
@@ -123,11 +125,11 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 画像タブとチャットタブは `job_lock` で直列化する。チャットタブがロックを放すのは、llama-server がすべて消え、LM Studio を unload した後である。
 - LM Studio の 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
-- チャットグラフの kind は `CHAT` / `SEARCH` / `WRITE` / `CODE` / `TO_IMAGE_TAB` / `DOCS` の 6 つ（設計は `docs/chat-deep-search-creative-sandbox.md`、`DOCS` は `docs/local-doc-mapreduce-design.md`）。1 本の `chat` グラフの中で分岐し、グラフを増やさない。`DOCS` は行頭の `/docs` だけで決まり（ルータは選ばない）、添付以外のすべてより先に判定する。文章とコードを書くのは LM Studio の 27B で、検索モデルと画像用プロンプトは使わない。
+- チャットグラフの kind は `CHAT` / `SEARCH` / `WRITE` / `CODE` / `TO_IMAGE_TAB` の 5 つ（設計は `docs/chat-deep-search-creative-sandbox.md`）。1 本の `chat` グラフの中で分岐し、グラフを増やさない。文章とコードを書くのは LM Studio の 27B で、検索モデルと画像用プロンプトは使わない。`/docs`（ローカル文書）は v0.8.0 で削除した。行頭の `/docs` は特別扱いせず、ふつうの文として振り分ける。
 - モードは `configurable.mode` の `fast` / `think` / `auto`（UI の「速い / 思考 / 自動」。無指定は `fast`、`auto` はルールとルータの判定で片方を選ぶ）。変わるのは予算と思考トークンだけ: 検索は 1 ラウンド / 下位問いの充足判定で最大 4 ラウンド・12 ページ・20 分、文章は一発 / アウトライン→本文→差分推敲、コードは生成のみ / 承認後に Docker で実行（最大 2 回）。思考トークンは回答本文に混ぜない。
 - コードの実行は `src/furry_agent/sandbox.py` だけが行う（`python:3.12-slim`、`--network none`、`--read-only`、`/work` のみマウント、2g / 2 CPU / 256 pids、`--cap-drop ALL`、非 root、60 秒、argv のみ）。承認（HITL）前に実行しない。サンドボックスは `job_lock` を握らない。
-- 主張の検証（`CLAIM_VERIFY=1`）は、検索と `/docs` の両方で、批評と同じ代理リーダーのプロセスで抽出 → 判定 → 統合 → 監査を行い、`claim_drop` が支持されない文を削除する（言い換えない）。採否を決めるのはオーケストレータの門（`claim_verify.gate`: 実在するカード、20 字の一致または数値・固有名詞、カードに無い数値は不可）で、モデルの判定は参考にとどめる。検証段は通信しない、LM Studio を載せ直さない、ツールを渡さない。失敗時の既定（`CLAIM_VERIFY_FAIL_OPEN=0`）は無監査の回答を出さず抜粋だけを返す。`job_lock` は監査が終わり、llama-server が消え、LM Studio を unload するまで放さない。
-- `/docs` のファイルを開くのはオーケストレータ（`doc_resolve.py` / `doc_nodes.py`）だけである。`LOCAL_DOC_ROOTS`（空ならオフ）の実パス配下だけを読み、拒否名を拡張子の許可より先に掛ける。モデルの出力をパスとして使わない。reader（Ternary-Bonsai-8B、幅 3、波ごとに kill）にはツールを渡さず、節の本文と質問だけを渡す。計画に LM Studio の 27B を使ったら、reader の起動前に unload する。`/docs` は Tor も外向き通信も開かない。書き込み・実行・削除・移動はしない。
+- 主張の検証（`CLAIM_VERIFY=1`）は、検索で、批評と同じ代理リーダーのプロセスで抽出 → 判定 → 統合 → 監査を行い、`claim_drop` が支持されない文を削除する（言い換えない）。採否を決めるのはオーケストレータの門（`claim_verify.gate`: 実在するカード、20 字の一致または数値・固有名詞、カードに無い数値は不可）で、モデルの判定は参考にとどめる。検証段は通信しない、LM Studio を載せ直さない、ツールを渡さない。失敗時の既定（`CLAIM_VERIFY_FAIL_OPEN=0`）は無監査の回答を出さず抜粋だけを返す。`job_lock` は監査が終わり、llama-server が消え、LM Studio を unload するまで放さない。
+- 自律モード（`control_nodes.py`）: 思考モード（「自動」で思考になったものを含む）で、検索・文章・コードのうち 2 つ以上、または結果に応じて次が決まる接続（「〜してから」「根拠を確認して」など）を含む依頼だけが入る（`router.is_compound`）。接頭辞・`configurable.task`・添付・続き・速いモードは入らない。27B（LM Studio が無ければ代理リーダー）が `ask_json` で 1 手ずつ JSON の Decision を返し、道具は既存の入口ノード（`plan` / `write_brief` / `code_plan`）へエッジで渡す。道具の終端は `controller_record` に戻る。上限は `CONTROLLER_MAX_STEPS`（既定 3、最大 4）と `SEARCH_WALL_CLOCK_S` 以内の壁時計、同じ道具と同じ依頼文の再実行は禁止。画像は生成せず画像タブへ案内する（`graph.py` は呼ばない）。章の確認とコンテナ実行の承認は残す。グラフは増やさない。
 
 既定の役割（採否の理由と実測は README「検索で使うモデルと採否」と実装記録 §4）:
 
@@ -140,6 +142,16 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 | 批評・統合 | Ternary-Bonsai-2-27B abliterated（PTQ1_0、代理リーダー） | Ternary-Bonsai-2-27B、Qwen3.5-4B-heretic、Ternary-Bonsai-8B |
 
 Qwen3-0.6B-heretic は旧形式のルータの検証に落ちたため、フィルタの最後の予備に使う。v0.5.0 のルータ（`kind` を返す形式）の検証には合格したので、ルータの 3 番手にも入る（`tools/bonsai/rank.json`）。1-bit の Bonsai-8B は reader の予備にとどめる。
+
+## CUI（cirka）とモデルゲート
+
+設計は `docs/locus-cui-design.md`（作業名 locus。コマンド名は `cirka` に確定）。変えてはいけない点だけここに置く。
+
+- エージェントループは cirka 側に置く。ツール（ファイルの一覧・検索・読み取り・編集・作成、シェル、タスク一覧、質問）は cirka を起動した端末のワークスペースの中だけで実行する。ホストはツールを実行しない。
+- ホストの `POST /coder/turn` は無状態の 1 ターン（SSE: status / thinking / token / tool_call / done / error）。会話やファイルの断片をスレッドやログに残さない（ログは件数と秒数だけ）。システムプロンプトを書き換えない。`job_lock` を握り、画像タブ・チャットタブと同時に LM Studio を使わない。LangGraph の `langgraph.json` の `http.app`（`src/furry_agent/coder_app.py`）で載せ、グラフは増やさない。
+- 検索と画像は既存のグラフ（`chat` の `configurable.task=search`、`agent`）を `/runs/stream` で呼ぶ。cirka は LM Studio・ComfyUI・Tor へ直接つながない。返った画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを渡す。
+- 許可モードの既定は `auto`（利用者の指定、v0.8.0）: 編集とコマンドを確認なしで実行し、`policy::guarded` の一覧（push、reset --hard、再帰的な削除、ダウンロードの直接実行、sudo、公開、ディスク・電源・レジストリ）に当たるコマンドだけ確認する。`default` は編集とコマンドの前に確認、`accept-edits` は編集だけ自動、`plan` は実行しない、`bypass` はすべて確認なしで明示したときだけ。Shift+Tab は auto / default / accept-edits / plan を巡回し、bypass には入らない。ワークスペースの外と秘密ファイル（`.env`、鍵、`credentials*` など）はどのモードでも扱わない。
+- 認証は足さない（ヘッダの差し込み口 `auth_header` だけ）。
 
 ## 画像の保存と UI への返却
 
@@ -169,10 +181,16 @@ langgraph.json                    graphs.agent がグラフを指す
 src/                              LangGraph のグラフ、役割推定（planner）、テンプレート注入、ComfyUI クライアント。
                                   チャットタブは chat_graph（ルーティングと検索）、write_nodes / code_nodes、chat_common、
                                   modes（速い / 思考 / 自動）、sandbox（Docker）、chat_models（llama-server の起動と停止）、
-                                  claim_verify / claim_nodes（主張の検証）、doc_resolve / doc_chunk / doc_nodes（/docs）
+                                  claim_verify / claim_nodes（主張の検証）、
+                                  control_nodes（自律モード）、coder_gate / coder_app（cirka 向けの /coder/turn）
+docs/autonomous-controller-design.md            チャットタブの自律モード（制御ループ）の設計と実装記録
+docs/locus-cui-design.md                        CUI cirka とモデルゲートの設計と実装記録
+cirka/                            CUI（Rust、単一バイナリ）。cirka/target/ は git に含めない。tui.rs が Claude Code に倣った画面、
+                                  art.rs と art_data.rs（生成物）がロゴの端末用の絵
+docs/logo/                        cirka のロゴ（cirka-icon.jpg、cirka-logo.jpg、cirka-design.jpg）
+scripts/gen_cirka_art.py          docs/logo の画像から cirka/src/art_data.rs（半角ブロック用のビットマップ）を作る
 docs/chat-deep-search-creative-sandbox.md       チャットタブの深い検索、文章、コード、モードの設計と実装記録
 docs/claim-verification-design.md               主張単位の検証の設計と実装記録
-docs/local-doc-mapreduce-design.md              /docs（ローカル文書の map-reduce）の設計と実装記録
 comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
 workflows/furry_ja.json           UI 形式
 workflows/furry_ja_api.json       フェーズ 1 の API 形式。t2i_basic / i2i_basic の元
@@ -191,7 +209,7 @@ prompts/system_bonsai_worker.txt  検索の reader（open_page と事実カー�
 prompts/system_write_*.txt        チャットタブの文章（アウトライン / 本文 / 推敲）
 prompts/system_code_plan.txt      チャットタブのコード生成
 prompts/system_claim_*.txt        主張の抽出 / 判定（監査も判定と同じ）
-prompts/system_doc_*.txt          /docs の計画 / 読解 / カバー
+prompts/chat/controller.txt       自律モードの判断（道具の選択と最終回答）
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
 scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai、コード実行用は setup-sandbox
@@ -203,7 +221,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表とローカル文書の読んだ範囲の表示（`search-trace.tsx` の `ClaimTraceView` / `DocTraceView`、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
@@ -261,7 +279,6 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - チャットタブの検索で、クラウド検索 API、CAPTCHA の突破、指紋偽装、`.onion` の巡回を行うこと。Tor を通らない検索の通信。
 - チャットタブのコードを、承認（HITL）なしで、または `sandbox.py` 以外（ホストのシェル、LangGraph プロセス内の subprocess）で実行すること。コンテナに docker.sock、ホームフォルダ、リポジトリ、`.env` を渡すこと。速いモードで実行すること。
 - 思考トークンを回答本文に混ぜること。文章生成に検索モデルや画像用プロンプトを使うこと。
-- `/docs` で、許可ルートの外・拒否名のファイルを読むこと、モデルの出力をパスとして開くこと、ファイルの書き込み・実行・削除・移動、ネットワーク（Tor を含む）を開くこと、埋め込みインデックスやベクトル DB を常設すること。
 - 主張の検証で、検証器同士の議論・多数決、検証段からの取得や追加検索、モデルの記憶での補完、数値の自動書き換え、支持されない文の言い換え。
 - 設計書 §5 の薄い `frontend/`。
 - ComfyUI または LM Studio をループバック以外へ開くこと。
@@ -290,8 +307,10 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - この端末の LM Studio の 27B は context 4096（`LMSTUDIO_CONTEXT`）で約 0.9 トークン/秒。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context と「`CHAT_TIMEOUT_S` で出せる量」（`LMSTUDIO_TOKENS_PER_S` から始め、応答ごとに測り直す）の小さい方に収める。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
 - Docker Desktop は普段は止めておき、承認したコードの実行のときだけ起動して、終わったら止める（VM が約 1.5GB を使い、27B や ComfyUI と取り合うため）。
 - 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の上限は `CLAIM_TIMEOUT_S`（600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かない）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
-- `/docs`（`docs/local-doc-mapreduce-design.md` §10）: `LOCAL_DOC_ROOTS` は既定で空（オフ）。パスは文字列だけ。`.log` は既定の拡張子に残し、広いルートでは `DOC_EXTENSIONS` で外す。計画は `DOC_PLANNER=auto`（節が `DOC_MAX_CHUNKS` を超えるときだけ 27B）。読む時間は `DOC_TIMEOUT_S`（600 秒）。起動できなかった reader の節は未読に戻し、以後の波の幅を下げる（この iGPU の Vulkan で確保できる量は空き RAM より小さい）。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
+- 自律モード（`docs/autonomous-controller-design.md` 末尾の実装記録）: 制御のノードは `control_nodes.py` に置き（write_nodes / code_nodes と同じ形）、Decision のスキーマもそこに置く。道具のメッセージはその id のまま残し、制御のメッセージには新しい id を振る（道具の出力を上書きしない）。文章のあとの最終回答は本文を繰り返さない。利用者が章の確認やコンテナ実行を却下したら、制御もそこで終える。
+- CUI の画面（v0.8.0）: Claude Code に倣い、ロゴ入りの枠、枠付きの入力欄と許可モードの行、`⏺` / `⎿` のブロック、差分、スピナー、矢印キーのメニュー。生のキー入力（raw mode）は入力欄とメニューのあいだだけ使い、出力は通常の行のまま（パイプや `-p` でも読める）。ロゴは画像のまま出せないので、`scripts/gen_cirka_art.py` が `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を小さなビットマップにし、▀ ▄ █ で描く（24 ビット色の端末ではロゴの赤 #D63A2F）。
+- CUI（`docs/locus-cui-design.md` 末尾の実装記録）: コマンド名は `cirka`。設定は `%APPDATA%\cirka\config.toml`（XDG）< `./.cirka/config.toml` < `CIRKA_HOST` など < `--host`。モデルゲートは素の `POST /coder/turn`（LangGraph のスレッドを使わない）で、`GET /coder/health` が文脈の大きさを返す。27B の tool calling は LM Studio のネイティブの解析で足りた（XML の自前解析は入れていない）。cirka は context 4096 に合わせ、ツールの説明を短くし、古い結果を 1 行に潰して収める。
 
 ## 作業規則
 

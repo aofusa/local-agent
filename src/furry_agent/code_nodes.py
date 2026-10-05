@@ -10,6 +10,9 @@
                   ``sandbox_lock`` (not the job lock: the container is capped at 2 GB and the 27B may stay)
     observe       success -> answer. A failure goes back to the 27B for a fix and to a new confirmation, at most
                   2 runs in total (first + one fix)
+
+When the control loop called the code branch, every end goes to controller_record instead of END; the approval
+card stays (the loop never skips it).
 """
 
 from __future__ import annotations
@@ -24,8 +27,9 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 
 from furry_agent import coding, sandbox
-from furry_agent.chat_common import (ChatState, _ask, _cleanup, _conf, _decision, _edited_args, _fail, _final, _held,
-                                     _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock, _progress, _prompt, _settings, log)
+from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, _cleanup, _conf, _decision, _edited_args, _fail,
+                                     _final, _held, _hitl, _history, _image_tab_busy, _is_think, _lmstudio, _lock,
+                                     _progress, _prompt, _settings, controlled, end_or_record, log)
 from furry_agent.config import REPO_ROOT, ChatSettings
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
@@ -78,6 +82,9 @@ async def _generate(state: ChatState, config: RunnableConfig, settings: ChatSett
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     else:
         messages = [{"role": "system", "content": system}, *_history(state, 6)]
+        if controlled(state):
+            # The control loop's request for this tool (the thread's last turn may be an earlier tool's output).
+            messages.append({"role": "user", "content": code["request"]})
     token = state.get("lock_token")
     try:
         token = await _lock(state, config, settings)
@@ -124,7 +131,7 @@ async def code_plan(state: ChatState, config: RunnableConfig) -> dict:
 
 
 def _after_plan(state: ChatState) -> str:
-    return END if state.get("error") else "write_files"
+    return end_or_record(state) if state.get("error") else "write_files"
 
 
 def _answer(code: dict, head: str) -> str:
@@ -169,7 +176,7 @@ async def write_files(state: ChatState, config: RunnableConfig) -> dict:
 def _after_files(state: ChatState) -> str:
     code = state.get("code") or {}
     if state.get("error") or not _is_think(state) or code.get("skipped"):
-        return END
+        return end_or_record(state)
     return "confirm_run"
 
 
@@ -247,7 +254,7 @@ async def confirm_run(state: ChatState, config: RunnableConfig) -> dict:
 
 def _after_confirm(state: ChatState) -> str:
     if state.get("error"):
-        return END
+        return end_or_record(state)
     return "sandbox_exec" if (state.get("code") or {}).get("approved") else "confirm_run"
 
 
@@ -321,7 +328,7 @@ async def sandbox_exec(state: ChatState, config: RunnableConfig) -> dict:
 
 
 def _after_exec(state: ChatState) -> str:
-    return END if state.get("error") or (state.get("code") or {}).get("skipped") else "observe"
+    return end_or_record(state) if state.get("error") or (state.get("code") or {}).get("skipped") else "observe"
 
 
 def _result_text(code: dict) -> str:
@@ -363,8 +370,8 @@ async def observe(state: ChatState, config: RunnableConfig) -> dict:
 def _after_observe(state: ChatState) -> str:
     code = state.get("code") or {}
     if state.get("error") or code.get("last_ok") or code.get("round", 0) >= sandbox.MAX_RUNS:
-        return END
-    return "write_files" if code.get("fixing") and code.get("files") else END
+        return end_or_record(state)
+    return "write_files" if code.get("fixing") and code.get("files") else end_or_record(state)
 
 
 def add_nodes(builder: Any) -> None:
@@ -373,8 +380,8 @@ def add_nodes(builder: Any) -> None:
     builder.add_node("confirm_run", confirm_run)
     builder.add_node("sandbox_exec", sandbox_exec)
     builder.add_node("observe", observe)
-    builder.add_conditional_edges("code_plan", _after_plan, ["write_files", END])
-    builder.add_conditional_edges("write_files", _after_files, ["confirm_run", END])
-    builder.add_conditional_edges("confirm_run", _after_confirm, ["sandbox_exec", "confirm_run", END])
-    builder.add_conditional_edges("sandbox_exec", _after_exec, ["observe", END])
-    builder.add_conditional_edges("observe", _after_observe, ["write_files", END])
+    builder.add_conditional_edges("code_plan", _after_plan, ["write_files", CONTROL_RECORD, END])
+    builder.add_conditional_edges("write_files", _after_files, ["confirm_run", CONTROL_RECORD, END])
+    builder.add_conditional_edges("confirm_run", _after_confirm, ["sandbox_exec", "confirm_run", CONTROL_RECORD, END])
+    builder.add_conditional_edges("sandbox_exec", _after_exec, ["observe", CONTROL_RECORD, END])
+    builder.add_conditional_edges("observe", _after_observe, ["write_files", CONTROL_RECORD, END])

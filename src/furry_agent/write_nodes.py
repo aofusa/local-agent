@@ -12,6 +12,7 @@
 
 The writer is always the LM Studio 27B; the search models and the image prompts are never used for writing.
 The job lock is released before every interrupt so the image tab is not blocked while the user reads.
+When the control loop called the writer, every end goes to controller_record instead of END (the interrupts stay).
 """
 
 from __future__ import annotations
@@ -24,9 +25,9 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 
 from furry_agent import search_agent as sa, writing
-from furry_agent.chat_common import (ChatState, _ask, capped, _cleanup, _decision, _edited_args, _fail, _final, _held, _hitl,
-                                     _is_think, _lmstudio, _lock, _progress, _prompt, _settings,
-                                     _usage, log)
+from furry_agent.chat_common import (CONTROL_RECORD, ChatState, _ask, capped, _cleanup, _decision, _edited_args, _fail,
+                                     _final, _held, _hitl, _is_think, _lmstudio, _lock, _progress, _prompt, _settings,
+                                     _usage, end_or_record, log)
 from furry_agent.job_lock import JobLockBusy
 from furry_agent.llm_client import LLMError
 
@@ -110,7 +111,7 @@ async def write_brief(state: ChatState, config: RunnableConfig) -> dict:
 
 
 def _after_brief(state: ChatState) -> str:
-    return END if state.get("error") else "write_draft"
+    return end_or_record(state) if state.get("error") else "write_draft"
 
 
 async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
@@ -162,7 +163,7 @@ async def write_draft(state: ChatState, config: RunnableConfig) -> dict:
 
 def _after_draft(state: ChatState) -> str:
     if state.get("error") or not _is_think(state):
-        return END
+        return end_or_record(state)
     return "write_revise"
 
 
@@ -215,9 +216,9 @@ async def write_revise(state: ChatState, config: RunnableConfig) -> dict:
 
 def _after_revise(state: ChatState) -> str:
     if state.get("error"):
-        return END
+        return end_or_record(state)
     artifact = state.get("artifact") or {}
-    return "chapter_confirm" if artifact.get("long") and _chapter(artifact) else END
+    return "chapter_confirm" if artifact.get("long") and _chapter(artifact) else end_or_record(state)
 
 
 async def chapter_confirm(state: ChatState, config: RunnableConfig) -> dict:
@@ -243,7 +244,7 @@ async def chapter_confirm(state: ChatState, config: RunnableConfig) -> dict:
 
 
 def _after_confirm(state: ChatState) -> str:
-    return END if state.get("error") else "write_draft"
+    return end_or_record(state) if state.get("error") else "write_draft"
 
 
 def add_nodes(builder: Any) -> None:
@@ -251,7 +252,7 @@ def add_nodes(builder: Any) -> None:
     builder.add_node("write_draft", write_draft)
     builder.add_node("write_revise", write_revise)
     builder.add_node("chapter_confirm", chapter_confirm)
-    builder.add_conditional_edges("write_brief", _after_brief, ["write_draft", END])
-    builder.add_conditional_edges("write_draft", _after_draft, ["write_revise", END])
-    builder.add_conditional_edges("write_revise", _after_revise, ["chapter_confirm", END])
-    builder.add_conditional_edges("chapter_confirm", _after_confirm, ["write_draft", END])
+    builder.add_conditional_edges("write_brief", _after_brief, ["write_draft", CONTROL_RECORD, END])
+    builder.add_conditional_edges("write_draft", _after_draft, ["write_revise", CONTROL_RECORD, END])
+    builder.add_conditional_edges("write_revise", _after_revise, ["chapter_confirm", CONTROL_RECORD, END])
+    builder.add_conditional_edges("chapter_confirm", _after_confirm, ["write_draft", CONTROL_RECORD, END])

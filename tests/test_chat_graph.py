@@ -53,7 +53,7 @@ def _settings(models_dir, **kw) -> ChatSettings:
     d, exe, catalog = models_dir
     kw.setdefault("code_dir", d.parent / "code")
     # The search tests below check the synthesis as it was before claim verification (CLAIM_VERIFY=0 keeps that
-    # path); tests/test_claims_docs_graph.py covers the verified path and /docs.
+    # path); tests/test_claims_graph.py covers the verified path.
     kw.setdefault("claim_verify", False)
     return replace(ChatSettings(), llama_server=str(exe), models_dir=d, rank_path=d / "missing-rank.json",
                    catalog_path=catalog, logs_dir=d.parent / "logs", job_lock_timeout_s=0.2, sandbox_wait_s=0.5,
@@ -132,9 +132,30 @@ class FakeLLM:
         if "careful programmer" in system:
             w.code_inputs.append(user)
             return ChatReply(w.code_replies.pop(0) if w.code_replies else CODE_REPLY)
+        if "道具を選ぶ制御役" in system:
+            w.controller_inputs.append(user)
+            if w.controller_replies:
+                reply = w.controller_replies.pop(0)
+                return ChatReply(reply if isinstance(reply, str) else json.dumps(reply))
+            return ChatReply(json.dumps(default_decision(user)))
         if "ローカルの日本語アシスタント" in system:
             return ChatReply("こんにちは！", reasoning="会話の思考" if kw.get("thinking") else "")
         raise AssertionError(f"unexpected prompt: {system[:60]}")
+
+
+def default_decision(user: str) -> dict:
+    """The fake controller: search first when the request asks for facts, then write or code, then final."""
+    request = user.split("これまでの道具の結果", 1)[0]
+    used = re.findall(r"^\d+\. (search|write|code)「", user, re.MULTILINE)
+    if "残りの手数: 0" in user:
+        return {"action": "final", "answer": "最終回答です。"}
+    if "search" not in used and re.search(r"調べ|検索", request):
+        return {"action": "tool", "tool": "search", "text": "調べる: " + request[8:60].strip(), "reason": "事実が要る"}
+    if "write" not in used and re.search(r"小説|手順書|記事|メモ", request):
+        return {"action": "tool", "tool": "write", "text": "書く: " + request[8:60].strip(), "reason": "文書が成果物"}
+    if "code" not in used and re.search(r"スクリプト|コード|プログラム", request):
+        return {"action": "tool", "tool": "code", "text": "1 から 3 を表示する Python スクリプト", "reason": "コード"}
+    return {"action": "final", "answer": "最終回答です。", "reason": "材料が揃った"}
 
 
 class FakeLMStudio(FakeLLM):
@@ -274,6 +295,8 @@ class World:
         self.chapters = 1
         self.drafts = 0
         self.code_replies: list[str] = []
+        self.controller_inputs: list[str] = []
+        self.controller_replies: list = []
 
 
 def _config(world, settings, lmstudio=None, comfy=None, mode=None, task=None, docker=None, thread="t"):

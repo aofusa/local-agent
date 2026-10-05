@@ -149,14 +149,6 @@ def test_drop_nothing_keeps_text():
     assert cv.drop_sentences(text, set()) == (text, [])
 
 
-def test_doc_cards_are_numbered_in_order():
-    cards = [{"locator": "a.md#x", "quote": "q1", "note": "n1", "verified": True, "chunk_id": "f1-c1"},
-             {"locator": "b.md#y", "quote": "q2", "note": "", "verified": False, "chunk_id": "f2-c1"}]
-    ev = cv.number_doc_cards(cards)
-    assert [(c["n"], c["evidence_id"], c["source_type"], c["chunk_id"]) for c in ev] == [
-        (1, "e1", "file", "f1-c1"), (2, "e2", "file", "f2-c1")]
-    assert "e1 [1] a.md#x" in cv.evidence_block(ev) and "（引用未確認）" in cv.evidence_block(ev)
-
 
 def test_injection_text_stays_data():
     ev = [{"evidence_id": "e1", "n": 1, "source_type": "web", "locator": "u", "title": "t",

@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-TAB_LABELS = {"image": "画像タブ", "chat": "チャットタブ"}
+TAB_LABELS = {"image": "画像タブ", "chat": "チャットタブ", "coder": "CUI（cirka）"}
 
 
 class JobLockBusy(RuntimeError):

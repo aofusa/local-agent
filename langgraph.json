@@ -5,6 +5,7 @@
     "image": "./src/furry_agent/graph.py:graph",
     "chat": "./src/furry_agent/chat_graph.py:graph"
   },
+  "http": {"app": "./src/furry_agent/coder_app.py:app"},
   "env": ".env",
   "python_version": "3.12"
 }

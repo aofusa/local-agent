@@ -63,17 +63,27 @@ class ChatState(MessagesState):
     # The code branch of this run (§5.2)
     code: dict[str, Any]
     # Claim verification (docs/claim-verification-design.md §5.4): the cards every claim is checked against
-    # (search cards or local-document cards, numbered once), the claims and their verdicts, the audit of the
+    # (the search cards, numbered once), the claims and their verdicts, the audit of the
     # final text, and why verification failed ("" when it did not).
     evidence: Annotated[list[dict], _append]
     claims: list[dict]
     claim_audit: list[dict]
     verify_error: str | None
-    # Local documents (/docs; docs/local-doc-mapreduce-design.md §5.6)
-    doc_root_hit: str
-    doc_files: list[dict]
-    doc_chunks: list[dict]
-    doc_waves: int
+    # The control loop (docs/autonomous-controller-design.md §6): active, steps, trace, decision, answer ...
+    control: dict[str, Any]
+
+
+CONTROL_RECORD = "controller_record"
+
+
+def controlled(state) -> bool:
+    """This run is the control loop: the end of a tool goes back to controller_record instead of END."""
+    return bool((state.get("control") or {}).get("active"))
+
+
+def end_or_record(state) -> str:
+    """END for the single-tool paths; controller_record when the control loop called the tool (§5.2)."""
+    return CONTROL_RECORD if controlled(state) else "__end__"
 
 
 class StageError(RuntimeError):
@@ -166,9 +176,6 @@ def _kwargs(state: ChatState, trace: dict | None = None, *, thinking: bool = Fal
     claims = claim_trace(state)
     if claims:
         out["claim_trace"] = claims
-    docs = doc_trace(state)
-    if docs:
-        out["doc_trace"] = docs
     if thinking and _is_think(state):
         thoughts = [t for t in state.get("thinking") or [] if t.get("text")]
         if thoughts:
@@ -191,21 +198,6 @@ def claim_trace(state) -> dict | None:
             "evidence": [{"n": c["n"], "locator": c["locator"], "source_type": c.get("source_type", "web")}
                          for c in evidence][:30]}
 
-
-def doc_trace(state) -> dict | None:
-    """What /docs read (UI: doc_trace): the root, the files, the denied names, the chunks read per wave."""
-    if not state.get("doc_root_hit"):
-        return None
-    chunks = state.get("doc_chunks") or []
-    return {"root": state["doc_root_hit"], "files": [{"rel": f["rel"], "size": f.get("size", 0),
-                                                       "truncated": bool(f.get("truncated"))}
-                                                      for f in state.get("doc_files") or [] if not f.get("reason")][:40],
-            "denied": [{"rel": f["rel"], "reason": f["reason"]} for f in state.get("doc_files") or []
-                       if f.get("reason")][:40],
-            "waves": state.get("doc_waves", 0),
-            "read": [{"id": c["id"], "locator": c["locator"], "wave": c.get("wave", 0)} for c in chunks if c.get("read")],
-            "unread": sum(1 for c in chunks if not c.get("read")),
-            "total": len(chunks)}
 
 
 def _progress(state: ChatState, text: str, trace: dict | None = None, *, task: dict | None = None) -> AIMessage:
