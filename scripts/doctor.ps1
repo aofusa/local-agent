@@ -154,7 +154,11 @@ Check "probe rank (tools\bonsai\rank.json)" {
     ($rank.order.PSObject.Properties | ForEach-Object { "$($_.Name)=$(@($_.Value)[0])" }) -join " "
 } -Optional
 Check "no orphan llama-server" {
-    $orphans = @(Get-Process llama-server -ErrorAction SilentlyContinue)
+    # The 27B's router (listening on LLM_PORT) and the model processes it starts are not search workers.
+    $router = @(Get-NetTCPConnection -State Listen -LocalPort $LLMPort -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
+    $children = @(Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $router -contains $_.ParentProcessId } | ForEach-Object { $_.ProcessId })
+    $orphans = @(Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin ($router + $children) })
     if ($orphans) { throw "残っています: PID $($orphans.Id -join ', ')（検索中でなければ Stop-Process で止めてください）" }
     "none"
 } -Optional
