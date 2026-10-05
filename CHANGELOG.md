@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.0 — cirka の auto モードと新しい画面、`/docs` の削除
+
+- cirka: 許可モード `auto` を足し、既定にした。編集とコマンドを確認なしで実行し、git push / reset --hard / clean -f、再帰的な削除、ダウンロードをそのまま実行、sudo、公開（npm / cargo publish）、ディスク・電源・レジストリの操作など、取り返しがつかないか外へ出るコマンドだけ確認する（`policy::guarded`）。`default` / `accept-edits` / `plan` / `bypass` はそのまま使える。Shift+Tab で auto → 確認 → 編集は自動 → plan を巡回する。
+- cirka の画面を Claude Code に倣って作り直した: ロゴ入りのウェルカム枠、枠付きの入力欄（複数行、履歴、Tab 補完、貼り付け）と許可モードの行、`⏺` / `⎿` のブロックで流れる応答とツール、行番号付きの色付き差分、☐ / ◼ / ☒ のタスク一覧、経過秒数付きのスピナー、矢印キーで選ぶ確認メニュー。`/auto`、`/logo`、`/clear` と `cirka logo` を足した。
+- ロゴ: `docs/logo/cirka-icon.jpg`（鷹と円と「式」の札）と `cirka-logo.jpg`（「cirka」と赤い点）を、`scripts/gen_cirka_art.py` で端末用の小さなビットマップ（`cirka/src/art_data.rs`）にし、▀ ▄ █ で描く。24 ビット色の端末ではロゴの赤、ほかは端末の赤。端末の大きさで大小を選ぶ。
+- エージェント本体（チャットタブ）から `/docs`（ローカル文書の map-reduce）を削除した。`doc_resolve` / `doc_chunk` / `doc_nodes`、そのプロンプト、`LOCAL_DOC_ROOTS` と `DOC_*` の設定、UI の「ローカル文書」の折りたたみ、設計書 `docs/local-doc-mapreduce-design.md` を消した。行頭の `/docs` はふつうの文として振り分ける。主張の検証は検索の回答に残る。
+- cirka のほかの機能（ツール、ホストの検索と画像、接続先の設定、セッション、undo、compact）は変えていない。
+
 ## v0.7.0 — 自律モード（制御ループ）と CUI cirka
 
 - チャットタブの自律モード（`docs/autonomous-controller-design.md`）: 思考モードで、検索・文章・コードのうち 2 つ以上、または「調べてから」「根拠を確認して」「動くか試して直して」のように結果で次が決まる依頼は、27B が 1 手ずつ JSON で次の道具（検索 / 文章 / コード / 画像タブ案内）か最終回答を選ぶ。道具は既存の流れ（`plan` / `write_brief` / `code_plan`）にそのまま入り、終わると要約だけが制御へ戻る（`controller_record`）。上限は 3 手（`CONTROLLER_MAX_STEPS`、最大 4）と 20 分（`SEARCH_WALL_CLOCK_S` 以内、`CONTROLLER_WALL_CLOCK_S`）。同じ道具を同じ依頼文で二度呼ばない。JSON が読めなければ 1 回だけ聞き直し、だめなら短い失敗文で終える。章の確認とコンテナ実行の承認カードは残り、却下すると制御も終わる。画像は生成せず画像タブへ案内する（`graph.py` は呼ばない）。「自動」はこの形の依頼で思考を選ぶ。接頭辞、添付、`/docs`、続き、速いモードは今までどおり 1 つの道具で処理する。グラフは増やしていない。

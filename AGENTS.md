@@ -150,7 +150,7 @@ Qwen3-0.6B-heretic は旧形式のルータの検証に落ちたため、フィ�
 - エージェントループは cirka 側に置く。ツール（ファイルの一覧・検索・読み取り・編集・作成、シェル、タスク一覧、質問）は cirka を起動した端末のワークスペースの中だけで実行する。ホストはツールを実行しない。
 - ホストの `POST /coder/turn` は無状態の 1 ターン（SSE: status / thinking / token / tool_call / done / error）。会話やファイルの断片をスレッドやログに残さない（ログは件数と秒数だけ）。システムプロンプトを書き換えない。`job_lock` を握り、画像タブ・チャットタブと同時に LM Studio を使わない。LangGraph の `langgraph.json` の `http.app`（`src/furry_agent/coder_app.py`）で載せ、グラフは増やさない。
 - 検索と画像は既存のグラフ（`chat` の `configurable.task=search`、`agent`）を `/runs/stream` で呼ぶ。cirka は LM Studio・ComfyUI・Tor へ直接つながない。返った画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを渡す。
-- 編集とコマンドは利用者の確認のあとに実行する（`accept-edits` は編集だけ自動、`plan` は実行しない、`bypass` は明示したときだけ）。ワークスペースの外と秘密ファイル（`.env`、鍵、`credentials*` など）はどのモードでも扱わない。
+- 許可モードの既定は `auto`（利用者の指定、v0.8.0）: 編集とコマンドを確認なしで実行し、`policy::guarded` の一覧（push、reset --hard、再帰的な削除、ダウンロードの直接実行、sudo、公開、ディスク・電源・レジストリ）に当たるコマンドだけ確認する。`default` は編集とコマンドの前に確認、`accept-edits` は編集だけ自動、`plan` は実行しない、`bypass` はすべて確認なしで明示したときだけ。Shift+Tab は auto / default / accept-edits / plan を巡回し、bypass には入らない。ワークスペースの外と秘密ファイル（`.env`、鍵、`credentials*` など）はどのモードでも扱わない。
 - 認証は足さない（ヘッダの差し込み口 `auth_header` だけ）。
 
 ## 画像の保存と UI への返却
@@ -185,7 +185,10 @@ src/                              LangGraph のグラフ、役割推定（planne
                                   control_nodes（自律モード）、coder_gate / coder_app（cirka 向けの /coder/turn）
 docs/autonomous-controller-design.md            チャットタブの自律モード（制御ループ）の設計と実装記録
 docs/locus-cui-design.md                        CUI cirka とモデルゲートの設計と実装記録
-cirka/                            CUI（Rust、単一バイナリ）。cirka/target/ は git に含めない
+cirka/                            CUI（Rust、単一バイナリ）。cirka/target/ は git に含めない。tui.rs が Claude Code に倣った画面、
+                                  art.rs と art_data.rs（生成物）がロゴの端末用の絵
+docs/logo/                        cirka のロゴ（cirka-icon.jpg、cirka-logo.jpg、cirka-design.jpg）
+scripts/gen_cirka_art.py          docs/logo の画像から cirka/src/art_data.rs（半角ブロック用のビットマップ）を作る
 docs/chat-deep-search-creative-sandbox.md       チャットタブの深い検索、文章、コード、モードの設計と実装記録
 docs/claim-verification-design.md               主張単位の検証の設計と実装記録
 comfyui_nodes/furry_ja/           ComfyUI カスタムノード（split / ckpt / image-after / release）。custom_nodes へリンクする
@@ -306,6 +309,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の上限は `CLAIM_TIMEOUT_S`（600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かない）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
 - IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は README の「調整の記録」。
 - 自律モード（`docs/autonomous-controller-design.md` 末尾の実装記録）: 制御のノードは `control_nodes.py` に置き（write_nodes / code_nodes と同じ形）、Decision のスキーマもそこに置く。道具のメッセージはその id のまま残し、制御のメッセージには新しい id を振る（道具の出力を上書きしない）。文章のあとの最終回答は本文を繰り返さない。利用者が章の確認やコンテナ実行を却下したら、制御もそこで終える。
+- CUI の画面（v0.8.0）: Claude Code に倣い、ロゴ入りの枠、枠付きの入力欄と許可モードの行、`⏺` / `⎿` のブロック、差分、スピナー、矢印キーのメニュー。生のキー入力（raw mode）は入力欄とメニューのあいだだけ使い、出力は通常の行のまま（パイプや `-p` でも読める）。ロゴは画像のまま出せないので、`scripts/gen_cirka_art.py` が `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を小さなビットマップにし、▀ ▄ █ で描く（24 ビット色の端末ではロゴの赤 #D63A2F）。
 - CUI（`docs/locus-cui-design.md` 末尾の実装記録）: コマンド名は `cirka`。設定は `%APPDATA%\cirka\config.toml`（XDG）< `./.cirka/config.toml` < `CIRKA_HOST` など < `--host`。モデルゲートは素の `POST /coder/turn`（LangGraph のスレッドを使わない）で、`GET /coder/health` が文脈の大きさを返す。27B の tool calling は LM Studio のネイティブの解析で足りた（XML の自前解析は入れていない）。cirka は context 4096 に合わせ、ツールの説明を短くし、古い結果を 1 行に潰して収める。
 
 ## 作業規則

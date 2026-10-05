@@ -18,7 +18,7 @@ Windows 機の上で次の順に処理して静止画を返すローカルエー
 検索の回答は、主張ごとに出典の抜粋と突き合わせ、支持された主張だけで書き、最後に文ごとに監査して支持されない文を削除します。
 「調べてから手順書にして」のように道具を順に使う依頼は、思考モード（または自動）で **自律モード** になり、27B が検索・文章・コード・画像タブ案内を結果を見ながら選び直します（最大 3 手。「4. 使い方 › 自律モード」）。
 
-端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で（編集とコマンドは確認のうえで）実行します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
+端末から使う CUI **cirka**（Rust 製、Windows / macOS / Linux）も同梱しています。作業ディレクトリで `cirka` を起動すると、この端末の 27B が次の一手を決め、ファイルの検索・読み取り・編集やビルド・テストのコマンドを、その PC の上で実行します（既定の auto モードは確認なし。push や再帰的な削除など危険な操作だけ確認します）。画面は Claude Code に倣った形で、`docs/logo` のロゴを端末用の絵にして表示します。接続先のホストは設定で変えられます（「4. 使い方 › CUI（cirka）」）。
 
 クラウド API は使いません。すべてローカルで動きます（検索の通信は Tor の出口だけを通ります）。
 
@@ -524,14 +524,15 @@ cirka config show                                # 実際に使われる値と�
 cirka status                                     # ホストに届くか、モデルと文脈の大きさ
 ```
 
-優先順位は「既定 < ユーザー設定 < プロジェクト設定 < 環境変数（`CIRKA_HOST` ほか） < コマンドライン（`--host`）」です。実行中は `/host http://… [--save]` で切り替えられます。そのほかのキー: `mode`（fast / think / auto）、`permission`（default / accept-edits / plan / bypass）、`shell`（auto / pwsh / powershell / cmd / bash / sh）、`max_turns`、`locale`、`auth_header`（`Name: value`。認証方式は未確定なので既定は空。ヘッダを付ける差し込み口だけです）、`idle_timeout_s` / `search_timeout_s` / `image_timeout_s`。
+優先順位は「既定 < ユーザー設定 < プロジェクト設定 < 環境変数（`CIRKA_HOST` ほか） < コマンドライン（`--host`）」です。実行中は `/host http://… [--save]` で切り替えられます。そのほかのキー: `mode`（fast / think / auto）、`permission`（auto / default / accept-edits / plan / bypass。既定は auto）、`shell`（auto / pwsh / powershell / cmd / bash / sh）、`max_turns`、`locale`、`auth_header`（`Name: value`。認証方式は未確定なので既定は空。ヘッダを付ける差し込み口だけです）、`idle_timeout_s` / `search_timeout_s` / `image_timeout_s`。
 
 #### 使い方
 
 ```
 $ cd ~/src/some-project
 $ cirka                         # 対話（REPL）
-$ cirka -p "テストが落ちる原因を調べて直して" --permission accept-edits   # 1 回だけ実行して終わる
+$ cirka -p "テストが落ちる原因を調べて直して"   # 1 回だけ実行して終わる（auto なので確認なし）
+$ cirka logo                    # ロゴを表示
 $ cirka --resume                # このディレクトリの直前のセッションを再開
 ```
 
@@ -540,16 +541,34 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 | ツール | 内容 | 既定の許可 |
 |---|---|---|
 | `list_dir` / `glob` / `grep` / `read_file` | 一覧、パターン検索、正規表現検索（.gitignore と `.cirkaignore` に従う）、行番号付きの読み取り | 自動 |
-| `edit_file` | 一意に一致する原文を置き換える（先に `read_file` したファイルだけ。CRLF を保つ） | 差分を見せて確認 |
-| `write_file` | 新規作成、または読んだファイルの置き換え | 差分を見せて確認 |
-| `bash` | シェルのコマンド（Windows は PowerShell、ほかは `sh -lc`）。既定 120 秒・最大 600 秒、出力 64 KiB まで、時間切れや Ctrl-C でプロセスツリーごと止める | 全文を見せて確認 |
+| `edit_file` | 一意に一致する原文を置き換える（先に `read_file` したファイルだけ。CRLF を保つ） | 自動（差分を表示） |
+| `write_file` | 新規作成、または読んだファイルの置き換え | 自動（差分を表示） |
+| `bash` | シェルのコマンド（Windows は PowerShell、ほかは `sh -lc`）。既定 120 秒・最大 600 秒、出力 64 KiB まで、時間切れや Ctrl-C でプロセスツリーごと止める | 自動（危険な操作だけ確認） |
 | `todo_write` / `ask_user` | タスク一覧、利用者への質問 | 自動 |
 | `web_search` | ホストのチャットタブの検索（Tor 経由、出典付き） | 自動 |
 | `image_generate` | ホストの画像タブ（参照画像 0〜4 枚と役割）。画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを返す | 自動 |
 
-確認では `y`（実行）/ `n`（拒否。理由はモデルに伝わる）/ `a`（以後この種類は確認しない）/ `q`（依頼を止める）を選びます。`/accept-edits` で編集は自動、`/plan` で変更とコマンドは提案だけ、`--permission bypass` で確認なし（シェルと同じ権限なので明示したときだけ）。どのモードでも、ワークスペースの外のパス（`..`、外を指すシンボリックリンク）と秘密ファイル（`.env`、`*.pem`、`*.key`、`id_rsa`、`credentials*` など）は扱いません。ツールの結果に鍵らしい文字列があれば `[redacted]` にしてから送ります（完全ではありません）。
+許可モード（入力欄の下に表示。Shift+Tab で auto → 確認 → 編集は自動 → plan の順に切り替え、`/auto` などのコマンドでも変えられます）:
 
-スラッシュコマンド: `/help`、`/status`、`/host`、`/mode`、`/plan`、`/accept-edits`、`/default`、`/cd`、`/undo`（直前の編集を戻す）、`/compact`（会話を要約して文脈を空ける）、`/search`、`/image`、`/todos`、`/resume`、`/forget`（いまのセッションのログを消す）、`/quit`。Ctrl-C は実行中のツールやモデルの応答を止め、待機中に 2 回押すと終了します。行末の `\` で複数行を入力できます。
+| モード | 編集 | コマンド |
+|---|---|---|
+| `auto`（既定） | 確認なし | 確認なし。ただし git push / reset --hard / clean -f、再帰的な削除（`rm -rf`、`Remove-Item -Recurse`、`rmdir /s`）、ダウンロードをそのまま実行（`curl … \| sh`、`iwr … \| iex`）、sudo、公開（npm / cargo publish）、ディスクや電源やレジストリの操作などは確認する |
+| `default` | 差分を見せて確認 | 全文を見せて確認 |
+| `accept-edits` | 確認なし | 確認 |
+| `plan` | 実行しない（提案だけ） | 実行しない |
+| `bypass` | 確認なし | 確認なし（危険な操作も。シェルと同じ権限なので `--permission bypass` で明示したときだけ） |
+
+確認は矢印キー（または数字）で選ぶメニューです: はい / はい、以後この種類は確認しない / いいえ（理由がモデルに伝わる）/ 依頼を止める（Esc）。`-p` の 1 回実行は対話できないので、確認が要る操作は実行しません。どのモードでも、ワークスペースの外のパス（`..`、外を指すシンボリックリンク）と秘密ファイル（`.env`、`*.pem`、`*.key`、`id_rsa`、`credentials*` など）は扱いません。ツールの結果に鍵らしい文字列があれば `[redacted]` にしてから送ります（完全ではありません）。
+
+スラッシュコマンド: `/help`、`/status`、`/host`、`/mode`、`/auto`、`/default`、`/accept-edits`、`/plan`、`/cd`、`/undo`（直前の編集を戻す）、`/compact`（会話を要約して文脈を空ける）、`/search`、`/image`、`/todos`、`/resume`、`/forget`（いまのセッションのログを消す）、`/logo`、`/clear`、`/quit`。
+
+画面（Claude Code に倣った形）:
+
+- 起動すると枠の中にロゴ（`docs/logo/cirka-icon.jpg` の鷹と円と「式」の札、`cirka-logo.jpg` の「cirka」と赤い点）と、作業ディレクトリ・接続先・モデルを出します。ロゴは端末で描けないので、`scripts/gen_cirka_art.py` が画像から作った小さなビットマップ（`cirka/src/art_data.rs`）を半角ブロック（▀ ▄ █）で描きます。色は 24 ビット色が使える端末（Windows Terminal、`COLORTERM=truecolor` など）ではロゴの赤そのもの、ほかは端末の赤です。端末の幅と高さに合わせて大小を選び、狭いときは文字だけにします。
+- 入力は枠付きの欄で、Enter で送信、Shift+Enter / Alt+Enter / 行末の `\` で改行、↑↓ で履歴、Tab でコマンド補完、Ctrl-C で入力を消す（空なら 2 回で終了）。貼り付けた複数行はそのまま入ります。
+- 応答は `⏺` で始まるブロックとして流れ、ツール呼び出しは `⏺ Read(src/main.rs)` のように 1 行、結果は `⎿` の下に短く出ます。編集は色付きの差分（行番号付き）、タスク一覧は ☐ / ◼ / ☒ で出します。モデルの応答待ちとツールの実行中は、経過秒数付きのスピナーが回ります（Ctrl-C で中断）。
+
+ロゴを差し替えたら `uv run python scripts/gen_cirka_art.py`（`--preview artifacts/cirka-art.png` で確認用の画像）を実行してから cirka をビルドし直します。
 
 セッションは `%LOCALAPPDATA%\cirka\sessions`（macOS / Linux は `~/.local/share/cirka/sessions`）に JSON Lines で残ります（ツールの結果を含みます）。
 
@@ -647,7 +666,9 @@ src/furry_agent/claim_nodes.py        主張の抽出 → 判定 → （統合�
 src/furry_agent/control_nodes.py      自律モード（controller → 道具の流れ → controller_record → finish）。判断の JSON、予算、重複の禁止
 src/furry_agent/coder_gate.py         cirka 向けの POST /coder/turn（LM Studio の tool calling を SSE で返す。ツールは実行しない）。coder_app.py が langgraph.json の http.app
 prompts/chat/controller.txt           自律モードの判断の system prompt
-cirka/                                CUI（Rust）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs、context.rs、session.rs
+cirka/                                CUI（Rust）。src/agent.rs（ループ）、tools/（ローカルのツールとホストの検索・画像）、host.rs、policy.rs（許可と auto の確認一覧）、context.rs、session.rs、tui.rs（画面）、art.rs / art_data.rs（ロゴの絵）
+docs/logo/                            cirka のロゴ（cirka-icon.jpg、cirka-logo.jpg、cirka-design.jpg）
+scripts/gen_cirka_art.py              docs/logo の画像から cirka のロゴの絵（cirka/src/art_data.rs）を作る
 scripts/build-cirka.ps1               cirka のリリースビルドと zip（dist/）
 src/furry_agent/search_agent.py       検索のスキーマ（Pydantic）、ページの絞り込み、引用の照合、統合への入力
 src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文取得、URL の許可判定

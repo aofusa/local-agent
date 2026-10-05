@@ -504,3 +504,10 @@ v2 候補: MCP クライアント、サブエージェント、plan の永続化
 - この端末（ROG Ally X、27B IQ3_M、context 4096）での実行:
   - ゲート単体: grep のツール定義を渡した 1 ターンで、27B が `grep` の tool_call を正しい JSON 引数で返した（134 秒、モデルのロード込み）。
   - cirka: テストが落ちる小さな Python プロジェクトで `cirka --mode fast --permission accept-edits -p "test_calc.py のテストが落ちる原因を調べて src/calc.py を直してください。"`。todo_write（3 項目）→ read_file × 2 → edit_file（`a - b` → `a + b`、確認なしで書き込み）→ bash（pytest。非対話なので拒否）→ 別の引数で bash（拒否）→ todo_write（確認の項目を blocked）→ 最終文（直したこと、手で確認するコマンド）。7 ターン、約 10 分 30 秒（1 ターン 23〜205 秒）。直したあとのテストは 2 件とも合格。
+
+### 17.4 v0.8.0 の変更
+
+- **許可モード `auto` を既定にした**（利用者の指定）。§8 の表に `auto` を足す: 読取・編集・コマンドを確認なしで実行する。ただし `policy::guarded` の一覧に当たるコマンド（git push / reset --hard / clean -f / 変更の一括破棄 / ブランチの強制削除、再帰的な削除、ディスクの初期化や dd、電源、sudo・runas、レジストリと実行ポリシー、ダウンロードの直接実行、npm・cargo の publish、Docker の prune、権限の一括変更）は確認する。§15 の 5（シェルは常に確認）は、この指定で置き換えた。`default` / `accept-edits` / `plan` / `bypass` は残し、Shift+Tab で auto → default → accept-edits → plan を巡回する（bypass は明示したときだけ）。
+- **画面を Claude Code に倣って作り直した**（§9。v1 の「ストリーミング REPL」の範囲で、TUI フレームワークは入れていない）: ロゴ入りのウェルカム枠、枠付きの入力欄（raw mode。複数行、履歴、Tab 補完、貼り付けの判定）と許可モードの行、`⏺` / `⎿` のブロック、行番号付きの差分、タスク一覧、スピナー、矢印キーの確認メニュー。raw mode は入力欄とメニューのあいだだけで、出力は通常の行なので `-p` やパイプでも読める。Windows はキーを離したイベントも届くので、貼り付けの判定（Enter の直後に次のキーが待っている）では離したイベントを数えない。
+- **ロゴ**: `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を `scripts/gen_cirka_art.py` が小さなビットマップ（`cirka/src/art_data.rs`、生成物をコミット）にし、半角ブロック（▀ ▄ █）で 1 文字 = 縦 2 画素として描く。アイコンは 22 / 14 画素幅、文字は 44 / 30 画素幅。端末の幅と高さで選ぶ。
+- 確認: `cargo test`（65 件）、ConPTY（pywinpty + pyte）で実際の cirka を動かした画面の確認（ウェルカム枠、Shift+Tab、/help、auto での読み取り → 編集（差分表示）→ コマンド → 最終回答、auto でも `rm -rf` は確認メニューになり「いいえ」がモデルに伝わる）。
