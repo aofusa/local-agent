@@ -159,7 +159,7 @@ $sources = @($ModelsDir | ForEach-Object { $_ -split '[,;]' } | ForEach-Object {
 # that ComfyUI reads tools\comfyui\models only.
 $yaml = Join-Path $dir "extra_model_paths.yaml"
 if (Test-Path $yaml) {
-    foreach ($line in Get-Content $yaml) { if ($line -match "base_path:\s*'?([^']+)'?\s*$") { $sources += $Matches[1].Trim() } }
+    foreach ($line in Get-Content $yaml) { if ($line -match "^\s*base_path:\s*'?([^']+)'?\s*$" -and [IO.Path]::IsPathRooted($Matches[1].Trim())) { $sources += $Matches[1].Trim() } }
 }
 $sources = @(($sources + (Get-KnownModelDirs)) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
 if ($sources) { Write-Ok "取り込み元: $($sources -join '; ')" }

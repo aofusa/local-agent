@@ -237,7 +237,7 @@ function Get-ComfyModelDirs($Layout) {
     $dirs = @($Layout.ModelsDir)
     if ($Layout.ExtraModelPaths -and (Test-Path $Layout.ExtraModelPaths)) {
         foreach ($line in Get-Content $Layout.ExtraModelPaths) {
-            if ($line -match "base_path:\s*'?([^']+)'?\s*$") { $dirs += $Matches[1].Trim() }
+            if ($line -match "^\s*base_path:\s*'?([^']+)'?\s*$" -and [IO.Path]::IsPathRooted($Matches[1].Trim())) { $dirs += $Matches[1].Trim() }
         }
     }
     $dirs
@@ -260,7 +260,7 @@ function Get-KnownModelDirs {
     if (Test-Path $yamls) {
         foreach ($yaml in Get-ChildItem $yamls -Filter "*.yaml" -ErrorAction SilentlyContinue) {
             foreach ($line in Get-Content $yaml.FullName) {
-                if ($line -match "base_path:\s*'?([^']+)'?\s*$") { $dirs += $Matches[1].Trim() }
+                if ($line -match "^\s*base_path:\s*'?([^']+)'?\s*$" -and [IO.Path]::IsPathRooted($Matches[1].Trim())) { $dirs += $Matches[1].Trim() }
             }
         }
     }
