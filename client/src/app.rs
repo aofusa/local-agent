@@ -84,14 +84,14 @@ impl App {
         let host = HostClient::new(&config);
         let ui = Terminal::new(interactive);
         let health = host.health().await;
-        let gate_ok = health.ok && health.gate && health.lmstudio;
+        let gate_ok = health.ok && health.gate && health.llm;
         let context = if health.context > 0 { health.context } else { 4096 };
         let problem = if !health.ok {
             Some(format!("ホストに届きません（{}）。cirka config set host <URL>", health.error.unwrap_or_default()))
         } else if !health.gate {
             Some("ホストに /coder/turn がありません（local-agent が古い）。/search と /image だけ使えます".into())
-        } else if !health.lmstudio {
-            Some("ホストの LM Studio が応答しません。ファイル作業はできません".into())
+        } else if !health.llm {
+            Some("ホストの LLM（llama.cpp）が応答しません。ファイル作業はできません".into())
         } else {
             None
         };
@@ -184,13 +184,13 @@ impl App {
                 self.agent.brain = HostBrain { host: client.clone() };
                 self.agent.tools.host = Some(client.clone());
                 let health = client.health().await;
-                self.gate_ok = health.ok && health.gate && health.lmstudio;
+                self.gate_ok = health.ok && health.gate && health.llm;
                 if health.context > 0 {
                     self.agent.set_context_window(health.context);
                 }
                 self.model = health.model.clone();
                 self.problem = if self.gate_ok { None } else {
-                    Some(health.error.clone().unwrap_or_else(|| "LM Studio 停止か /coder がない".into()))
+                    Some(health.error.clone().unwrap_or_else(|| "ホストの LLM 停止か /coder がない".into()))
                 };
                 let state = if self.gate_ok { "利用できます".to_string() } else {
                     format!("モデルは使えません（{}）", self.problem.clone().unwrap_or_default())
@@ -215,7 +215,7 @@ impl App {
         let h = host.health().await;
         let text = [
             format!("ワークスペース: {}", self.agent.tools.ws.root.display()),
-            format!("ホスト: {}（到達 {}、ゲート {}、LM Studio {}、使用中 {}）", self.config.host, h.ok, h.gate, h.lmstudio,
+            format!("ホスト: {}（到達 {}、ゲート {}、LLM {}、使用中 {}）", self.config.host, h.ok, h.gate, h.llm,
                     h.busy.unwrap_or_else(|| "なし".into())),
             format!("モデル: {}（文脈 {} トークン）", h.model, self.agent.context_window),
             format!("思考: {}  許可: {}  最大ターン: {}", self.agent.mode.as_str(), self.agent.policy.mode.as_str(), self.agent.max_turns),

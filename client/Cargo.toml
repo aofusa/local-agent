@@ -1,8 +1,8 @@
 [package]
 name = "cirka"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
-description = "CUI coding agent that uses a local-agent host (LangGraph + LM Studio) as its model"
+description = "CUI coding agent that uses a local-agent host (LangGraph + llama.cpp) as its model"
 license = "MIT OR Apache-2.0"
 rust-version = "1.85"
 

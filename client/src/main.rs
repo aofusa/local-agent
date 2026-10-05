@@ -1,5 +1,5 @@
 //! cirka: a CUI coding agent for the directory it starts in. The model runs on a local-agent host (LangGraph
-//! `/coder/turn` in front of LM Studio); the tools run here. docs/locus-cui-design.md is the design.
+//! `/coder/turn` in front of the host's llama.cpp router); the tools run here. docs/locus-cui-design.md is the design.
 
 mod agent;
 mod app;
@@ -151,14 +151,14 @@ async fn status(config: &Config) -> ExitCode {
     println!("host:     {}", config.host);
     println!("reachable: {}", h.ok);
     println!("gate:     {}", h.gate);
-    println!("lmstudio: {}", h.lmstudio);
+    println!("llm: {}", h.llm);
     println!("model:    {}", h.model);
     println!("context:  {}", h.context);
     println!("busy:     {}", h.busy.as_deref().unwrap_or("-"));
     if let Some(e) = h.error {
         println!("error:    {e}");
     }
-    if h.ok && h.gate && h.lmstudio { ExitCode::SUCCESS } else { ExitCode::from(2) }
+    if h.ok && h.gate && h.llm { ExitCode::SUCCESS } else { ExitCode::from(2) }
 }
 
 #[tokio::main]
