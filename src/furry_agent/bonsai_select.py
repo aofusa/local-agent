@@ -117,6 +117,8 @@ def free_memory_mb() -> int:
         status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
         return int(status.ullAvailPhys // (1024 * 1024))
+    if sys.platform == "darwin":
+        return _darwin_free_mb()
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
@@ -124,6 +126,31 @@ def free_memory_mb() -> int:
     except OSError:
         pass
     return 0
+
+
+def _darwin_free_mb() -> int:
+    """macOS: free + inactive + speculative + purgeable pages of vm_stat (what the kernel hands out without
+    swapping). Unified memory: Metal (llama.cpp, MLX, ComfyUI on MPS) allocates from the same pool."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return parse_vm_stat(out)
+
+
+def parse_vm_stat(out: str) -> int:
+    import re
+
+    size = re.search(r"page size of (\d+) bytes", out)
+    page = int(size.group(1)) if size else 16384
+    pages = 0
+    for name in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+        match = re.search(rf"{name}:\s+(\d+)", out)
+        if match:
+            pages += int(match.group(1))
+    return pages * page // (1024 * 1024)
 
 
 def available_models(catalog: Catalog, models_dir: Path) -> dict[str, Path]:

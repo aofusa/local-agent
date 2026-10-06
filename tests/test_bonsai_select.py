@@ -104,3 +104,13 @@ def test_unprobed_models_are_allowed_failed_ones_are_not(tmp_path):
     rank = Rank.load(rank_file)
     assert not rank.passed("ternary-8b", "worker") and not rank.passed("bonsai-8b", "worker")
     assert rank.passed("qwen3.5-4b-heretic", "worker")
+
+
+def test_macos_free_memory_from_vm_stat():
+    from furry_agent.bonsai_select import parse_vm_stat
+
+    out = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+           "Pages free:                               65536.\nPages active:                             1000.\n"
+           "Pages inactive:                           65536.\nPages speculative:                        0.\n"
+           "Pages purgeable:                          0.\n")
+    assert parse_vm_stat(out) == 2048
