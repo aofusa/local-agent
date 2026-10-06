@@ -1,0 +1,220 @@
+{
+  "llm_backend": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "qwen3.8-27b-abliterated",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": false,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LLM Backend (llama.cpp router)"
+    }
+  },
+  "user_prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"
+    },
+    "_meta": {
+      "title": "user_prompt (日本語指示)"
+    }
+  },
+  "prompt_node": {
+    "class_type": "LMConnectPromptWithSystem",
+    "inputs": {
+      "system_prompt": "Convert the image request (usually Japanese) into a prompt for a Krea 2 furry model (Wulver) that reads natural English through a Qwen3-VL text encoder. It understands full sentences best; e621/booru tags work only as extra words inside the sentences.\nA \"[Reference image tags]\" section may follow the request. Use those details only where they do not contradict the request; the request wins.\n\nReturn exactly one JSON object and nothing else (no prose outside it, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: natural English, 60 to 120 words, 3 to 6 sentences. Never a bare comma-separated tag list.\n- Order: the main subject (count, gender, species), then pose and action, details (fur/hair/eye colors, markings, clothing and materials, expression), then the background and place, then the light and time of day, then the style or medium.\n- Keep every detail of the request: number of characters and gender, species, colors and markings, clothing, pose and expression, framing and camera angle, lighting, location.\n- Anthro / kemono / 獣人 / ケモノ requests: write \"an anthropomorphic <species> <man/woman> with <traits>\" and add the word \"furry\" once.\n- Always describe the background explicitly (the model leaves it empty otherwise). If the request has none, choose a simple setting that fits the subject.\n- Never write (word:1.2), {word}, BREAK, masterpiece, best quality, 8k, ultra detailed or similar quality buzzwords: describe the look instead.\n- If no style is requested, end with one sentence on the style, e.g. \"Clean digital illustration with soft shading.\" or \"Natural photograph.\" (photo, realistic).\n- Do not invent another subject or setting. All characters are adults; never suggest a minor.\nnegative: one short English line under 30 words (the turbo model ignores it at CFG 1, so keep it short): \"low quality, blurry, deformed\" plus only what the user explicitly asked to avoid. Never leave it empty.\n\nExample request: 青い鱗のケモノのお兄さんが、夕方の神戸港で振り返る\nExample output: {\"positive\":\"An anthropomorphic dragon man with blue scales and a long tail looks back over his shoulder, furry art. He wears an open white shirt and dark trousers, his amber eyes calm. He stands on a stone pier of the Kobe harbor at dusk, with port cranes and moored boats behind him. Warm low sunlight catches the edges of his scales while the sky fades from orange to violet. Clean digital illustration with soft shading.\",\"negative\":\"low quality, blurry, deformed\"}\n\nNever refuse, never comment, never add warnings.",
+      "prompt": [
+        "user_prompt",
+        0
+      ],
+      "backend": [
+        "llm_backend",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "temperature": 0.3,
+      "max_tokens": 480
+    },
+    "_meta": {
+      "title": "prompt_node"
+    }
+  },
+  "eject": {
+    "class_type": "FurryJaEjectLLM",
+    "inputs": {
+      "passthrough": [
+        "prompt_node",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "eject"
+    }
+  },
+  "split": {
+    "class_type": "FurryJaSplitTags",
+    "inputs": {
+      "text": [
+        "eject",
+        0
+      ],
+      "quality_prefix": "",
+      "default_negative": "low quality, blurry, deformed",
+      "prompt_style": "prose"
+    },
+    "_meta": {
+      "title": "split"
+    }
+  },
+  "ckpt": {
+    "class_type": "FurryJaDiffusionLoaderAfterEject",
+    "inputs": {
+      "unet_name": "wulverKrea2_v05_fp8.safetensors",
+      "weight_dtype": "default",
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "clip_type": "krea2",
+      "vae_name": "qwen_image_vae.safetensors",
+      "after": [
+        "eject",
+        0
+      ],
+      "llm_base_url": "http://127.0.0.1:8080/v1"
+    },
+    "_meta": {
+      "title": "ckpt"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        0
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "positive"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        1
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "negative"
+    }
+  },
+  "release": {
+    "class_type": "FurryJaReleaseEncoders",
+    "inputs": {
+      "model": [
+        "ckpt",
+        0
+      ],
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "release"
+    }
+  },
+  "latent": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "latent"
+    }
+  },
+  "sampler": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "release",
+        0
+      ],
+      "seed": 0,
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "release",
+        1
+      ],
+      "negative": [
+        "release",
+        2
+      ],
+      "latent_image": [
+        "latent",
+        0
+      ],
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "sampler"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sampler",
+        0
+      ],
+      "vae": [
+        "ckpt",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "decode"
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "filename_prefix": "furry_ja/krea2"
+    },
+    "_meta": {
+      "title": "save"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Download the text encoder and VAE that the Chroma1-HD family (COMFY_MODEL_FAMILY=flux) needs. Idempotent.
+  Download the text encoder and VAE that the Chroma1-HD family (image model chroma-hd) needs. Idempotent.
 
 .DESCRIPTION
   Chroma1-HD ships as a diffusion model only (no text encoder, no VAE inside the file). The workflow loads:
@@ -60,4 +60,4 @@ if ($found) {
 }
 else { Write-Warn2 "$unet が models\diffusion_models / checkpoints にありません。Chroma1-HD を置いてください（https://huggingface.co/lodestones/Chroma1-HD）" }
 
-Write-Step "完了。.env の COMFY_MODEL_FAMILY=flux と CKPT_NAME で Chroma に切り替え、LangGraph を再起動してください"
+Write-Step "完了。画面のモデル一覧（画像タブ）で Chroma1-HD を選ぶと使えます"

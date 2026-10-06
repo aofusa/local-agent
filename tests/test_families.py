@@ -69,18 +69,15 @@ def test_looks_like_tag_list(text, expected):
     assert looks_like_tag_list(text) is expected
 
 
-def test_settings_family_specific_values(monkeypatch):
+def test_settings_ignore_the_old_model_switches(monkeypatch):
+    # The image model comes from config/host_models.json; COMFY_MODEL_FAMILY / CKPT_NAME / LORAS are not read.
     monkeypatch.setenv("COMFY_MODEL_FAMILY", "flux")
     monkeypatch.setenv("CKPT_NAME", "chroma_v10HD.safetensors")
     monkeypatch.setenv("LORAS", "sdxl_style:0.8")
-    monkeypatch.setenv("CHROMA_LORAS", "")
+    monkeypatch.setenv("CHROMA_UNET_NAME", "other.safetensors")
     monkeypatch.setenv("CHROMA_VAE", "flux_ae.safetensors")
-    monkeypatch.delenv("CHROMA_HD_ENABLED", raising=False)
     settings = Settings.from_env()
-    assert settings.model_family == FLUX
-    assert settings.ckpt_for(FLUX) == "chroma_v10HD.safetensors"
-    assert settings.ckpt_for(SDXL) is None
-    assert settings.loras_for(FLUX) == "" and settings.loras_for(SDXL) == "sdxl_style:0.8"
+    assert not hasattr(settings, "model_family") and not hasattr(settings, "ckpt_name")
     assert settings.model_overrides(FLUX) == {"vae_name": "flux_ae.safetensors"}
     assert settings.model_overrides(SDXL) == {}
 
@@ -94,7 +91,16 @@ def test_chroma_speed_overrides(monkeypatch):
     assert settings.plan_defaults(SDXL, None) == {}
 
 
-@pytest.mark.parametrize("value, family", [("", SDXL), ("sdxl", SDXL), ("flux", FLUX), ("Flux", FLUX)])
-def test_settings_family_comes_from_env_only(monkeypatch, value, family):
-    monkeypatch.setenv("COMFY_MODEL_FAMILY", value)
-    assert Settings.from_env().model_family == family
+@pytest.mark.parametrize("family", ["sdxl", "flux", "krea2", "anima"])
+def test_every_family_has_maps_and_style(family):
+    mapping = load_map(family)
+    assert mapping["prompt_style"] in ("danbooru", "prose")
+    assert {"t2i_basic", "i2i_basic"} <= set(mapping["templates"])
+    for entry in mapping["templates"].values():
+        assert {"steps", "cfg", "sampler_name", "scheduler", "quality_prefix", "negative"} <= set(entry["slots"])
+
+
+def test_new_families_refuse_pose_with_the_model_name():
+    with pytest.raises(FamilyError, match="Wulver"):
+        check_roles(load_map("krea2"), {"img_1": "pose"}, "Wulver (Krea 2)")
+    assert check_roles(load_map("anima"), {"img_1": "base"}) == ({"img_1": "base"}, [], None)

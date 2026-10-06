@@ -4,11 +4,12 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from furry_agent.families import FLUX, SDXL, canonical_family
+from furry_agent.families import FLUX
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Chroma1-HD model files: env name -> template slot. Empty = the value stored in workflows/maps/flux.json.
+# CHROMA_UNET_NAME is no longer read: the image entry's "ckpt" (config/host_models.json) names the model.
 CHROMA_MODEL_ENV = {
     "CHROMA_UNET_NAME": "ckpt_name",
     "CHROMA_TEXT_ENCODER": "clip_name",
@@ -36,15 +37,14 @@ def idle_timeout_from_env() -> float:
 @dataclass(frozen=True)
 class Settings:
     comfyui_url: str
-    ckpt_name: str | None
     workflows_dir: Path
     outputs_dir: Path
     logs_dir: Path
     # Idle timeout of a ComfyUI run: no progress event for this long (AGENT_IDLE_TIMEOUT_S).
     timeout_s: float
-    model_family: str = SDXL
-    loras: str = ""
-    chroma_loras: str = ""
+    # Machine-specific Chroma files / speed knobs (CHROMA_*). The model itself, its LoRAs and its sampler values
+    # come from the image entry of config/host_models.json; these only override the flux family's files and
+    # size/steps on a slow machine.
     chroma_models: dict[str, str] = field(default_factory=dict)
     chroma_defaults: dict[str, int] = field(default_factory=dict)
 
@@ -52,44 +52,26 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             comfyui_url=os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"),
-            # Empty -> keep the name stored in the workflow templates.
-            ckpt_name=os.environ.get("CKPT_NAME") or None,
             workflows_dir=Path(os.environ.get("WORKFLOWS_DIR", REPO_ROOT / "workflows")),
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", REPO_ROOT / "outputs")),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             timeout_s=idle_timeout_from_env(),
-            # sdxl (yiffInHell, Danbooru tags; default) or flux (Chroma1-HD, prose). Alias: illustrious.
-            model_family=canonical_family(os.environ.get("COMFY_MODEL_FAMILY")) or SDXL,
-            # "name[:model_strength[:clip_strength]]", comma separated. Empty = no LoRA.
-            loras=os.environ.get("LORAS", ""),
-            # SDXL LoRAs do not fit Chroma, so Chroma has its own list.
-            chroma_loras=os.environ.get("CHROMA_LORAS", ""),
-            chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items() if os.environ.get(env)},
+            chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items()
+                           if os.environ.get(env) and slot != "ckpt_name"},
             # Machine-specific speed knobs: 1024x1024 x 28 steps takes ~30 min on a Radeon 890M.
             chroma_defaults={key: int(os.environ[env]) for env, key in CHROMA_DEFAULT_ENV.items()
                              if os.environ.get(env, "").strip()},
         )
 
-    def ckpt_for(self, family: str) -> str | None:
-        """CKPT_NAME belongs to COMFY_MODEL_FAMILY; CHROMA_UNET_NAME is the Chroma-specific fallback."""
-        if family == self.model_family and self.ckpt_name:
-            return self.ckpt_name
-        if family == FLUX:
-            return self.chroma_models.get("ckpt_name")
-        return None
-
-    def loras_for(self, family: str) -> str:
-        return self.chroma_loras if family == FLUX else self.loras
-
     def plan_defaults(self, family: str, defaults: dict | None) -> dict:
-        """The family map's defaults with the .env overrides (Chroma only)."""
+        """The family map's defaults (with the model's own params merged in) and the .env overrides (Chroma only)."""
         return {**(defaults or {}), **(self.chroma_defaults if family == FLUX else {})}
 
     def model_overrides(self, family: str) -> dict[str, str]:
         """Template slot -> value for the text encoder / VAE / weight dtype (Chroma only)."""
         if family != FLUX:
             return {}
-        return {k: v for k, v in self.chroma_models.items() if k != "ckpt_name"}
+        return dict(self.chroma_models)
 
 
 def env_int(name: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
@@ -141,6 +123,11 @@ class ChatSettings:
 
     llm_url: str = "http://127.0.0.1:8080/v1"
     llm_model: str = ""
+    # The picked inference model (config/host_models.json): its id, label and whether it shows thinking.
+    # Empty = the router's LLM_MODEL with LLM_CONTEXT (no model was asked for and DEFAULT_INFERENCE_MODEL is unset).
+    inference_model: str = ""
+    inference_label: str = ""
+    llm_thinking: bool = True
     # Context window of the router's 27B (scripts/setup-llm.ps1 loads it with 4096: more does not fit).
     llm_ctx: int = 4096
     # No response for this long ends a model call or a wait (AGENT_IDLE_TIMEOUT_S, 20 minutes). Model calls stream,

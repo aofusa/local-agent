@@ -4,7 +4,8 @@ LangGraph never calls the LLM router. The ComfyUI workflow calls the LLM, ejects
 the checkpoint, IP-Adapter and ControlNet (design doc §4). This graph:
 
     ingest    read the message, normalize up to 4 reference images (or the previous output) into references;
-              the model family (sdxl / flux) comes from COMFY_MODEL_FAMILY
+              the image model (family, file, LoRAs, sampler values) is the catalog entry named by
+              configurable.image_model, else DEFAULT_IMAGE_MODEL (config/host_models.json)
     plan      rule-based roles -> family role check -> template id -> clamped parameters, and a summary (WI §4.6)
     confirm   LangGraph interrupt when the roles are ambiguous (agent-chat-ui HITL card)
     submit    upload (deduplicated by sha256), inject through the node map, validate node types, /prompt
@@ -36,9 +37,10 @@ from PIL import Image
 
 from furry_agent.comfy_client import ComfyClient, ComfyError
 from furry_agent.config import Settings
-from furry_agent.families import FLUX, LABELS, FamilyError, check_roles, looks_like_tag_list
+from furry_agent.families import LABELS, PROSE, FamilyError, check_roles, looks_like_tag_list
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.media import IMAGE_ROLES, MAX_IMAGES, Media, MediaError, Request, parse_request
+from furry_agent.model_catalog import CatalogError, HostCatalog, ModelChoiceError, load_catalog, resolve_image
 from furry_agent.planner import (
     GenerationPlan,
     Intent,
@@ -110,6 +112,27 @@ class StageError(RuntimeError):
 def _settings(config: RunnableConfig | None) -> Settings:
     configurable = (config or {}).get("configurable", {})
     return configurable.get("settings") or Settings.from_env()
+
+
+def _host_catalog(config: RunnableConfig | None) -> HostCatalog:
+    return (config or {}).get("configurable", {}).get("host_catalog") or load_catalog()
+
+
+def _image_job(config: RunnableConfig | None) -> dict:
+    """The run's image model (configurable.image_model, else the default), baked into the job (design doc §8).
+    The id is never read from the message text, and an unusable id is refused, never swapped for another."""
+    requested = (config or {}).get("configurable", {}).get("image_model")
+    choice = resolve_image(requested, _host_catalog(config))
+    return {"family": choice.family, "image_model": choice.id, "image_label": choice.label,
+            "ckpt_name": choice.ckpt, "loras": choice.lora_text, "params": dict(choice.params),
+            "models": dict(choice.models)}
+
+
+def model_info(job: dict) -> dict:
+    """additional_kwargs of the reply: which image model made it (the UI shows the label under the message)."""
+    if not job.get("image_model"):
+        return {}
+    return {"model_info": {"kind": "image", "id": job["image_model"], "label": job.get("image_label", "")}}
 
 
 def _client(config: RunnableConfig | None, settings: Settings) -> ComfyClient:
@@ -228,13 +251,18 @@ async def ingest(state: State, config: RunnableConfig) -> dict:
             raise MediaError(f"日本語で描きたい内容を入力してください（画像は 0〜{MAX_IMAGES} 枚まで添付できます）。")
     except (MediaError, ValueError) as exc:
         return _fail({**state, "progress_id": progress_id}, exc, "入力")
-    log.info("request family=%s refs=%s text=%s", settings.model_family,
+    try:
+        model = await asyncio.to_thread(_image_job, config)
+    except (ModelChoiceError, CatalogError) as exc:
+        return _fail({**state, "progress_id": progress_id}, exc, "モデル選択")
+    log.info("request image_model=%s family=%s refs=%s text=%s", model["image_model"], model["family"],
              [(r["image_id"], r["role"], r["sha256"][:12]) for r in references], request.text)
     return {
         **reset,
         "references": references,
-        "job": {"text": request.text or DEFAULT_TEXT_FOR_IMAGES, "family": settings.model_family},
-        "messages": [AIMessage(id=progress_id, content=f"受け付けました（参照画像 {len(references)} 枚）。役割とテンプレートを決めています…")],
+        "job": {"text": request.text or DEFAULT_TEXT_FOR_IMAGES, **model},
+        "messages": [AIMessage(id=progress_id, content=(
+            f"受け付けました（{model['image_label']}、参照画像 {len(references)} 枚）。役割とテンプレートを決めています…"))],
     }
 
 
@@ -254,9 +282,10 @@ def _image_label(ref: ReferenceImage) -> str:
 
 
 def _summary(plan: GenerationPlan, references: list[ReferenceImage], roles: dict[str, str],
-             ignored: dict[str, str], loras: list[str]) -> str:
+             ignored: dict[str, str], loras: list[str], model_label: str = "") -> str:
     family = plan["model_family"]
-    lines = [f"**モデル**: {LABELS.get(family, family)}", f"**テンプレート**: {plan['template_id']}（{family}）"]
+    name = f"{model_label}（{LABELS.get(family, family)}）" if model_label else LABELS.get(family, family)
+    lines = [f"**モデル**: {name}", f"**テンプレート**: {plan['template_id']}（{family}）"]
     for ref in references:
         role = roles.get(ref["image_id"])
         if role is None:
@@ -278,8 +307,13 @@ def _summary(plan: GenerationPlan, references: list[ReferenceImage], roles: dict
     return "\n".join(lines)
 
 
-def _family(state: State, settings: Settings) -> str:
-    return (state.get("job") or {}).get("family") or settings.model_family
+def _family(state: State) -> str:
+    return (state.get("job") or {}).get("family") or ""
+
+
+def _loras(state: State) -> list[LoraSpec]:
+    """The image entry's LoRAs (config/host_models.json), in order. LORAS / CHROMA_LORAS in .env are not read."""
+    return parse_loras(",".join((state.get("job") or {}).get("loras") or []))
 
 
 def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] | None = None) -> dict:
@@ -288,13 +322,13 @@ def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] 
     if proposal_roles:
         for ref in references:
             ref["role"] = proposal_roles.get(ref["image_id"], ref["role"])
-    family = _family(state, settings)
+    family = _family(state)
     family_map = load_map(family, settings.workflows_dir)  # TemplateError for an unregistered family
     intent: Intent = classify_intent(state["job"]["text"], references)
     resolution = resolve_roles(references, intent)
     # Unsupported references are refused before asking anything (Chroma: only a base image).
     checked, notes, denoise = check_roles(family_map, resolution.proposal if resolution.needs_confirmation
-                                          else resolution.roles)
+                                          else resolution.roles, state["job"].get("image_label", ""))
     if not resolution.needs_confirmation:
         resolution.roles = checked
     for ref in references:
@@ -302,8 +336,14 @@ def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] 
     template_id = select_workflow(resolution.roles.values()) if not resolution.needs_confirmation else None
     if template_id:
         load_template(family, template_id, settings.workflows_dir)  # TemplateError when missing
+    # The family's defaults, then the model's own sampler values (catalog params), then the machine's CHROMA_*.
+    params = dict(state["job"].get("params") or {})
     plan = build_plan(template_id or "?", family, references, resolution.roles, intent,
-                      defaults=settings.plan_defaults(family, family_map.get("defaults")))
+                      defaults=settings.plan_defaults(family, {**(family_map.get("defaults") or {}), **params}))
+    # plan["negative"] is the run's negative text; the model's default negative goes to the split node.
+    for key, slot in (("quality_prefix", "quality_prefix"), ("negative", "default_negative")):
+        if key in params:
+            plan[slot] = params[key]  # type: ignore[literal-required]
     if denoise is not None and plan["denoise"] is not None and intent.denoise is None:
         plan["denoise"] = denoise
     plan["notes"] += notes
@@ -315,7 +355,7 @@ def _make_plan(state: State, settings: Settings, proposal_roles: dict[str, str] 
 async def plan(state: State, config: RunnableConfig) -> dict:
     settings = _settings(config)
     try:
-        loras = [s.name for s in parse_loras(settings.loras_for(_family(state, settings)))]
+        loras = [s.name for s in _loras(state)]
         result = await asyncio.to_thread(_make_plan, state, settings)
     except (ValueError, TemplateError, FamilyError) as exc:
         return _fail(state, exc, "ワークフロー選択")
@@ -330,7 +370,8 @@ async def plan(state: State, config: RunnableConfig) -> dict:
         return {"references": result["references"], "plan": plan_, "proposal": proposal,
                 "messages": [_progress(state, f"画像の役割を確認させてください: {resolution.reason}")]}
     log.info("plan template=%s roles=%s seed=%d", plan_["template_id"], resolution.roles, plan_["seed"])
-    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras)
+    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras,
+                       state["job"].get("image_label", ""))
     return {"references": result["references"], "plan": plan_, "proposal": None,
             "job": {**state["job"], "summary": summary},
             "messages": [_progress(state, f"次の内容で生成します。\n\n{summary}\n\nComfyUI の空きを確認しています…")]}
@@ -387,8 +428,9 @@ async def confirm(state: State, config: RunnableConfig) -> dict:
     except (ValueError, TemplateError) as exc:
         return _fail(state, exc, "役割推定")
     resolution, plan_ = result["resolution"], result["plan"]
-    loras = [s.name for s in parse_loras(settings.loras_for(_family(state, settings)))]
-    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras)
+    loras = [s.name for s in _loras(state)]
+    summary = _summary(plan_, result["references"], resolution.roles, resolution.ignored, loras,
+                       state["job"].get("image_label", ""))
     log.info("confirmed template=%s roles=%s", plan_["template_id"], resolution.roles)
     return {"references": result["references"], "plan": plan_, "proposal": None,
             "job": {**state["job"], "summary": summary},
@@ -422,15 +464,18 @@ async def _check_nodes(client: ComfyClient, prompt: dict, family_map: dict) -> N
         raise TemplateError(f"この環境の ComfyUI に無いノードがあります: {', '.join(missing)}。{hint}")
 
 
-async def _check_models(client: ComfyClient, settings: Settings, family: str, template: dict, entry: dict,
+def _model_files(settings: Settings, job: dict) -> dict[str, str]:
+    """Template slot -> file for this run: the catalog entry's text encoder / VAE / dtype, then CHROMA_* (flux)."""
+    return {**(job.get("models") or {}), **settings.model_overrides(job["family"])}
+
+
+async def _check_models(client: ComfyClient, settings: Settings, job: dict, template: dict, entry: dict,
                         family_map: dict) -> str:
     """Every model file of the template must exist in ComfyUI (WI §5.7: name the missing files, no fallback)."""
+    family = job["family"]
     values = {slot: slot_value(template, path) for slot, path in model_slots(entry).items()}
-    values.update({k: v for k, v in settings.model_overrides(family).items() if k in values})
-    values["ckpt_name"] = settings.ckpt_for(family) or values["ckpt_name"]
-    if family != FLUX and "chroma" in values["ckpt_name"].lower():
-        raise TemplateError(f"{values['ckpt_name']} は Chroma1-HD のモデルです。.env の COMFY_MODEL_FAMILY=flux "
-                            "も設定して LangGraph を再起動してください")
+    values.update({k: v for k, v in _model_files(settings, job).items() if k in values})
+    values["ckpt_name"] = job.get("ckpt_name") or values["ckpt_name"]
     missing = []
     for slot, path in model_slots(entry).items():
         node_id, _, field = path.split(".", 2)
@@ -440,7 +485,7 @@ async def _check_models(client: ComfyClient, settings: Settings, family: str, te
         if family_map.get("model_setup_hint"):
             raise ComfyError(f"{family_map.get('label', family)} のモデルファイルが ComfyUI に見つかりません: "
                              f"{', '.join(missing)}。{family_map['model_setup_hint']}")
-        raise ComfyError(f"チェックポイント {', '.join(missing)} が ComfyUI に見つかりません")
+        raise ComfyError(f"{job.get('image_label') or family} のチェックポイント {', '.join(missing)} が ComfyUI に見つかりません")
     return values["ckpt_name"]
 
 
@@ -451,7 +496,7 @@ async def submit(state: State, config: RunnableConfig) -> dict:
     family = plan_["model_family"]
     stage = "キュー待ち"
     try:
-        loras: list[LoraSpec] = parse_loras(settings.loras_for(family))
+        loras: list[LoraSpec] = _loras(state)
         # Shared with the chat tab (job_lock.py): the other job is waited for while it works (its holder renews
         # the lease; a holder that died frees the lock when the lease runs out). JOB_LOCK_TIMEOUT_S, when set,
         # bounds the wait for a chat run.
@@ -469,7 +514,7 @@ async def submit(state: State, config: RunnableConfig) -> dict:
                                                       settings.workflows_dir)
             family_map = await asyncio.to_thread(load_map, family, settings.workflows_dir)
             await _check_nodes(client, template, family_map)
-            ckpt_name = await _check_models(client, settings, family, template, entry, family_map)
+            ckpt_name = await _check_models(client, settings, state["job"], template, entry, family_map)
             if loras:
                 loras = resolve_lora_names(loras, await client.loras())
             stage = "アップロード"
@@ -484,7 +529,7 @@ async def submit(state: State, config: RunnableConfig) -> dict:
             stage = "ワークフロー注入"
             prompt = await asyncio.to_thread(build_run_prompt, family, plan_, images, state["job"]["text"],
                                              ckpt_name, loras, settings.workflows_dir,
-                                             settings.model_overrides(family),
+                                             _model_files(settings, state["job"]),
                                              llm_read_timeout_s=settings.timeout_s)
             await _check_nodes(client, prompt, family_map)
             stage = "キュー投入"
@@ -503,17 +548,17 @@ async def submit(state: State, config: RunnableConfig) -> dict:
            "client_id": client_id, "seed": plan_["seed"], "ckpt_name": ckpt_name, "family": family,
            "loras": [f"{s.name}:{s.strength_model}" for s in loras],
            "refs": [(r["image_id"], r["resolved_role"], r["filename_on_comfy"]) for r in references]}
-    log.info("submitted prompt_id=%s family=%s template=%s seed=%d steps=%s cfg=%s refs=%s loras=%s", prompt_id,
-             family, plan_["template_id"], plan_["seed"], plan_["steps"], plan_["cfg"], job["refs"], job["loras"])
+    log.info("submitted prompt_id=%s image_model=%s family=%s template=%s seed=%d steps=%s cfg=%s refs=%s loras=%s",
+             prompt_id, job.get("image_model"), family, plan_["template_id"], plan_["seed"], plan_["steps"], plan_["cfg"], job["refs"], job["loras"])
     vision = "参照画像の役割別タグ付け → " if images else ""
-    making = "英語の説明文" if family == FLUX else "タグ"
+    making = "英語の説明文" if family in PROSE else "タグ"
     return {
         "job": job,
         "references": references,
         "comfy_prompt_id": prompt_id,
         "messages": [_progress(state, (
             f"ComfyUI に投入しました（prompt_id {prompt_id}）。\n\n{job.get('summary', '')}\n\n"
-            f"{vision}Qwen3.8 27B（llama.cpp）で{making}を生成中です。モデルのロードを含め数分かかります…"
+            f"{vision}LLM（llama.cpp）で{making}を生成中です。モデルのロードを含め数分かかります…"
         ))],
     }
 
@@ -548,9 +593,10 @@ async def await_tags(state: State, config: RunnableConfig) -> dict:
     }
     log.info("tags prompt_id=%s mode=%s positive=%s", job["prompt_id"], tags["split_mode"], tags["positive"])
     warnings = list(job.get("warnings") or [])
-    chroma = job.get("family") == FLUX
+    chroma = job.get("family") in PROSE
     if chroma and looks_like_tag_list(tags["positive"]):
-        warnings.append("LLM が説明文ではなくタグ列を返しました。Chroma1-HD では品質が落ちることがあります")
+        warnings.append(f"LLM が説明文ではなくタグ列を返しました。{job.get('image_label') or 'この画像モデル'} では"
+                        "品質が落ちることがあります")
     if chroma and tags["split_mode"] == "fallback":
         warnings.append("LLM の出力が JSON ではなかったため、生の出力を positive にしています")
     made = "英語の説明文を生成しました" if chroma else "タグを生成しました"
@@ -570,7 +616,8 @@ def _save_outputs(outputs_dir: Path, job: dict, tags: dict, plan_: dict | None, 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = outputs_dir / f"{stamp}_{job['prompt_id'][:8]}_{name}"
     path.write_bytes(data)
-    meta = {k: job.get(k) for k in ("prompt_id", "seed", "family", "template_id", "ckpt_name", "refs", "loras")}
+    meta = {k: job.get(k) for k in ("prompt_id", "seed", "image_model", "family", "template_id", "ckpt_name", "refs",
+                                    "loras")}
     if plan_:
         meta.update({k: plan_.get(k) for k in ("strengths", "denoise", "pose_preprocessor", "width", "height",
                                                "steps", "cfg", "sampler_name", "scheduler")})
@@ -637,7 +684,8 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
     pose_note = "\n\n2 枚目はポーズ参照から抽出した ControlNet 入力です。" if len(blocks) > len(saved) else ""
     warnings = "".join(f"\n\n⚠️ {w}" for w in job.get("warnings") or [])
     text = (
-        f"生成しました（{job.get('template_id', '?')}、seed {job.get('seed')}、{job.get('ckpt_name')}）。{warnings}\n\n"
+        f"生成しました（{job.get('image_label') or job.get('ckpt_name')}、{job.get('template_id', '?')}、"
+        f"seed {job.get('seed')}、{job.get('ckpt_name')}）。{warnings}\n\n"
         f"{job.get('summary', '')}\n\n"
         f"**positive**: {tags.get('positive', '')}\n\n**negative**: {tags.get('negative', '')}\n\n"
         f"保存先: ComfyUI output/{comfy_file}、リポジトリ outputs/{saved[0][1].name}\n\n"
@@ -645,7 +693,8 @@ async def await_image(state: State, config: RunnableConfig) -> dict:
     )
     return {
         "outputs": [*(state.get("outputs") or []), *(str(p) for _, p in saved)][-20:],
-        "messages": [AIMessage(id=state["progress_id"], content=[{"type": "text", "text": text}, *blocks])],
+        "messages": [AIMessage(id=state["progress_id"], content=[{"type": "text", "text": text}, *blocks],
+                               additional_kwargs=model_info(job))],
     }
 
 

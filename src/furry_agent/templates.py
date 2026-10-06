@@ -2,9 +2,9 @@
 
 Templates are the reviewed API JSON files under ``workflows/<family>/``; ``workflows/maps/<family>.json``
 names every slot as ``node.inputs.field``. Nothing here invents node ids: values only go to mapped slots.
-The two structural edits are also map/env driven: the pose preprocessor variant (from the map) and the
-LoRA chain (from the ``LORAS`` environment variable), inserted right after the checkpoint loader so it
-still runs after the LLM eject.
+The two structural edits are also map/catalog driven: the pose preprocessor variant (from the map) and the
+LoRA chain (the image model's ``loras`` in config/host_models.json), inserted right after the checkpoint loader
+so it still runs after the LLM eject.
 """
 
 from __future__ import annotations
@@ -196,6 +196,10 @@ def build_run_prompt(
     for slot, cast in (("steps", int), ("cfg", float), ("sampler_name", str), ("scheduler", str)):
         if slot in slots and plan.get(slot) is not None:
             _set(prompt, slots[slot], cast(plan[slot]))
+    # The model's own quality prefix / default negative (config/host_models.json params), when it sets them.
+    for slot, key in (("quality_prefix", "quality_prefix"), ("negative", "default_negative")):
+        if slot in slots and plan.get(key) is not None:
+            _set(prompt, slots[slot], str(plan[key]))
     if "denoise" in slots and plan.get("denoise") is not None:
         _set(prompt, slots["denoise"], float(plan["denoise"]))
     for role, filename in images.items():

@@ -38,10 +38,13 @@ function Get-Json([string]$Url) { Invoke-RestMethod -Uri $Url -TimeoutSec 10 }
 
 $envValues = Read-DotEnv
 $modelKey = $envValues["LLM_MODEL"]
-$ckptName = $envValues["CKPT_NAME"]
+$ckptName = $envValues["DEFAULT_IMAGE_MODEL"]
 $workflow = Read-JsonFile (Join-Path (Get-RepoRoot) "workflows\furry_ja_api.json")
 if (-not $modelKey) { $modelKey = $workflow.llm_backend.inputs.model }
-if (-not $ckptName) { $ckptName = $workflow.ckpt.inputs.ckpt_name }
+$imageCatalog = Read-JsonFile (Join-Path (Get-RepoRoot) "config\host_models.json")
+$imageEntry = @($imageCatalog.image | Where-Object { $_.id -eq $ckptName } | Select-Object -First 1)
+if (-not $imageEntry) { $imageEntry = @($imageCatalog.image)[0] }
+$ckptName = $imageEntry.ckpt
 if (-not $LLMPort) { $LLMPort = [int](Get-DotEnvValue "LLM_PORT" "8080") }
 
 Write-Step "LLM ルータ（llama.cpp）"
@@ -100,8 +103,8 @@ Check "reference nodes and models (multi-image)" {
     if ($controlnets -notcontains "controlnet-union-sdxl-1.0-promax.safetensors") { throw "ControlNet union のモデルがありません（setup-comfyui-refs.ps1）" }
     "$($needed.Count) nodes + ControlNet"
 }
-Check "LORAS" {
-    $loras = Get-DotEnvValue "LORAS" ""
+Check "LoRA ($($imageEntry.id))" {
+    $loras = (@($imageEntry.loras) -join ",")
     if (-not $loras) { return "none" }
     $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info/LoraLoader"
     $available = @($info.LoraLoader.input.required.lora_name[0]) | ForEach-Object { "$_".Replace('\', '/').ToLower() }

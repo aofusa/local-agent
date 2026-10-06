@@ -1,12 +1,14 @@
 """Model family names (Chroma HD work instruction §5.2) and the per-family checks LangGraph runs.
 
-Two families are registered: ``sdxl`` (yiffInHell / Illustrious, Danbooru tags, the default) and
-``flux`` (Chroma1-HD, a Flux.1-schnell derivative that reads English prose through T5).
-The family decides which ``workflows/<family>/`` templates and ``workflows/maps/<family>.json`` are used;
-the LLM call, eject and checkpoint gate stay inside the ComfyUI workflow for both.
+Four families are registered: ``sdxl`` (yiffInHell / Illustrious / Rekemono, Danbooru tags), ``flux``
+(Chroma1-HD, a Flux.1-schnell derivative that reads English prose through T5), ``krea2`` (Krea 2 models such as
+Wulver: English prose through Qwen3-VL-4B) and ``anima`` (Anima models such as Indigo Furry Mix Anima: Danbooru
+tags through Qwen3 0.6B). The family decides which ``workflows/<family>/`` templates and
+``workflows/maps/<family>.json`` are used; the LLM call, eject and checkpoint gate stay inside the ComfyUI workflow
+for all of them.
 
-The family is chosen only by ``COMFY_MODEL_FAMILY`` in ``.env`` (``flux`` -> Chroma1-HD,
-anything else registered -> that family, empty -> sdxl). Messages never switch it.
+The family is the one of the image model the client picked (configurable.image_model, a config/host_models.json
+id; else DEFAULT_IMAGE_MODEL). The message text never switches it ("Chroma で" is just part of the prompt).
 """
 
 from __future__ import annotations
@@ -15,11 +17,16 @@ import re
 
 SDXL = "sdxl"
 FLUX = "flux"
+KREA2 = "krea2"
+ANIMA = "anima"
 ALIASES = {
     "sdxl": SDXL, "illustrious": SDXL, "yiffinhell": SDXL, "yih": SDXL,
-    "flux": FLUX,
+    "flux": FLUX, "krea2": KREA2, "anima": ANIMA,
 }
-LABELS = {SDXL: "SDXL（yiffInHell / Danbooru タグ）", FLUX: "Chroma1-HD（Flux 系、英語の説明文）"}
+LABELS = {SDXL: "SDXL（Danbooru タグ）", FLUX: "Chroma1-HD（Flux 系、英語の説明文）",
+          KREA2: "Krea 2（英語の説明文）", ANIMA: "Anima（Danbooru タグ）"}
+# Families whose prompt is English prose (the LLM writes sentences, not tags).
+PROSE = {FLUX, KREA2}
 
 _FULLWIDTH = str.maketrans("ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ０１２３４５６７８９／＿－",
                                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_-")
@@ -37,7 +44,8 @@ def canonical_family(name: str | None) -> str | None:
     return ALIASES.get(key) or ALIASES.get(re.sub(r"[\s_-]+", "", key)) or key
 
 
-def check_roles(family_map: dict, roles: dict[str, str]) -> tuple[dict[str, str], list[str], float | None]:
+def check_roles(family_map: dict, roles: dict[str, str],
+                model_label: str = "") -> tuple[dict[str, str], list[str], float | None]:
     """Fit resolved roles (image_id -> role) to what the family supports (§5.5).
 
     Returns (roles to use, notes for the reply, denoise override). Raises FamilyError when the combination is refused,
@@ -46,7 +54,7 @@ def check_roles(family_map: dict, roles: dict[str, str]) -> tuple[dict[str, str]
     if "supported_roles" not in family_map:
         return roles, [], None  # sdxl: every role combination has a template
     supported = set(family_map["supported_roles"])
-    label = family_map.get("label") or family_map.get("family", "")
+    label = model_label or family_map.get("label") or family_map.get("family", "")
     notes: list[str] = []
     denoise = None
     result = dict(roles)
@@ -59,13 +67,13 @@ def check_roles(family_map: dict, roles: dict[str, str]) -> tuple[dict[str, str]
                          f"denoise {denoise} で寄せています（ポーズの厳密一致ではありません）")
         else:
             raise FamilyError(f"{label} 経路はポーズ ControlNet 未対応です。ポーズ参照を使うときは "
-                              ".env の COMFY_MODEL_FAMILY を sdxl に戻すか、ポーズ画像を外してください")
+                              "画像モデルを SDXL 系に切り替えるか、ポーズ画像を外してください")
     unsupported = sorted({r for r in result.values() if r not in supported})
     if unsupported:
         names = {"character": "キャラクター参照", "style": "画風参照", "mask": "マスク（部分修正）", "pose": "ポーズ参照"}
         listed = "、".join(names.get(r, r) for r in unsupported)
         raise FamilyError(f"{label} 経路は {listed} の画像に未対応です（使えるのは元画像 1 枚の img2img だけです）。"
-                          "画風は文章で指示するか、.env の COMFY_MODEL_FAMILY を sdxl に戻してください")
+                          "画風は文章で指示するか、画像モデルを SDXL 系に切り替えてください")
     return result, notes, denoise
 
 

@@ -9,11 +9,13 @@
   3. Install eedali/LM_Connect (pinned commit) into custom_nodes. It is used only as an OpenAI-compatible client of
      the llama.cpp router; llama-cpp-python is NOT installed: no GGUF runs inside ComfyUI.
   4. Link custom_nodes\furry_ja to this repository's comfyui_nodes\furry_ja (directory junction).
-  5. Models live in tools\comfyui\models only. The files this project uses (the checkpoint CKPT_NAME, the LoRAs in
-     LORAS / CHROMA_LORAS, the reference-image and Chroma models) are looked for in the model folders an earlier
-     ComfyUI on this machine has (Comfy Desktop, Documents\ComfyUI\models) and in -ModelsDir, and hard-linked into
-     tools\comfyui\models (copied across drives). Nothing has to be passed: a later run finds them in place.
-     -CheckpointUrl downloads the checkpoint when no folder has it.
+  5. Models live in tools\comfyui\models only. The files this project uses (every image model of
+     config\host_models.json with its LoRAs, text encoder and VAE, the reference-image and Chroma models) are looked
+     for in the model folders an earlier ComfyUI on this machine has (Comfy Desktop, Documents\ComfyUI\models) and
+     in -ModelsDir, and hard-linked into tools\comfyui\models (copied across drives). Nothing has to be passed: a
+     later run finds them in place. A model whose file is nowhere is listed as unavailable (GET /models).
+     -CheckpointUrl downloads the default model's checkpoint when no folder has it.
+     The text encoders / VAE of Krea 2 and Anima come from Hugging Face: scripts\setup-image-models.ps1.
   6. Save the paths to .env (COMFYUI_*), read by start-comfyui.ps1 and the other setup scripts.
   Start or restart ComfyUI afterwards with .\scripts\start-comfyui.ps1 (127.0.0.1:8188, --cache-none).
 
@@ -29,7 +31,7 @@ param(
     [string]$Torch = "auto",
     [string[]]$ModelsDir = @(),
     [string]$CheckpointUrl = "",
-    [string]$CkptName = "",            # default: CKPT_NAME in .env
+    [string]$CkptName = "",            # the checkpoint -CheckpointUrl saves (default: the default image model's)
     [string]$LMConnectCommit = "422a08970fee5f3f525589bcb3170099007ae286",
     [switch]$ReinstallTorch
 )
@@ -164,25 +166,31 @@ if (Test-Path $yaml) {
 $sources = @(($sources + (Get-KnownModelDirs)) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
 if ($sources) { Write-Ok "取り込み元: $($sources -join '; ')" }
 
-$ckpt = if ($CkptName) { $CkptName } else { Get-DotEnvValue "CKPT_NAME" "yiffInHell_yihVANTABLACK.safetensors" }
-$chromaUnet = Get-DotEnvValue "CHROMA_UNET_NAME" "chroma_v10HD.safetensors"
+# The image models of config\host_models.json (checkpoint / diffusion model, LoRAs, text encoder, VAE).
+Push-Location (Get-RepoRoot)
+try { $catalogFiles = (Invoke-Native uv run --quiet python scripts\host_models.py wanted | Select-Object -Last 1) | ConvertFrom-Json }
+finally { Pop-Location }
+if ($LASTEXITCODE -ne 0 -or -not $catalogFiles) { throw "config\host_models.json を読めません" }
+$ckpt = if ($CkptName) { $CkptName } else { ($catalogFiles | Where-Object { $_.kind -eq "ckpt_name" } | Select-Object -First 1).name }
+$chromaUnet = "chroma_v10HD.safetensors"
 $chromaStem = [IO.Path]::GetFileNameWithoutExtension($chromaUnet)
 $wanted = @(
-    @{ Folders = @("checkpoints", "diffusion_models", "unet"); Name = $ckpt; Required = $true },
     @{ Folders = @("controlnet"); Name = "controlnet-union-sdxl-1.0-promax.safetensors" },
     @{ Folders = @("ipadapter"); Name = "ip-adapter-plus_sdxl_vit-h.safetensors" },
     @{ Folders = @("clip_vision"); Name = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors" },
-    @{ Folders = @("diffusion_models", "checkpoints", "unet"); Name = $chromaUnet },
     @{ Folders = @("diffusion_models"); Name = "$($chromaStem)_fp8_e4m3fn.safetensors" },
     @{ Folders = @("text_encoders", "clip"); Name = (Get-DotEnvValue "CHROMA_TEXT_ENCODER" "t5xxl_fp8_e4m3fn.safetensors") },
     @{ Folders = @("vae"); Name = (Get-DotEnvValue "CHROMA_VAE" "ae.safetensors") }
 )
-foreach ($entry in (@(Get-DotEnvValue "LORAS" "") + @(Get-DotEnvValue "CHROMA_LORAS" "")) -split '[,;]') {
-    $name = ($entry.Trim() -split ':')[0].Trim()
-    if (-not $name) { continue }
-    $file = Resolve-LoraName $name (@($layout.ModelsDir) + $sources)
-    if ($file) { $wanted += @{ Folders = @("loras"); Name = $file; Required = $true } }
-    else { Write-Warn2 "LoRA $name がありません。$($layout.ModelsDir)\loras に置いてください" }
+foreach ($file in $catalogFiles) {
+    if ($file.download) { continue }   # scripts\setup-image-models.ps1
+    if ($file.kind -eq "lora") {
+        $name = Resolve-LoraName $file.name (@($layout.ModelsDir) + $sources)
+        if ($name) { $wanted += @{ Folders = @("loras"); Name = $name; Required = $true } }
+        else { Write-Warn2 "LoRA $($file.name)（$($file.model)）がありません。$($layout.ModelsDir)\loras に置いてください" }
+        continue
+    }
+    $wanted += @{ Folders = @($file.folders); Name = $file.name; Required = [bool]$file.required; Model = $file.model }
 }
 foreach ($item in $wanted) {
     $path = Import-ComfyModel $layout $item.Folders $item.Name $sources
@@ -192,7 +200,8 @@ foreach ($item in $wanted) {
         Save-Download $CheckpointUrl $path
     }
     elseif ($item.Required) {
-        Write-Warn2 "$($item.Name) がありません。$($layout.ModelsDir)\$($item.Folders[0]) に置いてください（-CheckpointUrl で取得もできます）"
+        $who = if ($item.Model) { "（画像モデル $($item.Model) は使えないと表示します）" } else { "" }
+        Write-Warn2 "$($item.Name) がありません。$($layout.ModelsDir)\$($item.Folders[0]) に置いてください$who"
     }
 }
 if (Test-Path $yaml) { Remove-Item $yaml; Write-Ok "extra_model_paths.yaml をやめました（モデルは tools\comfyui\models に取り込み済み）" }

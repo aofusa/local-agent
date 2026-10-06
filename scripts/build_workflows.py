@@ -285,6 +285,11 @@ def ui_workflow(api: dict) -> dict:
 # --- Multi-image role templates (work instruction WI-IMG-MULTI-REF-001 §4.4) ---------------
 
 MODEL_FAMILY = "sdxl"
+# Slots every family has: the sampler (sdxl keeps its template values unless the catalog entry sets them) and the
+# split node's quality prefix / default negative.
+SAMPLER_SLOTS = {"steps": "sampler.inputs.steps", "cfg": "sampler.inputs.cfg",
+                 "sampler_name": "sampler.inputs.sampler_name", "scheduler": "sampler.inputs.scheduler"}
+QUALITY_SLOTS = {"quality_prefix": "split.inputs.quality_prefix", "negative": "split.inputs.default_negative"}
 CONTROLNET_NAME = "controlnet-union-sdxl-1.0-promax.safetensors"
 IPADAPTER_PRESET = "PLUS (high strength)"
 # style: IP-Adapter "style transfer" only feeds the style blocks, so the subject is not copied.
@@ -336,6 +341,8 @@ def role_template(template_id: str, api: dict | None = None) -> tuple[dict, dict
     api = api or api_workflow()
     roles = template_roles(template_id)
     slots = {"prompt": "user_prompt.inputs.value", "seed": "sampler.inputs.seed", "ckpt_name": "ckpt.inputs.ckpt_name"}
+    slots.update(SAMPLER_SLOTS)
+    slots.update(QUALITY_SLOTS)
 
     if template_id in ("t2i_basic", "i2i_basic"):
         # The phase-1 graphs, produced by the same code the agent used before templates existed.
@@ -449,17 +456,21 @@ def node_map(api: dict | None = None) -> tuple[dict, dict[str, dict]]:
             "roles": sorted(template_roles(template_id)),
             "slots": slots,
         }
-    mapping = {"family": MODEL_FAMILY, "pose_preprocessors": POSE_PREPROCESSORS,
+    mapping = {"family": MODEL_FAMILY, "label": "SDXL", "prompt_style": "danbooru", "pose_preprocessors": POSE_PREPROCESSORS,
                "ipadapter_weight_scale": IPADAPTER_WEIGHT_SCALE, "templates": templates}
     return mapping, prompts
 
 
-# --- Chroma1-HD family (docs/chroma-hd-support-work-instruction.md §5.4) -----------------------------
+# --- Diffusion-transformer families: Chroma1-HD (flux), Krea 2 (krea2), Anima (anima) ------------------------
 #
-# Copied from the official ComfyUI_Chroma1-HD_T2I-workflow.json (workflows/reference/): CLIPLoader type chroma,
+# Chroma follows the official ComfyUI_Chroma1-HD_T2I-workflow.json (workflows/reference/): CLIPLoader type chroma,
 # T5TokenizerOptions, ModelSamplingAuraFlow shift 1.0, euler + beta, Flux VAE, EmptySD3LatentImage. The official
 # SamplerCustomAdvanced chain is replaced by KSampler (WI §2.3) so `sampler` keeps its id, seed slot and denoise.
-# The LLM part is the same as sdxl (prompt_node -> eject -> split -> ckpt); only the system prompt differs.
+# Krea 2 and Anima follow ComfyUI's blueprints "Text to Image (Krea-2 Turbo)" / "Text to Image (Anima)":
+# UNETLoader + CLIPLoader (krea2 / stable_diffusion) + qwen_image_vae, EmptyLatentImage, KSampler.
+# The LLM part is the same as sdxl (prompt_node -> eject -> split -> ckpt); `ckpt` is FurryJaDiffusionLoaderAfterEject
+# (diffusion model + text encoder + VAE after the eject), so every node id stays the same. Only the system prompt,
+# the encoders and the sampler defaults differ; the model's own values come from config/host_models.json.
 
 CHROMA_FAMILY = "flux"
 CHROMA_UNET = os.environ.get("CHROMA_UNET_NAME") or "chroma_v10HD.safetensors"
@@ -479,47 +490,100 @@ CHROMA_DEFAULTS = {
 # Comparison presets (WI §5.4); not used by default.
 CHROMA_PRESETS = {"quality": {"steps": 40, "cfg": 3.0}, "speed": {"steps": 26, "cfg": 3.8}}
 CHROMA_NEGATIVE = "low quality, ugly, unfinished, out of focus, deformed, blurry, smudged, flat colors"
+ANIMA_QUALITY = "masterpiece, best quality, very aesthetic, score_8, furry"
+ANIMA_NEGATIVE = ("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, "
+                  "human, bad anatomy, bad hands, watermark, signature, text")
+
+DIT_FAMILIES = {
+    CHROMA_FAMILY: {
+        "label": "Chroma1-HD",
+        "system": "system_chroma_prose.txt", "prompt_style": "prose", "split_style": "prose",
+        "quality_prefix": "", "negative": CHROMA_NEGATIVE, "temperature": 0.3, "max_tokens": 400,
+        "models": CHROMA_MODELS, "defaults": CHROMA_DEFAULTS, "presets": CHROMA_PRESETS,
+        "t5": True, "sampling": ("ModelSamplingAuraFlow", "model_sampling (shift 1.0)", {"shift": 1.0}),
+        "latent": "EmptySD3LatentImage", "save_prefix": "furry_ja/chroma",
+        "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
+    },
+    # Krea 2 (Wulver v0.5 is a turbo finetune): 8 steps, CFG 1 (the negative does nothing), euler / simple,
+    # shift 1.15 is ComfyUI's default for the model, Qwen3-VL-4B text encoder (CLIPLoader type krea2).
+    "krea2": {
+        "label": "Krea 2",
+        "system": "system_krea2_prose.txt", "prompt_style": "prose", "split_style": "prose",
+        "quality_prefix": "", "negative": "low quality, blurry, deformed", "temperature": 0.3, "max_tokens": 480,
+        "models": {"unet_name": "wulverKrea2_v05_fp8.safetensors", "weight_dtype": "default",
+                   "clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "clip_type": "krea2",
+                   "vae_name": "qwen_image_vae.safetensors"},
+        "defaults": {"width": 1024, "height": 1024, "steps": 8, "cfg": 1.0, "sampler_name": "euler",
+                     "scheduler": "simple", "size_min": 512, "size_max": 1536, "max_pixels": 1024 * 1024},
+        "t5": False, "sampling": None, "latent": "EmptyLatentImage", "save_prefix": "furry_ja/krea2",
+        "model_setup_hint": "scripts の setup-image-models を実行して Krea 2 のテキストエンコーダと VAE を入れてください",
+    },
+    # Anima (Cosmos-Predict2 2B, Qwen3 0.6B text encoder): Danbooru tags plus natural language, score tags,
+    # er_sde / simple, CFG 4, ~1 MP.
+    "anima": {
+        "label": "Anima",
+        "system": "system_furry_tags.txt", "prompt_style": "danbooru", "split_style": "tags",
+        "quality_prefix": ANIMA_QUALITY, "negative": ANIMA_NEGATIVE, "temperature": 0.4, "max_tokens": 320,
+        "models": {"unet_name": "indigoFurryMixAnima_v10.safetensors", "weight_dtype": "default",
+                   "clip_name": "qwen_3_06b_base.safetensors", "clip_type": "stable_diffusion",
+                   "vae_name": "qwen_image_vae.safetensors"},
+        "defaults": {"width": 832, "height": 1216, "steps": 28, "cfg": 4.0, "sampler_name": "er_sde",
+                     "scheduler": "simple", "size_min": 512, "size_max": 1536, "max_pixels": 1536 * 1536},
+        "t5": False, "sampling": None, "latent": "EmptyLatentImage", "save_prefix": "furry_ja/anima",
+        "model_setup_hint": "scripts の setup-image-models を実行して Anima のテキストエンコーダと VAE を入れてください",
+    },
+}
 
 
-def chroma_template(template_id: str) -> tuple[dict, dict]:
-    """Return (API prompt, slot map) for flux (Chroma1-HD) t2i_basic / i2i_basic."""
-    system = (PROMPTS / "system_chroma_prose.txt").read_text(encoding="utf-8").strip()
+def dit_template(family: str, template_id: str) -> tuple[dict, dict]:
+    """Return (API prompt, slot map) for a diffusion-transformer family's t2i_basic / i2i_basic."""
+    spec = DIT_FAMILIES[family]
+    system = (PROMPTS / spec["system"]).read_text(encoding="utf-8").strip()
     system_vision = (PROMPTS / "system_vision_caption.txt").read_text(encoding="utf-8").strip()
-    d = CHROMA_DEFAULTS
+    d = spec["defaults"]
+    clip = ["t5_options", 0] if spec["t5"] else ["ckpt", 1]
     nodes = {
         "llm_backend": ("LMConnectLMStudioBackend", "LLM Backend (llama.cpp router)", _backend()),
         "user_prompt": ("PrimitiveStringMultiline", "user_prompt (日本語指示)", {"value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"}),
         "prompt_node": ("LMConnectPromptWithSystem", "prompt_node", {
             "system_prompt": system, "prompt": ["user_prompt", 0], "backend": ["llm_backend", 0],
-            "base_url": LLM_URL, "model": "", "temperature": 0.3, "max_tokens": 400,
+            "base_url": LLM_URL, "model": "", "temperature": spec["temperature"], "max_tokens": spec["max_tokens"],
         }),
         "eject": ("FurryJaEjectLLM", "eject", {
             "passthrough": ["prompt_node", 0], "base_url": LLM_URL, "model": "", "debug_logging": True,
         }),
         "split": ("FurryJaSplitTags", "split", {
-            "text": ["eject", 0], "quality_prefix": "", "default_negative": CHROMA_NEGATIVE, "prompt_style": "prose",
+            "text": ["eject", 0], "quality_prefix": spec["quality_prefix"], "default_negative": spec["negative"],
+            "prompt_style": spec["split_style"],
         }),
         "ckpt": ("FurryJaDiffusionLoaderAfterEject", "ckpt", {
-            **CHROMA_MODELS, "after": ["eject", 0], "llm_base_url": LLM_URL,
+            **spec["models"], "after": ["eject", 0], "llm_base_url": LLM_URL,
         }),
+    }
+    if spec["t5"]:
         # Official: "min_padding 1 is the official way".
-        "t5_options": ("T5TokenizerOptions", "t5_options", {"clip": ["ckpt", 1], "min_padding": 1, "min_length": 0}),
-        "positive": ("CLIPTextEncode", "positive", {"text": ["split", 0], "clip": ["t5_options", 0]}),
-        "negative": ("CLIPTextEncode", "negative", {"text": ["split", 1], "clip": ["t5_options", 0]}),
-        "model_sampling": ("ModelSamplingAuraFlow", "model_sampling (shift 1.0)", {"model": ["ckpt", 0], "shift": 1.0}),
-        # Drop the T5 (~5 GB) before the 8.9B model samples.
+        nodes["t5_options"] = ("T5TokenizerOptions", "t5_options", {"clip": ["ckpt", 1], "min_padding": 1, "min_length": 0})
+    nodes["positive"] = ("CLIPTextEncode", "positive", {"text": ["split", 0], "clip": clip})
+    nodes["negative"] = ("CLIPTextEncode", "negative", {"text": ["split", 1], "clip": clip})
+    model = ["ckpt", 0]
+    if spec["sampling"]:
+        cls, title, inputs = spec["sampling"]
+        nodes["model_sampling"] = (cls, title, {"model": ["ckpt", 0], **inputs})
+        model = ["model_sampling", 0]
+    nodes.update({
+        # Drop the text encoder before the diffusion model samples.
         "release": ("FurryJaReleaseEncoders", "release", {
-            "model": ["model_sampling", 0], "positive": ["positive", 0], "negative": ["negative", 0],
+            "model": model, "positive": ["positive", 0], "negative": ["negative", 0],
         }),
-        "latent": ("EmptySD3LatentImage", "latent", {"width": d["width"], "height": d["height"], "batch_size": 1}),
+        "latent": (spec["latent"], "latent", {"width": d["width"], "height": d["height"], "batch_size": 1}),
         "sampler": ("KSampler", "sampler", {
             "model": ["release", 0], "seed": 0, "steps": d["steps"], "cfg": d["cfg"],
             "sampler_name": d["sampler_name"], "scheduler": d["scheduler"],
             "positive": ["release", 1], "negative": ["release", 2], "latent_image": ["latent", 0], "denoise": 1.0,
         }),
         "decode": ("VAEDecode", "decode", {"samples": ["sampler", 0], "vae": ["ckpt", 2]}),
-        "save": ("SaveImage", "save", {"images": ["decode", 0], "filename_prefix": "furry_ja/chroma"}),
-    }
+        "save": ("SaveImage", "save", {"images": ["decode", 0], "filename_prefix": spec["save_prefix"]}),
+    })
     prompt = {node_id: _node(cls, title, inputs) for node_id, (cls, title, inputs) in nodes.items()}
     slots = {
         "prompt": "user_prompt.inputs.value", "seed": "sampler.inputs.seed", "ckpt_name": "ckpt.inputs.unet_name",
@@ -527,12 +591,13 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
         "vae_name": "ckpt.inputs.vae_name", "steps": "sampler.inputs.steps", "cfg": "sampler.inputs.cfg",
         "sampler_name": "sampler.inputs.sampler_name", "scheduler": "sampler.inputs.scheduler",
     }
+    slots.update(QUALITY_SLOTS)
     if template_id == "t2i_basic":
         slots.update(width="latent.inputs.width", height="latent.inputs.height")
         return prompt, slots
     if template_id != "i2i_basic":
-        raise ValueError(f"flux has no template {template_id}")
-    # img2img: the base image is captioned (tags) for the LLM, which rewrites everything as prose.
+        raise ValueError(f"{family} has no template {template_id}")
+    # img2img: the base image is captioned (tags) for the LLM, which rewrites everything in the family's style.
     prompt.update({
         "llm_backend_vision": _node("LMConnectLMStudioBackend", "LLM Backend (vision)", _backend()),
         "ref_image": _node("LoadImage", "ref_image", {"image": REF_PLACEHOLDER}),
@@ -555,30 +620,41 @@ def chroma_template(template_id: str) -> tuple[dict, dict]:
     return prompt, slots
 
 
-def chroma_map() -> tuple[dict, dict[str, dict]]:
+def chroma_template(template_id: str) -> tuple[dict, dict]:
+    return dit_template(CHROMA_FAMILY, template_id)
+
+
+def dit_map(family: str) -> tuple[dict, dict[str, dict]]:
+    spec = DIT_FAMILIES[family]
     templates, prompts = {}, {}
     for template_id in ("t2i_basic", "i2i_basic"):
-        prompt, slots = chroma_template(template_id)
+        prompt, slots = dit_template(family, template_id)
         prompts[template_id] = prompt
-        templates[template_id] = {"file": f"{CHROMA_FAMILY}/{template_id}.api.json",
+        templates[template_id] = {"file": f"{family}/{template_id}.api.json",
                                   "roles": sorted(template_roles(template_id)), "slots": slots}
     mapping = {
-        "family": CHROMA_FAMILY,
-        "label": "Chroma1-HD",
-        # Model files and sampler defaults live here, not in code (WI §4). CHROMA_* env vars override the files.
-        "models": CHROMA_MODELS,
-        "defaults": CHROMA_DEFAULTS,
-        "presets": CHROMA_PRESETS,
-        # Only the base image (img2img) is supported. Flux ControlNet / IP-Adapter are not verified on Chroma (WI §2.4).
+        "family": family,
+        "label": spec["label"],
+        # Model files and sampler defaults live here, not in code (WI §4). The catalog entry
+        # (config/host_models.json) names the diffusion model and its own sampler values.
+        "models": spec["models"],
+        "defaults": spec["defaults"],
+        **({"presets": spec["presets"]} if spec.get("presets") else {}),
+        # Only the base image (img2img) is supported. ControlNet / IP-Adapter are not verified on these models.
         "supported_roles": ["base"],
         "pose_enabled": False,
         "pose_fallback": "refuse",
         "pose_fallback_denoise": 0.65,
         "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
-        "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
+        "model_setup_hint": spec["model_setup_hint"],
         "templates": templates,
     }
+    mapping["prompt_style"] = spec["prompt_style"]
     return mapping, prompts
+
+
+def chroma_map() -> tuple[dict, dict[str, dict]]:
+    return dit_map(CHROMA_FAMILY)
 
 
 def _write_json(path: Path, data) -> None:
@@ -595,11 +671,12 @@ def main() -> None:
         _write_json(WORKFLOWS / mapping["templates"][template_id]["file"], prompt)
     _write_json(WORKFLOWS / "maps" / f"{MODEL_FAMILY}.json", mapping)
     print("wrote furry_ja_api.json, furry_ja.json,", len(prompts), f"templates and maps/{MODEL_FAMILY}.json under", WORKFLOWS)
-    chroma, chroma_prompts = chroma_map()
-    for template_id, prompt in chroma_prompts.items():
-        _write_json(WORKFLOWS / chroma["templates"][template_id]["file"], prompt)
-    _write_json(WORKFLOWS / "maps" / f"{CHROMA_FAMILY}.json", chroma)
-    print("wrote", len(chroma_prompts), f"templates and maps/{CHROMA_FAMILY}.json")
+    for family in DIT_FAMILIES:
+        mapping, prompts = dit_map(family)
+        for template_id, prompt in prompts.items():
+            _write_json(WORKFLOWS / mapping["templates"][template_id]["file"], prompt)
+        _write_json(WORKFLOWS / "maps" / f"{family}.json", mapping)
+        print("wrote", len(prompts), f"templates and maps/{family}.json")
 
 
 if __name__ == "__main__":

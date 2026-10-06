@@ -1,33 +1,23 @@
 {
-  "family": "flux",
-  "label": "Chroma1-HD",
+  "family": "anima",
+  "label": "Anima",
   "models": {
-    "unet_name": "chroma_v10HD.safetensors",
-    "weight_dtype": "fp8_e4m3fn",
-    "clip_name": "t5xxl_fp8_e4m3fn.safetensors",
-    "clip_type": "chroma",
-    "vae_name": "ae.safetensors"
+    "unet_name": "indigoFurryMixAnima_v10.safetensors",
+    "weight_dtype": "default",
+    "clip_name": "qwen_3_06b_base.safetensors",
+    "clip_type": "stable_diffusion",
+    "vae_name": "qwen_image_vae.safetensors"
   },
   "defaults": {
-    "width": 1024,
-    "height": 1024,
+    "width": 832,
+    "height": 1216,
     "steps": 28,
-    "cfg": 3.5,
-    "sampler_name": "euler",
-    "scheduler": "beta",
+    "cfg": 4.0,
+    "sampler_name": "er_sde",
+    "scheduler": "simple",
     "size_min": 512,
-    "size_max": 1216,
-    "max_pixels": 1048576
-  },
-  "presets": {
-    "quality": {
-      "steps": 40,
-      "cfg": 3.0
-    },
-    "speed": {
-      "steps": 26,
-      "cfg": 3.8
-    }
+    "size_max": 1536,
+    "max_pixels": 2359296
   },
   "supported_roles": [
     "base"
@@ -36,10 +26,10 @@
   "pose_fallback": "refuse",
   "pose_fallback_denoise": 0.65,
   "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
-  "model_setup_hint": "scripts\\setup-comfyui-chroma.ps1 を実行するか、.env の CHROMA_* を確認してください",
+  "model_setup_hint": "scripts の setup-image-models を実行して Anima のテキストエンコーダと VAE を入れてください",
   "templates": {
     "t2i_basic": {
-      "file": "flux/t2i_basic.api.json",
+      "file": "anima/t2i_basic.api.json",
       "roles": [],
       "slots": {
         "prompt": "user_prompt.inputs.value",
@@ -59,7 +49,7 @@
       }
     },
     "i2i_basic": {
-      "file": "flux/i2i_basic.api.json",
+      "file": "anima/i2i_basic.api.json",
       "roles": [
         "base"
       ],
@@ -81,5 +71,5 @@
       }
     }
   },
-  "prompt_style": "prose"
+  "prompt_style": "danbooru"
 }
