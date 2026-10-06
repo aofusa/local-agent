@@ -20,5 +20,10 @@ policy.reply_to があれば、それが今返事をする発言である。そ�
 {"kind":"look","look":{"yaw":0.0,"duration_ms":400}}
 {"kind":"noop"}
 
+例:
+- reply_to「あおふさ、こんにちは！今日は何してたの？」→ {"actions":[{"kind":"say","say":{"text":"こんにちは！今日はワールド巡りしてたよ。そっちは？"}}],"belief":"挨拶と近況の質問"}
+- reply_to「あおふさ、聞こえる？」→ {"actions":[{"kind":"say","say":{"text":"聞こえてるよ、どうしたの？"}}],"belief":"聞こえるか確認された"}
+自分の名前で自分に呼びかけない。相手の質問をそのまま言い返さない。
+
 返す形:
 {"actions":[{"kind":"noop"}],"belief":""}
