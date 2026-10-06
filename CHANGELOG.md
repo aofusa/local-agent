@@ -1,5 +1,10 @@
 # Changelog
 
+## 未リリース — vrc-pilot の presence ターン
+
+- `POST /presence/turn` と `GET /presence/health`（`src/furry_agent/presence.py`、`docs/presence-design.md`）。vrc-pilot が世界状態の要約を送り、ActionCommand を最大 2 つ受け取る。ツールは無く、144 文字超は切らずに 422、方針違反の移動は 422、4 秒で 504。`/coder/turn` と同じ http.app に登録した。画像グラフ・チャットグラフ・`langgraph.json` のグラフ ID は変えていない。
+- `config/host_models.json` に `presence-qwen3.5-4b`（ゲーミングノートの llama.cpp）と `presence-gemma4-e4b`（Mac の mlx-vlm、チャットのみの予備）。
+
 ## v0.13.0 — 別ホストの LLM（リモートの llama.cpp、OpenAI 互換サービス）、UI の表示崩れの修正と応答時間
 
 - 別ホストの推論モデル（`docs/remote-llm-design.md`）: `config/host_models.json` の推論モデルに `endpoint`（`kind` = `llamacpp` / `openai`、`url`、`model`、任意の `api_key`）を書くと、チャットタブと `POST /coder/turn` がその接続先を呼ぶ（`llm_client.RemoteLLM`）。接続先の情報はカタログに直接書き、`.env` と `.env.example` は変えない。
