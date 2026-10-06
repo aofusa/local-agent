@@ -1,11 +1,13 @@
 # 構成
 
-ファイルの配置、ワークフローのノード、UI の変更点、ログ、開発の手順です。全体の約束事は [AGENTS.md](../AGENTS.md)、各機能の設計はこのフォルダの設計書にあります。
+ファイルの配置、ワークフローのノード、UI の変更点、ログ、開発の手順です。規則は [AGENTS.md](../AGENTS.md)、仕様の詳細は [specification.md](specification.md)、決めたことの経緯は [decisions.md](decisions.md)、各機能の設計はこのフォルダの設計書にあります。
 
 ## ファイル
 
 ```
-AGENTS.md / docs/                     仕様
+AGENTS.md                             開発の規則と構成（最小限）
+docs/specification.md / decisions.md  仕様と契約の詳細 / 実装時の決定と経緯
+docs/*-design.md, *-work-instruction.md  機能ごとの設計と実装記録
 langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph、http.app -> coder_app.py:app（/coder/turn）
 src/furry_agent/chat_graph.py         チャットタブのグラフ（ingest → route → chat | plan → search → filter → read → critique → synthesize）
 src/furry_agent/chat_models.py        チャットタブの llama-server（reader、代理リーダー）の起動と停止、外部依存の差し替え口

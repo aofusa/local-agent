@@ -1,0 +1,53 @@
+# 実装時の決定と経緯
+
+実装の途中で決めたこと、その理由、版ごとの経緯をまとめます。変えてはいけない仕様は [specification.md](specification.md)、規則は [AGENTS.md](../AGENTS.md)、版ごとの変更の一覧は [CHANGELOG.md](../CHANGELOG.md) にあります。ここに書いた値を変えるときは、理由を添えてこの文書も直します。
+
+## 実装済みの範囲（版ごと）
+
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）、cirka の auto モード（既定）・Claude Code に倣った画面・`docs/logo` のロゴ（v0.8.0。ソースはクライアント側 CUI として `client/`）、LM Studio をやめて llama.cpp のルータで 27B を動かすことと、llama.cpp と ComfyUI をセットアップが `tools/` に自前で導入すること（`docs/llamacpp-router-design.md`、v0.11.0）、ホストのモデル一覧（`config/host_models.json`）から Web と cirka が推論モデル・画像モデルを選ぶことと、モデルごとのパラメータ、Krea 2（Wulver）と Anima（Indigo Furry Mix Anima）の画像系統、macOS（Apple silicon、MLX 優先、`scripts/*.sh`）への対応（`docs/host-model-selection-design.md`、v0.12.0）は実装済みで、他ホストのブラウザからの動作も確認済みである（v0.12.0 で Indigo Furry Mix XL を足し、役割が `config/host_models.json` に移った `.env` の設定を消した）。導入と起動の最小手順は `README.md`、詳細は `docs/setup.md` / `docs/usage.md` / `docs/configuration.md` / `docs/architecture.md` / `docs/troubleshooting.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、AGENTS.md・specification.md と設計書の制約に従う。
+
+## 実装時に決めたもの
+
+- ComfyUI と llama.cpp は `tools/` に自前で導入する（v0.11.0、利用者の指定）。モデルの置き場は指定なしで決まる: 既にある場所（LM Studio・以前の ComfyUI のモデルフォルダ、Hugging Face のキャッシュ）から `tools/` へハードリンクし、Hugging Face のファイルは `hf download`（無ければ uv 経由の huggingface_hub）でキャッシュに取得してからリンクする（同じモデルを二重に取得しない。`scripts/lib/common.ps1` の `Import-ComfyModel` / `Get-HfFile`）。再量子化した IQ3_M の SHA-256 は `config/llm_model.json` に固定し、この端末では変更前の LM Studio のファイルと一致した。ComfyUI は Comfy-Org/ComfyUI の検証済みコミット（v0.38.0-32、`e9027f2b`）、PyTorch は Radeon なら AMD の ROCm 7.2 Windows 版（`repo.radeon.com`）、NVIDIA なら CUDA 12.8、ほかは CPU。パスは `.env` に保存する。
+- チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（v0.12.0 から `config/host_models.json` の `yiffinhell-vantablack`、`DEFAULT_IMAGE_MODEL`）。
+- モデルの選択（v0.12.0、利用者の指定。`docs/host-model-selection-design.md` 末尾の実装記録）: `config/host_models.json` に推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 8 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix XL（Noob EPS 11）、Indigo Furry Mix Anima、Chroma1-HD、Wulver）を置く。推論モデルはルータのプリセットの節（`scripts/host_models.py preset` が導入済みの GGUF ごとに書く）で、選ぶとルータへ送る `model` と文脈・思考の有無が変わる。Bonsai は `thinking: off`。SDXL のモデル（5 つ）はすべて以前の `LORAS` の LoRA（novabeast xl v1 rank64 pony、強度 1.0）を使う。パラメータの出典は `docs/configuration.md`「モデルの一覧とパラメータ」。画像のタグ生成の LLM は選択によらずルータの `LLM_MODEL`（ワークフローの `llm_backend`）のまま。`GET /models` は使えないモデルも理由つきで返し、Web はピッカーで無効にし、cirka は拒否する。
+- `.env` の整理（v0.12.0、利用者の指定）: 役割が `config/host_models.json` に移った設定と使わなくなった設定（`CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME`、`LMSTUDIO_*`、`LOCAL_DOC_ROOTS`、`DOC_EXTENSIONS`）は、`.env.example` からもコードの読み取りからも消した。残っていても読まない。
+- 画像系統の追加（v0.12.0）: `krea2`（Wulver、Krea 2 の turbo 系。Qwen3-VL-4B fp8、qwen_image_vae、8 steps、cfg 1、euler / simple、英語の説明文）と `anima`（Indigo Furry Mix Anima。Qwen3 0.6B、qwen_image_vae、er_sde / simple、cfg 4、タグ + score タグ）。どちらも Chroma と同じく `ckpt` が `FurryJaDiffusionLoaderAfterEject`（eject の後に拡散モデル・テキストエンコーダ・VAE を読む）で、ノード ID は SDXL と同じ。参照画像は `base` だけ。テキストエンコーダと VAE は `setup-image-models`（`config/host_models.json` の `downloads`、SHA-256 照合）が入れる。
+- macOS（v0.12.0）: LLM は MLX を優先する（`setup-mlx.sh` が MLX 版を入れたモデルは `engine = mlx` の節になり、`furry_agent.mlx_router` が `mlx_lm.server` で動かす）。MLX 版が無いモデル（Bonsai の 1-bit / ternary、量子化済みの GGUF だけのもの）と検索用のモデルは PrismML fork の llama-server（Metal）で動かす。確認機（空き 20GB）では Qwen3.8 27B（GGUF 12.7GB / MLX 4bit 14GB）が入らないため、推論とタグ生成は Bonsai 2 27B abliterated（`LLM_MODEL` もこれ）、画像は yiffInHell VANTABLACK だけを入れた。入れていないモデルは一覧で使えないと表示される。
+- agent-chat-ui に返す画像は `{"type": "image", "mimeType": "image/png", "data": <base64>}`。在庫の UI は AI メッセージの画像を描画しないため、`ai.tsx` に最小限の変更を加えた。
+- 参照画像の役割と強度は、画像ブロックの `metadata.role` / `metadata.strength` で送る。UI には添付ごとの役割セレクトと強度欄を加えた。役割の確認は在庫の HITL 表示（承認 / 編集 / 却下）を使う。
+- LoRA は画像モデルごとに `config/host_models.json` の `loras`（`"<ファイル>:<強度>"` の配列、CLIP 強度は同じ値、0 より大きく 2 以下）。v0.11 までの `.env` の `LORAS` / `CHROMA_LORAS` は読まない。
+- 参照画像用のノードとモデルは `scripts/setup-comfyui-refs.ps1` が入れる（ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose ONNX、Depth Anything V2 Small）。実行時の自動ダウンロードはしない。
+- タイムアウト（v0.9.0、利用者の指定）: 何も返ってこない時間が `AGENT_IDLE_TIMEOUT_S`（`.env`、既定 1200 秒、最小 30 秒）続いたときだけ打ち切り、何かが返ってきている限り全体の時間では打ち切らない。モデル呼び出し（ルータの 27B、検索用の llama-server）はすべてストリームで受け取り、トークンと思考トークンで計る（`llm_client.idle_timeout`）。ComfyUI の待ちはその prompt の進捗イベントで計り、LM Connect ノードの `read_timeout_seconds` にも同じ値を入れる（`templates.build_run_prompt`。入力値の差し替えだけで、ノード ID と構造は変えない）。llama-server の起動は `/health` の応答（読み込み中の 503 を含む）で計る。ほかのタブや ComfyUI のキューは、相手が動いているあいだ待つ（ロックの期限 15 分が止まった相手を外す）。全体の予算（`SEARCH_WALL_CLOCK_S`、`CLAIM_TIMEOUT_S`、`CONTROLLER_WALL_CLOCK_S`、`SEARCH_TOTAL_TIMEOUT_S`、`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）は既定で無しで、設定したときだけ掛かる。1 件を諦めて先へ進むための短い上限（Tor 経由の HTTP リクエスト 30 秒、Tor の起動 90 秒、状態確認の HTTP）とコンテナ実行の 60 秒は残す。時間で `max_tokens` を削らない（context だけで決める）。`COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は廃止。cirka は設定 `idle_timeout_s`（既定 1200 秒）で同じ考え方（`bash` は出力が途切れた時間で止める）。
+- ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1`）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
+- モデル系統は選んだ画像モデルの `family` で決まる（v0.11 までは `.env` の `COMFY_MODEL_FAMILY`。`sdxl` はタグ、`flux` は Chroma1-HD と英語の説明文、`krea2` / `anima` は上記）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
+- 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可。27B のルータと `llama-quantize` も同じ build）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。取得物（Tor、fork の zip、モデル）は SHA-256 を照合する（値は `config/search_models.json` と Tor の配布元）。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
+- 量と長さの上限（v0.10.0、利用者の指定）: 以前はコードの定数だった上限（検索意図の数、ページの字数、各段の `max_tokens`、監査する文の数、履歴の字数、推敲の件数、出力の末尾、ロックの期限、添付画像の大きさなど）は `.env` で変えられる（`config.env_int` / `env_float`、モジュールの読み込み時に読む。一覧は `docs/configuration.md`「量と長さの上限」と `.env.example` の末尾）。既定値は変えていない。`SEARCH_MAX_ROUNDS`・`SEARCH_MAX_PAGES`・`CLAIM_MAX`・`CLAIM_QUOTE_CHARS`・`CONTROLLER_MAX_STEPS` などの範囲の上限も広げた（既定は設計書の値のまま）。reader の数と検索意図は 7 まで（ポート `BONSAI_BASE_PORT + 0..6`）。固定のまま残すもの: コンテナ実行の上限（60 秒、2g、2 CPU、256 pids、`--network none`、実行 2 回）、主張の検証の門（20 字の一致）、参照画像 4 枚、ノード ID と生成の既定値。
+- コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
+- この端末のルータの 27B は context 4096（`LLM_CONTEXT`）で約 2 トークン/秒（v0.10 までの LM Studio では 0.9〜1.5）。チャットタブは 1 回の呼び出しの `max_tokens`（回答 + 思考）を context に収める（v0.9.0 から時間では削らない）。思考の余地（256 トークン）が無いときは思考を使わず、思考が予算を使い切ったら思考なしで 1 回答え直す。
+- Docker（v0.11.0、利用者の指定）: `docker` コマンドがエンジンにつながればそれを使う（Docker Desktop でも Docker Engine でもよく、Desktop には触れない）。つながらないときだけ、承認したコードの実行のあいだ Docker Desktop を起動し（`docker desktop start`、無ければ `Docker Desktop.exe`）、CLI プラグインで起動したときは終わったら止める（VM が約 1.5GB を使い、27B や ComfyUI と取り合うため）。`docker` コマンドが無ければ何も起動しない（`sandbox.engine_state`）。
+- 主張の検証（`docs/claim-verification-design.md` §10）: 既定で有効（`CLAIM_VERIFY=1`）、速いモードでも行う。時間の予算 `CLAIM_TIMEOUT_S` は既定で無し（v0.9.0。以前は 600 秒。設計の 120 秒では実測 150〜360 秒の検証が監査に届かなかった）。失敗時は抜粋だけを返す（`CLAIM_VERIFY_FAIL_OPEN=0`）。進捗表は `claim_trace` として UI の折りたたみに出す。`opinion` は使い、数値を含むものは事実の主張として扱う。
+- IP-Adapter のキャラクター weight は強度 × 0.5（`workflows/maps/sdxl.json` の `ipadapter_weight_scale`）。DWPose は人物検出なし + ONNX の CPU 実行。根拠は `docs/troubleshooting.md` の「調整の記録」。
+- 自律モード（`docs/autonomous-controller-design.md` 末尾の実装記録）: 制御のノードは `control_nodes.py` に置き（write_nodes / code_nodes と同じ形）、Decision のスキーマもそこに置く。道具のメッセージはその id のまま残し、制御のメッセージには新しい id を振る（道具の出力を上書きしない）。文章のあとの最終回答は本文を繰り返さない。利用者が章の確認やコンテナ実行を却下したら、制御もそこで終える。
+- CUI の画面（v0.8.0）: Claude Code に倣い、ロゴ入りの枠、枠付きの入力欄と許可モードの行、`⏺` / `⎿` のブロック、差分、スピナー、矢印キーのメニュー。生のキー入力（raw mode）は入力欄とメニューのあいだだけ使い、出力は通常の行のまま（パイプや `-p` でも読める）。ロゴは画像のまま出せないので、`scripts/gen_cirka_art.py` が `docs/logo/cirka-icon.jpg` と `cirka-logo.jpg` を小さなビットマップにし、▀ ▄ █ で描く（24 ビット色の端末ではロゴの赤 #D63A2F）。
+- CUI のディレクトリ名（v0.8.1、利用者の指定）: 固有名詞ではなく役割で `client/` とした。コマンド名・設定・データの置き場・スクリプト名（`build-cirka.ps1`、`gen_cirka_art.py`）は `cirka` のまま。
+- CUI（`docs/locus-cui-design.md` 末尾の実装記録）: コマンド名は `cirka`。設定は `%APPDATA%\cirka\config.toml`（XDG）< `./.cirka/config.toml` < `CIRKA_HOST` など < `--host`。モデルゲートは素の `POST /coder/turn`（LangGraph のスレッドを使わない）で、`GET /coder/health` が文脈の大きさを返す。27B の tool calling はサーバのネイティブの解析で足りた（v0.10 までは LM Studio、v0.11.0 から llama-server の `--jinja`。XML の自前解析は入れていない）。cirka は context 4096 に合わせ、ツールの説明を短くし、古い結果を 1 行に潰して収める。
+
+## フェーズ 1 の実装順序（記録）
+
+最初の実装（フェーズ 1）は次の順で、設計書 §6 の完了条件を満たした。新しい機能でも、外部プロセスの確認 → 最小の 1 枚 → UI → 他ホスト、の順で確かめる。
+
+設計書 §6 の完了条件を、その順で満たす。呼び出し元は設計書に書かれた薄いフロントではなく LangGraph である。各段が終わるまで次へ進まない。
+
+1. `http://127.0.0.1:8080/v1/models`（llama.cpp のルータ）と `http://127.0.0.1:8188/system_stats` を確認する。応答が無いときは起動手順を README と `docs/usage.md` に書き、起動できないことだけを理由にリポジトリ内の実装を放棄しない。起動そのものをエージェントが勝手に広範囲へ変更しない。
+2. セットアップ（`scripts/setup-comfyui.ps1`）が `tools/comfyui` に入れた ComfyUI へ `eedali/LM_Connect` を導入し、再起動後にノード一覧へ出ることを確認する。ローカル GGUF バックエンドは使わない。CUDA 版 llama-cpp-python は入れない。フォールバック条件は設計書 §3.2 に従う。
+3. `workflows/furry_ja_api.json` と `workflows/furry_ja.json`、`prompts/system_furry_tags.txt` を作る。
+4. LangGraph のグラフを作り、テキストだけで 1 枚生成できることを確認する。ログに、eject が成功したことと、KSampler 開始時にルータのモデルが unloaded であることを残す。
+5. 生成画像が `outputs/` と ComfyUI の Save Image の両方に残り、グラフの応答として UI に出ることを確認する。
+6. agent-chat-ui をこのリポジトリで起動し、他ホストから日本語 1 文を送って UI 上に静止画が返ることを確認する。
+7. 参照画像 1 枚の img2img を確認する。
+8. VHS があるときだけ動画フレーム経路を足す。無いときは `docs/troubleshooting.md`（既知の対象外）に「未導入のため対象外」と書く。
+
+## 設計書のフェーズ 2 の frontend/
+
+設計書のフェーズ 2 に書かれた `frontend/`（単一 HTML と小さな Python）は、このプロジェクトの利用者向け UI ではない。利用者向け UI は agent-chat-ui とする。`frontend/` は、利用者に頼まれない限り作らない。

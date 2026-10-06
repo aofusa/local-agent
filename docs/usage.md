@@ -1,6 +1,6 @@
 # 使い方
 
-README の「実行」の補足です。起動の詳細、モデルの選択、画像タブ、チャットタブ、CUI（cirka）の使い方をまとめます。設定の一覧は [configuration.md](configuration.md)、困ったときは [troubleshooting.md](troubleshooting.md)。
+README の「QuickStart」の補足です。起動の詳細、モデルの選択、画像タブ、チャットタブ、CUI（cirka）の使い方をまとめます。設定の一覧は [configuration.md](configuration.md)、困ったときは [troubleshooting.md](troubleshooting.md)。
 
 ## 起動の詳細
 

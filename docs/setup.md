@@ -1,6 +1,6 @@
 # セットアップの詳細
 
-README の「インストール」の補足です。各スクリプトが何をするか、オプション、手動で設定する場合、メモリと量子化の考え方をまとめます。
+README の「QuickStart」の補足です。各スクリプトが何をするか、オプション、手動で設定する場合、メモリと量子化の考え方をまとめます。
 LLM（llama.cpp）と ComfyUI は、どちらもセットアップがこのリポジトリの `tools\` に入れて使います（LM Studio と既存の ComfyUI は要りません）。設計の経緯は [llamacpp-router-design.md](llamacpp-router-design.md)。
 
 ## 動作環境
