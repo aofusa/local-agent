@@ -154,7 +154,15 @@ export function ModelPicker({
 }) {
   const { models, error, loading, refresh } = useHostModels(apiUrl);
   const [open, setOpen] = useState(false);
+  // Fixed position from the button: the input area scrolls and would clip an absolutely placed list.
+  const [place, setPlace] = useState<{
+    right: number;
+    bottom?: number;
+    top?: number;
+    maxHeight: number;
+  } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -180,7 +188,24 @@ export function ModelPicker({
   const name = current?.label || (error ? "モデル" : value || "…");
 
   const toggle = () => {
-    if (!open) void refresh();
+    if (!open) {
+      void refresh();
+      const rect = button.current?.getBoundingClientRect();
+      if (rect) {
+        const right = Math.max(8, window.innerWidth - rect.right);
+        const above = rect.top - 16;
+        const below = window.innerHeight - rect.bottom - 16;
+        setPlace(
+          above >= below
+            ? {
+                right,
+                bottom: window.innerHeight - rect.top + 8,
+                maxHeight: above,
+              }
+            : { right, top: rect.bottom + 8, maxHeight: below },
+        );
+      }
+    }
     setOpen(!open);
   };
 
@@ -190,6 +215,7 @@ export function ModelPicker({
       className={cn("relative", className)}
     >
       <button
+        ref={button}
         type="button"
         onClick={toggle}
         aria-haspopup="listbox"
@@ -204,7 +230,17 @@ export function ModelPicker({
         <div
           role="listbox"
           aria-label={kind === "inference" ? "推論モデル" : "画像モデル"}
-          className="bg-background absolute right-0 bottom-full z-50 mb-2 w-80 max-w-[90vw] rounded-xl border p-1 shadow-lg"
+          style={
+            place
+              ? {
+                  right: place.right,
+                  bottom: place.bottom,
+                  top: place.top,
+                  maxHeight: place.maxHeight,
+                }
+              : undefined
+          }
+          className="bg-background fixed z-50 w-80 max-w-[90vw] overflow-y-auto rounded-xl border p-1 shadow-lg"
         >
           <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-xs">
             {kind === "inference" ? "推論モデル" : "画像モデル"}
