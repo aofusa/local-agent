@@ -2,7 +2,7 @@
 
 - 対象: [aofusa/local-agent](https://github.com/aofusa/local-agent)（クライアント `client/` = cirka、Web = `agent-chat-ui`）
 - 日付: 2026-10-05
-- 状態: 設計のみ。実装は含まない
+- 状態: 実装済み（v0.12.0）。設計との差分と吸収方法は末尾の「16. 実装記録」
 - 関連: `AGENTS.md`、`docs/lmstudio-comfyui-workflow-design.md`、`docs/chroma-hd-support-work-instruction.md`、`docs/locus-cui-design.md`、`config/search_models.json`
 
 ## 1. 目的
@@ -402,3 +402,37 @@ Claude / Gemini から採るもの:
 - Claude の effort / thinking 切替、Gemini の入れ子メニュー。ピッカーはモデル一覧だけ。
 - `/image` を `/image-model` の別名にすること。本文中のモデル名解釈。
 - 認証の追加。
+
+## 16. 実装記録（v0.12.0、2026-10-06）
+
+依頼（2026-10-06）は、この設計書を参考にした推論モデル・画像モデルの選択に加えて、次を求めた: モデルごとのパラメータを設定ファイルに持つ、初期の候補（推論 2、画像 7）とその推奨パラメータを Web で調べて入れる、SDXL のモデルには現在の LoRA を使う、Wulver（`wulverKrea2_v05_fp8.safetensors`）に対応する、macOS（MLX 優先）に対応する。
+
+### 16.1 設計との差分
+
+| 項目 | 設計 | 実装 | 理由 |
+|---|---|---|---|
+| 推論モデルの実体 | 両方とも `chat_models._leader` と同じ個別の llama-server（port offset 9）を起動 | 両方ともルータ（v0.11.0 の `llama-server --models-preset`）の節。選ぶとルータへ送る `model` が変わる | 設計の時点では 27B が LM Studio にあった。v0.11.0 でルータができ、unload と eject の確認（`GET /models`）がすでにルータ前提なので、同じ経路に載せた。ルータは `--models-max 1` で前のモデルを自分で外す（設計 §7 の「切替前に stop」「同じ id なら再利用」をルータが行う） |
+| Bonsai とルータ | 検索の代理リーダーと同じファイル | 同じ GGUF をプリセットの節にもする（二重に置かない）。AGENTS.md の「検索モデルはルータに入れない」に例外として書いた | 上と同じ |
+| カタログの推論の項目 | `catalog_id`、`context_env`、`thinking` | `gguf`（`{"catalog": "llm_model"}` か `{"catalog": "search_models", "id": …}`）、`context`、`thinking`、`vision`、`params`（llama-server のオプション）、`gpu_offload`、`mlx` | モデルごとのパラメータ（依頼）。Qwen の GGUF は `config/llm_model.json` にあるため |
+| 画像の候補 | yiffinhell、indigofurrymixml（SDXL）、chroma-hd、wulver（SDXL） | yiffinhell-vantablack / -metallictetra / -xxxtended-v2、rekemono（sdxl）、indigofurrymix-anima（**anima**）、chroma-hd（flux）、wulver（**krea2**） | 依頼のファイルを調べた結果: Indigo Furry Mix Anima は Anima（Cosmos-Predict2 系、Qwen3 0.6B）、Wulver は Krea 2（Qwen3-VL-4B）の拡散モデルだけのファイルで、どちらも SDXL ではない。系統を 2 つ足した |
+| 画像の項目 | `ckpt`、`prompt_style`、`loras` | 加えて `params`（steps / cfg / sampler_name / scheduler / width / height / quality_prefix / negative）、`models`（テキストエンコーダ等の差し替え）、一覧の `downloads`（系統ごとの取得物） | 依頼のモデルごとのパラメータ |
+| id の文字 | 英小文字・数字・ハイフン | ドットも可 | 設計の例 `qwen3.8-27b-abliterated` にドットがある |
+| `DEFAULT_INFERENCE_MODEL` | 既定 id | 空なら v0.11 と同じ `LLM_MODEL` / `LLM_CONTEXT`（Mac の `setup-llm.sh` は入っているモデルを書く） | 既存のテストと起動を壊さない（§3.2） |
+| `CHROMA_*` | `CHROMA_UNET_NAME` は読まない | 同じ。`CHROMA_TEXT_ENCODER` / `VAE` / `WEIGHT_DTYPE` / `MAX_PIXELS` / `STEPS` はこの端末の調整として残し、カタログの値の上に重ねる | 設計 §5 のとおり |
+| coder の tool call の再試行（§7、§12） | tool call が無ければ 1 回だけ再試行して `tool_call` エラー | 入れていない | モデルが道具を使わずに答えるのは正常な終わり方で、区別できない。llama-server の `--jinja` の解析で足りている（v0.11 の実装記録） |
+| Web のピッカーの配置 | 送信ボタンの左 | 同じ。一覧は入力欄の上に固定位置で開き、高いときはスクロール | 入力欄の祖先の overflow で 7 件目以降が隠れた |
+| macOS | 対象外（設計の範囲外） | `scripts/*.sh`、MLX 優先のルータ `furry_agent.mlx_router`、PyTorch MPS | 依頼 |
+
+### 16.2 パラメータの決め方
+
+各モデルの配布ページ（Civitai、Hugging Face）の推奨値を使い、出典を `docs/configuration.md`「モデルの一覧とパラメータ」に書いた。例外は 2 つ: Qwen3.8 27B は v0.11 の値（temp 0.4、repeat-penalty 1.1）のまま（タグの JSON を閉じさせるために入れた値で、公式の思考なしの推奨 temp 0.7 / presence-penalty 1.5 より安定を優先）。Rekemono は配布ページが見つからないため、同系統の kemono SDXL の推奨の中央値。既定の yiffInHell VANTABLACK の値はテンプレートと同じで、既定の投入 JSON は v0.11 と変わらない（テストで確認）。
+
+### 16.3 macOS
+
+確認機は Apple M4・24GB・macOS 15.5、空きディスクは作業開始時 12GB。パッケージと更新のダウンロードキャッシュ（pip、poetry、Yarn、Homebrew、uv、アプリの自動更新）を消して 20GB にしたが、Qwen3.8 27B（GGUF 12.7GB、MLX 4bit 14.1GB）と yiffInHell（7.1GB）は両方は入らない。依頼の「画像は yiffInHell VANTABLACK のみ」に合わせ、推論は Bonsai 2 27B abliterated（5.9GB。検索の代理リーダーと兼用）だけ、検索は Qwen3-1.7B-heretic と Bonsai-4B を入れた。Qwen は一覧で「LLM ルータのプリセットにありません」と表示され、`DEFAULT_INFERENCE_MODEL` と画像のタグ生成（`LLM_MODEL`）は Bonsai になる。Chroma1-HD（17.8GB）と Wulver（12.2GB）は容量の都合で試していない。
+
+MLX: Bonsai の 1-bit / ternary は MLX の一般の実行系では動かず（PrismML の MLX 版は abliterated でない別物で、独自のランタイムが要る）、abliterated の MLX 版も無い。Qwen3.8 27B abliterated の MLX 4bit 版は一覧の `mlx` に書いたが、この Mac には入らない。MLX の経路は小さな MLX モデル（mlx-community/Qwen3-0.6B-4bit）を入れたプリセットで確かめ（`furry_agent.mlx_router` 経由で、思考の既定オフと `<think>` の分離、ストリーム、tool call、unload、同じルータの GGUF の節への切り替え）、確認後に消した。
+
+### 16.4 確認
+
+Windows（ROG Ally X）と macOS（M4）での結果は `CHANGELOG.md` の v0.12.0 にある。Windows では 7 つの画像モデルのうち VANTABLACK（テキストのみ・img2img）、METALLIC TETRA（UI のピッカーから）、Wulver、Indigo Furry Mix Anima、Chroma1-HD を生成し、推論は Qwen と Bonsai の両方をチャットタブと cirka で使った。macOS では Bonsai と VANTABLACK で画像生成、Tor 検索、cirka、別ホストのブラウザからの UI を確かめた。

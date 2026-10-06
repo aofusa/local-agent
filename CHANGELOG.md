@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.12.0 — 推論モデル・画像モデルの選択、Krea 2（Wulver）と Anima、macOS（MLX 優先）
+
+- モデルの一覧 `config/host_models.json`（`docs/host-model-selection-design.md`）: 推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 7 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix Anima、Chroma1-HD、Wulver）。モデルごとにパラメータを持つ（推論: context、思考の有無、llama-server のサンプリング。画像: steps、cfg、サンプラー、スケジューラ、サイズ、quality prefix、negative、LoRA）。値は各モデルの配布ページの推奨から決め、出典を `docs/configuration.md` に書いた。SDXL のモデルはすべて以前の `LORAS` の LoRA を使う。
+  - `GET /models`（`/coder/turn` と同じ http.app）: 一覧と、使えるか（ルータのプリセットの節、ComfyUI のファイル、`HOST_MODELS_DISABLE`）とその理由。
+  - 画像グラフ: `configurable.image_model`（無ければ `DEFAULT_IMAGE_MODEL`）の系統・ファイル・LoRA・パラメータをジョブに焼く。`CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME` は読まない。本文のモデル名では切り替えない。SDXL のマップにサンプラーと `split` のスロットを足した（テンプレートは変えていない。既定のモデルの投入 JSON は v0.11 と同じ）。
+  - チャットタブと `POST /coder/turn`: `configurable.inference_model` / body の `inference_model`（無ければ `DEFAULT_INFERENCE_MODEL`、それも無ければ v0.11 と同じ `LLM_MODEL`）。推論モデルはルータのプリセットの節（`scripts/host_models.py preset` が導入済みの GGUF ごとに書く）で、文脈と思考の有無もモデルに従う。Bonsai は思考を表示しない。未知・使えない id は拒否し、別のモデルへ替えない。応答に `model_info`、`/coder/health` に既定の id。
+- 画像系統 `krea2`（Wulver: Qwen3-VL-4B fp8 と qwen_image_vae、8 steps、cfg 1、英語の説明文、`prompts/system_krea2_prose.txt`）と `anima`（Indigo Furry Mix Anima: Qwen3 0.6B と qwen_image_vae、er_sde、cfg 4、タグ）。Chroma と同じ形（`ckpt` が eject の後に拡散モデル・テキストエンコーダ・VAE を読む、ノード ID は同じ、参照画像は元画像だけ）。`setup-image-models.ps1` / `.sh` が画像モデルのファイルを取り込み、エンコーダを Hugging Face から取得する（SHA-256 照合）。
+- Web UI: 送信ボタンの横にモデルのピッカー（Claude / Gemini 型）。チャットタブは推論モデル、画像タブは画像モデル。使えないモデルは理由つきで無効、選択はスレッドごと（新しいチャットは既定）、応答の下にモデル名。
+- cirka 0.4.0: `/model`、`/image-model`、`/models`。id は完全一致、`--save`（`--project`）、`CIRKA_INFERENCE_MODEL` / `CIRKA_IMAGE_MODEL`、セッションに保存して `/resume` で戻す。入力欄の下に `model:… image:…`（端末の幅に収める）。`cirka status` に両方の id。
+- macOS（Apple silicon）: `scripts/*.sh`（`setup.sh`、`setup-llamacpp.sh`、`setup-llm.sh`、`setup-mlx.sh`、`setup-comfyui.sh`、`setup-image-models.sh`、`setup-comfyui-refs.sh`、`setup-search-models.sh`、`setup-tor.sh`、`setup-sandbox.sh`、`start-*.sh`、`start-all.sh`、`stop-all.sh`、`doctor.sh`、`build-cirka.sh`）。llama.cpp は PrismML fork の macOS arm64（Metal）版、ComfyUI は PyTorch の MPS、Tor は Homebrew。LLM は MLX を優先する: MLX 版を入れたモデルは `furry_agent.mlx_router`（llama.cpp のルータと同じ API で、MLX の節は `mlx_lm.server`、GGUF の節は llama-server を子にする。思考は既定で切り、`<think>` を `reasoning_content` に分ける）。空きメモリ（`vm_stat`）とポート（`lsof`）も macOS に対応した。
+- デグレ確認（Windows、2026-10-06、ROG Ally X）:
+  - SDXL（既定の yiffInHell VANTABLACK + novabeast）テキストのみと元画像 1 枚の img2img（denoise 0.45）。投入したサンプラーの値はテンプレートと同じ。
+  - yiffInHell METALLIC TETRA を UI のピッカーで選んで送信（`configurable.image_model`、24 steps / cfg 3.5 / sgm_uniform が投入された）。
+  - Wulver（Krea 2）: 英語の説明文、eject の確認の後に拡散モデル・Qwen3-VL・VAE を読み込み、1024×1024、約 12 分。
+  - Indigo Furry Mix Anima: タグ + score タグ、er_sde / cfg 4、約 4 分。
+  - Chroma1-HD（`CHROMA_MAX_PIXELS` を一時的に 512×512 相当に下げた）。
+  - Tor 検索（速いモード）: 計画（ルータの 27B）→ reader → 代理リーダーの統合、主張 12 件の突き合わせ。
+  - チャットタブで Bonsai 2 27B を UI から選んで送信（ルータの Bonsai の節が答え、応答にモデル名）。
+  - cirka 0.4.0: Bonsai 2 27B でファイル作成 → コマンド実行まで完了。ConPTY で `/model`、部分一致の拒否、`/image-model` と入力欄の下の表示を確認。
+  - pytest 644 件、cirka の `cargo test` 75 件と `cargo clippy` が通る。
+- デグレ確認（macOS、2026-10-06、Apple M4・24GB・macOS 15.5。空きディスクが少ないため推論は Bonsai 2 27B abliterated、画像は yiffInHell VANTABLACK、検索は Qwen3-1.7B-heretic だけを入れた）:
+  - `scripts/setup.sh` の各段（llama.cpp の Metal 版、Tor、検索モデル、ルータのプリセット、ComfyUI と PyTorch 2.14 の MPS、画像モデルのリンク、UI）と `start-all.sh`、`doctor.sh`（ルータ・ComfyUI・Tor がループバックのまま）。
+  - 画像（SDXL テキストのみ）: Bonsai がタグの JSON を返し（`split mode=json`）、eject の確認の後に MPS で生成、`outputs/` と ComfyUI の output に保存（約 11 分。別の VM がメモリを使っていてスワップしたため遅い）。
+  - Tor 検索（速いモード）: Bonsai が計画と統合、Qwen3-1.7B がフィルタと reader、主張 12 件の突き合わせと監査、後始末でルータの Bonsai と検索用 llama-server が残らない。
+  - cirka（Windows の cirka から Mac のホストへ）: 既定が Bonsai（context 8192）になり、ファイル作成 → コマンド実行まで完了。Mac で cirka をビルドし（`crossterm::ansi_support` が Windows 専用だったビルドエラーと、`/var` → `/private/var` の絶対パスを外と誤る不具合を直した）、`cargo test` 76 件と `cargo clippy` が通る。
+  - 別ホスト（Windows）のブラウザから Mac の UI（`http://192.168.11.53:3000`）を開き、Qwen は理由つきで選べず、Bonsai を選んで送ると Bonsai が答える。画像タブは VANTABLACK だけが選べ、ほかは不足ファイルを表示する。
+  - MLX: 小さな MLX モデルで MLX 優先のルータ（思考の既定オフと分離、ストリーム、tool call、unload、GGUF の節への切り替え）を確かめた。Qwen3.8 27B の MLX 版（14GB）と Chroma1-HD・Wulver は容量の都合で試していない。
+  - 確認中に直した macOS の不具合: `.env.example` の CRLF が値に残る、hf 1.x の出力形式、`vm_stat` の subprocess がイベントループを止める（`sysctlbyname` に替えた）。
+
 ## v0.11.0 — LM Studio をやめて llama.cpp のルータへ、ComfyUI と llama.cpp の自前導入、README の整理
 
 - LLM サーバを LM Studio から llama.cpp の llama-server（ルータモード、`--models-preset`、`127.0.0.1:8080`）に替えた（`docs/llamacpp-router-design.md`）。ComfyUI のタグ生成、チャットタブ、cirka の `/coder/turn` が同じ 27B を使う。モデルは最初の要求で子プロセスに載り、`POST /models/unload` で外れる（アイドル 300 秒で sleep してメモリを返す）。検索モデルと同じ PrismML fork の Vulkan 版を使い、build を 1 つにまとめた。
