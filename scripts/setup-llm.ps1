@@ -14,9 +14,10 @@
      pinned SHA-256.
   3. Requantizes the source (default IQ3_M) with llama-quantize so it fits in ~24 GB of shared memory next to the
      OS, unless the requantized file was found in step 2. -Quant none uses the source as it is.
-  4. Writes the router preset tools\llm\models.ini: context, GPU layers (-GpuOffload share of the model's layers),
-     flash attention, 1 slot, mmap loading, thinking off by default, idle sleep (frees the memory after
-     sleep_idle_s seconds without a request).
+  4. Writes the router preset tools\llm\models.ini (scripts\host_models.py): one section per inference model of
+     config\host_models.json whose GGUF exists, with its context and sampling parameters, GPU layers
+     (-GpuOffload share of the 27B's layers; the Bonsai 2 27B runs fully on the GPU), flash attention, 1 slot,
+     mmap loading, thinking off by default, idle sleep (frees the memory after sleep_idle_s seconds).
   5. Saves LLM_SERVER, LLM_PRESET, LLM_URL, LLM_MODEL, LLM_CONTEXT to .env and regenerates workflows\ when the
      model name or the URL differs from the templates.
 
@@ -136,34 +137,25 @@ if ($created -and $pinnedQuant -and (Split-Path -Leaf $target) -eq $pinnedQuant.
 }
 Write-Ok "model: $target"
 
-Write-Step "ルータのプリセット（context $ContextLength、GPU offload $GpuOffload、thinking off）"
-Push-Location $root
-try { $info = (Invoke-Native uv run --quiet python scripts\gguf_info.py $target --offload $GpuOffload | Select-Object -Last 1) | ConvertFrom-Json }
-finally { Pop-Location }
-if ($LASTEXITCODE -ne 0 -or -not $info.layers) { throw "GGUF のメタデータを読めません: $target" }
-Write-Ok "$($info.architecture), $($info.layers) layers -> n-gpu-layers $($info.gpu_layers)"
-$settings = [ordered]@{
-    "model"              = $target.Replace("\", "/")
-    "mmproj"             = $mmproj.Replace("\", "/")
-    "ctx-size"           = $ContextLength
-    "n-gpu-layers"       = $info.gpu_layers
-    "flash-attn"         = "on"
-    "parallel"           = 1
-    # Vulkan on a shared-memory iGPU: without mmap the CPU-side weights go to pinned memory and the load fails
-    # with ErrorOutOfDeviceMemory (measured on the Radeon 890M).
-    "load-mode"          = "mmap"
-    "jinja"              = $true
-    "reasoning-format"   = "deepseek"
-    "reasoning"          = "off"
-    "temp"               = $spec.temperature
-    # LM Studio's default sampling had a repeat penalty of 1.1; without it the tag JSON could loop on the negative
-    # tags until max_tokens and come back unclosed (split fell back to the raw text).
-    "repeat-penalty"     = $spec.repeat_penalty
-    "sleep-idle-seconds" = $spec.sleep_idle_s
-}
+Write-Step "ルータのプリセット（config\host_models.json の推論モデルごと。GPU offload $GpuOffload、thinking off）"
+# One section per inference model whose GGUF exists (the 27B above, the Bonsai 2 27B abliterated from
+# scripts\setup-search-models.ps1), with the model's own context and sampling (config\host_models.json "params").
 $preset = Join-Path $root "tools\llm\models.ini"
-Write-TextFile $preset (ConvertTo-LlmPresetIni $spec.name $settings)
+$modelsDir = Get-DotEnvValue "BONSAI_MODELS_DIR" (Join-Path $root "tools\models")
+Push-Location $root
+try {
+    $out = Invoke-Native uv run --quiet python scripts\host_models.py preset --out $preset --offload $GpuOffload `
+        --qwen-model $target --qwen-mmproj $mmproj --models-dir $modelsDir --sleep-idle $spec.sleep_idle_s
+} finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { throw "ルータのプリセットを書けません: $($out -join ' ')" }
+foreach ($section in (($out | Select-Object -Last 1) | ConvertFrom-Json)) {
+    if ($section.skipped) { Write-Warn2 "$($section.skipped.id): $($section.skipped.reason)（モデル一覧では使えないと表示します）" }
+    else { Write-Ok "[$($section.id)] ctx $($section.settings.'ctx-size'), n-gpu-layers $($section.settings.'n-gpu-layers')" }
+}
 Write-Ok $preset
+if ($ContextLength -ne [int]$spec.context) {
+    Write-Warn2 "-ContextLength は config\host_models.json の context を使うようになりました（$ContextLength は .env の LLM_CONTEXT にだけ入れます）"
+}
 
 Write-Step ".env"
 $url = "http://127.0.0.1:$Port/v1"

@@ -47,15 +47,16 @@ from furry_agent.bonsai_select import Catalog, Selection, SelectionError, select
 from furry_agent.bonsai_worker import Ledger, WorkerError, run_reader
 from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, StageError, _ask, capped, _cleanup, _conf,
                                      _fail, _final, _held, _history, _is_think, _last_human, _leaders, _ledgers,
-                                     _llm, _lock, _progress, _prompt, _settings, _text_of, controlled,
-                                     end_or_record, log)
-from furry_agent.chat_models import (LEADER_CTX, LEADER_LABEL, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
+                                     _llm, _lock, _progress, _prompt, _settings, _text_of, check_router_model,
+                                     controlled, end_or_record, leader_label, log, model_info)
+from furry_agent.chat_models import (LEADER_CTX, PORT_FILTER, PORT_ROUTE, PROXY_LABEL,
                                      _catalog, _ensure_tor, _free_mb, _leader, _leader_client, _run_model, _search_client,
                                      _server)
-from furry_agent.config import env_int
+from furry_agent.config import ChatSettings, env_int
 from furry_agent.graph import _setup_file_logging  # the same logs/furry_agent.log as the image tab
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LLMError
+from furry_agent.model_catalog import CatalogError, ModelChoiceError, load_catalog
 from furry_agent.router import (CHAT, CODE, SEARCH, TO_IMAGE_TAB, WRITE, Route, compound_kinds, is_compound,
                                 route as route_rules)
 from furry_agent.search_client import SearchError
@@ -144,16 +145,27 @@ _NOTES = {
 
 
 async def ingest(state: ChatState, config: RunnableConfig) -> dict:
-    settings = _settings(config)
     conf = _conf(config)
-    await asyncio.to_thread(_setup_file_logging, settings.logs_dir)
     progress_id = f"progress-{uuid.uuid4()}"
+    try:
+        # The run's inference model (configurable.inference_model): refreshed here in a thread, read from the cache
+        # by the later nodes. An id the host does not offer ends the run; another model is never used instead.
+        await asyncio.to_thread(load_catalog)
+        settings = _settings(config)
+        await check_router_model(config, settings)
+    except (ModelChoiceError, CatalogError) as exc:
+        base = conf.get("chat_settings") or ChatSettings.from_env()
+        await asyncio.to_thread(_setup_file_logging, base.logs_dir)
+        log.info("chat model refused: %s", exc)
+        return {"progress_id": progress_id, "error": "model", "lock_token": None,
+                "messages": [AIMessage(id=progress_id, content=f"⚠️ 応答できませんでした［モデル選択］: {exc}")]}
+    await asyncio.to_thread(_setup_file_logging, settings.logs_dir)
     artifact = state.get("artifact") or {}
     has_draft = bool(artifact.get("draft"))
     reset = {"progress_id": progress_id, "error": None, "lock_token": None, "search": {}, "code": {},
              "hits": [RESET], "cards": [RESET], "logs": [RESET], "thinking": [RESET],
              "evidence": [RESET], "claims": [], "claim_audit": [], "verify_error": None,
-             "control": {}}
+             "control": {}, "model_info": model_info(settings)}
     human = _last_human(state)
     if human is None:
         return {**reset, "error": "no input", "messages": [AIMessage(id=progress_id, content="メッセージがありません。")]}
@@ -166,6 +178,8 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
     choice = modes.choose(conf.get("mode"), decision, has_draft=has_draft, draft_status=artifact.get("status", ""),
                           compound=compound)
     info = _mode_info(choice)
+    if choice.mode == modes.THINK and not settings.llm_thinking:
+        info["note"] = f"{settings.inference_label or settings.llm_model} は思考を表示しません（本文だけを返します）"
     reset.update({"mode": choice.mode, "mode_info": info})
     log.info("chat route=%s reason=%s mode=%s requested=%s", kind, decision.reason, choice.mode, choice.requested)
     if kind == TO_IMAGE_TAB:
@@ -328,7 +342,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
             async with _held(token):
                 parsed = await sa.ask_json(llm, planner_messages, schema,
                                            max_tokens=capped(settings, llm, PLAN_TOKENS_THINK if think else PLAN_TOKENS))
-            planner = LEADER_LABEL
+            planner = leader_label(settings)
         if parsed is None:
             try:
                 client, planner = await _leader(config, settings, token, "plan")
@@ -366,7 +380,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
             mode = "proxy"
         search.update({"intents": intents, "pending": [i["id"] for i in intents], "mode": mode,
                        "roles": {**search["roles"], "planner": planner,
-                                 "leader": LEADER_LABEL if mode == "resident" else
+                                 "leader": leader_label(settings) if mode == "resident" else
                                  PROXY_LABEL}})
         _ledgers[token] = Ledger()
         # Query and intent texts are not logged (design doc §5.10); result URLs are, in search_client.

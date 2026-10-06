@@ -32,8 +32,8 @@ from furry_agent.bonsai_select import SelectionError
 from furry_agent.bonsai_worker import WorkerError
 from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, _cleanup, _fail, _final, _held, _kwargs,
                                      _last_human, _leaders, _llm, _lock, _progress, _prompt, _settings,
-                                     _text_of, capped, log)
-from furry_agent.chat_models import LEADER_LABEL, _leader
+                                     _text_of, capped, leader_label, log)
+from furry_agent.chat_models import _leader
 from furry_agent import writing
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
@@ -260,7 +260,7 @@ async def _decide(state: ChatState, config: RunnableConfig, settings: ChatSettin
                 {"role": "user", "content": controller_input(_request(state), control)}]
     proxy = False
     if await llm.reachable():
-        client, label = llm, LEADER_LABEL
+        client, label = llm, leader_label(settings)
     else:
         client, label = await _leader(config, settings, token, "synthesize")
         proxy = True

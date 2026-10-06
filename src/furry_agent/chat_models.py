@@ -15,7 +15,7 @@ from langchain_core.runnables import RunnableConfig
 
 from furry_agent.bonsai_select import Catalog, Rank, Selection, available_models, free_memory_mb, select_model
 from furry_agent.bonsai_worker import LlamaServer, WorkerError, free_port
-from furry_agent.chat_common import ChatState, _conf, _leaders, _llm, log
+from furry_agent.chat_common import ChatState, _conf, _leaders, _llm, leader_label, log
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.llm_client import OpenAICompatClient
 from furry_agent.search_client import TorSearchClient
@@ -112,5 +112,5 @@ async def _leader(config, settings: ChatSettings, token: str, task: str) -> tupl
 
 async def _leader_client(config, settings: ChatSettings, state: ChatState, task: str):
     if (state.get("search") or {}).get("mode") == "resident":
-        return _llm(config, settings), LEADER_LABEL
+        return _llm(config, settings), leader_label(settings)
     return await _leader(config, settings, state["lock_token"], task)
