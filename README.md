@@ -32,7 +32,7 @@ Windows（PowerShell）:
 ```powershell
 winget install Git.Git; winget install astral-sh.uv; winget install OpenJS.NodeJS.LTS
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-git clone https://github.com/aofusa/local-agent local-agent; cd local-agent
+git clone https://github.com/aofusa/local-agent.git local-agent; cd local-agent
 .\scripts\setup.ps1 -OpenFirewall     # 初回は 1 時間ほど（何度実行しても安全）
 .\scripts\start-all.ps1               # 起動
 .\scripts\doctor.ps1                  # 確認
@@ -42,7 +42,7 @@ macOS（ターミナル）:
 
 ```bash
 brew install git uv node huggingface-cli
-git clone https://github.com/aofusa/local-agent local-agent && cd local-agent
+git clone https://github.com/aofusa/local-agent.git local-agent && cd local-agent
 scripts/setup.sh                      # 入れるモデルを絞るオプションは docs/setup.md
 scripts/start-all.sh                  # 起動（止めるときは scripts/stop-all.sh）
 scripts/doctor.sh                     # 確認
