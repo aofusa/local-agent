@@ -9,6 +9,20 @@ LAN 内の別の PC やスマートフォンのブラウザから日本語の指
 - **cirka**: 別 PC の端末で動く CUI のコーディングエージェント（[client/README.md](client/README.md)）。
 - 推論モデルと画像モデルは、送信ボタンの横（cirka は `/model`・`/image-model`）で選べます。
 
+```
+他ホストのブラウザ ──> agent-chat-ui   http://<LAN IP>:3000
+                         ▼
+                   LangGraph       http://<LAN IP>:2024   graph: agent（画像）/ chat（チャット）、/coder/turn・/models
+                         │ 画像タブ: ComfyUI HTTP API のみ
+                         ▼
+                   ComfyUI         http://127.0.0.1:8188  （tools/comfyui、ループバックのみ）
+                         │ LM Connect ノード（OpenAI 互換 API）。タグを作ったら LLM を unload して画像を生成
+                         ▼
+                   llama.cpp       http://127.0.0.1:8080/v1（ルータ。macOS は MLX 優先。ループバックのみ）
+                   チャットタブ: LangGraph ──> llama.cpp ルータ / 検索用 llama-server（検索中だけ）/ Tor / Docker
+別 PC の端末 ──> cirka ──> LangGraph（POST /coder/turn、/runs/stream）
+```
+
 詳しくは次のドキュメントを参照してください。
 
 | ドキュメント | 内容 |
