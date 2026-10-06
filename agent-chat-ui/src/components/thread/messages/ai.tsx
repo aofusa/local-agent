@@ -7,6 +7,7 @@ import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
+import { ModelInfoLine, isModelInfo } from "../model-picker";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
@@ -242,8 +243,16 @@ export function AssistantMessage({
             {isTaskTrace(message?.additional_kwargs?.task_trace) && (
               <TaskTraceView trace={message.additional_kwargs.task_trace} />
             )}
-            {isChatModeInfo(message?.additional_kwargs?.chat_mode) && (
-              <ChatModeBadge info={message.additional_kwargs.chat_mode} />
+            {(isChatModeInfo(message?.additional_kwargs?.chat_mode) ||
+              isModelInfo(message?.additional_kwargs?.model_info)) && (
+              <div className="flex flex-wrap items-center gap-3">
+                {isModelInfo(message?.additional_kwargs?.model_info) && (
+                  <ModelInfoLine info={message.additional_kwargs.model_info} />
+                )}
+                {isChatModeInfo(message?.additional_kwargs?.chat_mode) && (
+                  <ChatModeBadge info={message.additional_kwargs.chat_mode} />
+                )}
+              </div>
             )}
 
             {!hideToolCalls && (

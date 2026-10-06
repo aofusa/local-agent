@@ -664,6 +664,8 @@ export type ChatModeInfo = {
   requested?: "fast" | "think" | "auto";
   reason?: string;
   label?: string;
+  // e.g. "Bonsai 2 27B abliterated は思考を表示しません" (a model without visible thinking in think mode)
+  note?: string;
 };
 
 export function isChatModeInfo(value: unknown): value is ChatModeInfo {
@@ -685,6 +687,7 @@ export function ChatModeBadge({ info }: { info: ChatModeInfo }) {
       {info.requested === "auto"
         ? `自動 → ${label}${info.reason ? `（${info.reason}）` : ""}`
         : label}
+      {info.note ? ` ・ ${info.note}` : ""}
     </span>
   );
 }

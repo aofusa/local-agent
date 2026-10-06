@@ -46,6 +46,7 @@ import {
   useActiveTab,
   useChatMode,
 } from "./mode-tabs";
+import { ModelPicker, useModelChoice } from "./model-picker";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -173,9 +174,24 @@ export function Thread() {
   const isChatTab = useActiveTab() === CHAT_GRAPH;
   // local-agent: 自動 / 速い / 思考, sent with every chat-tab run as configurable.mode.
   const [chatMode, setChatMode] = useChatMode();
+  // local-agent: the model picked for this conversation (null = the host's default, nothing is sent).
+  const [inferenceModel, setInferenceModel] = useModelChoice(
+    "inference",
+    threadId,
+  );
+  const [imageModel, setImageModel] = useModelChoice("image", threadId);
   const runConfig = isChatTab
-    ? { config: { configurable: { mode: chatMode } } }
-    : {};
+    ? {
+        config: {
+          configurable: {
+            mode: chatMode,
+            ...(inferenceModel ? { inference_model: inferenceModel } : {}),
+          },
+        },
+      }
+    : imageModel
+      ? { config: { configurable: { image_model: imageModel } } }
+      : {};
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -575,11 +591,21 @@ export function Thread() {
                           accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                           className="hidden"
                         />
+                        {/* local-agent: the model of the next message (Claude / Gemini style) */}
+                        <ModelPicker
+                          key={isChatTab ? "inference" : "image"}
+                          kind={isChatTab ? "inference" : "image"}
+                          apiUrl={stream.apiUrl}
+                          value={isChatTab ? inferenceModel : imageModel}
+                          onChange={
+                            isChatTab ? setInferenceModel : setImageModel
+                          }
+                          className="ml-auto"
+                        />
                         {stream.isLoading ? (
                           <Button
                             key="stop"
                             onClick={() => stream.stop()}
-                            className="ml-auto"
                           >
                             <LoaderCircle className="h-4 w-4 animate-spin" />
                             Cancel
@@ -587,7 +613,7 @@ export function Thread() {
                         ) : (
                           <Button
                             type="submit"
-                            className="ml-auto shadow-md transition-all"
+                            className="shadow-md transition-all"
                             disabled={
                               isLoading ||
                               (!input.trim() && contentBlocks.length === 0)
