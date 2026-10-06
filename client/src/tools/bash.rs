@@ -13,7 +13,7 @@ use tokio::io::AsyncReadExt;
 
 use super::{Planned, ToolCtx, ToolOutput, arg_str, arg_u64};
 use crate::config::ShellKind;
-use crate::platform::{resolve_shell, shell_argv};
+use crate::platform::{command_env, decode_output, resolve_shell, shell_argv};
 use crate::ui::{Frontend, UiEvent};
 
 const OUTPUT_CAP: usize = 64 * 1024;
@@ -100,6 +100,7 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .envs(command_env())
         .kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
@@ -145,8 +146,8 @@ pub async fn run(ctx: &ToolCtx, command: &str, cwd: &Path, timeout_s: u64, ui: &
         (None, Some(c)) => format!("終了コード {c}（{seconds:.1} 秒）\n"),
         (None, None) => format!("シグナルで終了しました（{seconds:.1} 秒）\n"),
     };
-    let stdout = String::from_utf8_lossy(&stdout);
-    let stderr = String::from_utf8_lossy(&stderr);
+    let stdout = decode_output(&stdout);
+    let stderr = decode_output(&stderr);
     if !stdout.trim().is_empty() {
         text.push_str(&format!("--- stdout ---\n{}\n", stdout.trim_end()));
     }
@@ -198,6 +199,30 @@ mod tests {
         assert!(out.content.contains("終了コード 0") && out.content.contains("hello"));
         let fail = run(&c, "exit 3", &dir, 60, &mut NullUi).await;
         assert!(!fail.ok && fail.content.contains("終了コード 3"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn japanese_output_of_a_child_program_is_not_garbled() {
+        // A native program (Python here) writes to the pipe itself; on Windows it used to come back in the ANSI
+        // code page (cp932) and showed as mojibake. Emoji are outside cp932 and made Python raise.
+        let python = ["python", "python3"].into_iter().find(|p| crate::platform::which(p).is_some());
+        let Some(python) = python else { return };
+        let (c, dir) = ctx();
+        std::fs::write(dir.join("hello.py"), "print('こんにちは、世界')\nprint('絵文字 🐺')\n").unwrap();
+        let out = run(&c, &format!("{python} hello.py"), &dir, 60, &mut NullUi).await;
+        assert!(out.ok, "{}", out.content);
+        assert!(out.content.contains("こんにちは、世界"), "{}", out.content);
+        assert!(out.content.contains("絵文字 🐺"), "{}", out.content);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn japanese_output_of_the_shell_itself_is_not_garbled() {
+        let (c, dir) = ctx();
+        let cmd = if cfg!(windows) { "Write-Output 'シェルの出力'" } else { "echo シェルの出力" };
+        let out = run(&c, cmd, &dir, 60, &mut NullUi).await;
+        assert!(out.ok && out.content.contains("シェルの出力"), "{}", out.content);
         std::fs::remove_dir_all(dir).ok();
     }
 

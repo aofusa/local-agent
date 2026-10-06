@@ -89,6 +89,69 @@ pub fn shell_argv(kind: ShellKind, command: &str) -> (String, Vec<String>) {
     }
 }
 
+/// Environment for a shell command so that the programs it starts write UTF-8 to the pipe. A variable the user set
+/// is left alone. Windows: Python writes a pipe in the ANSI code page (cp932 on Japanese Windows), which came back
+/// as mojibake and made it raise on characters outside the code page; in a terminal it writes UTF-8 anyway.
+/// Elsewhere: a session without any locale (a bare ssh, a service) gets a UTF-8 character type.
+pub fn command_env() -> Vec<(&'static str, &'static str)> {
+    let unset = |name: &str| std::env::var_os(name).is_none_or(|v| v.is_empty());
+    let mut env = Vec::new();
+    if cfg!(windows) {
+        if unset("PYTHONIOENCODING") {
+            env.push(("PYTHONIOENCODING", "utf-8"));
+        }
+    } else if unset("LC_ALL") && unset("LC_CTYPE") && unset("LANG") {
+        env.push(("LC_CTYPE", if cfg!(target_os = "macos") { "UTF-8" } else { "C.UTF-8" }));
+    }
+    env
+}
+
+/// Command output as text, line by line: UTF-8 where it is valid UTF-8, otherwise (Windows) the ANSI code page
+/// that programs use for a pipe, so one tool's cp932 line does not turn the UTF-8 lines around it into mojibake.
+pub fn decode_output(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for line in bytes.split_inclusive(|&b| b == b'\n') {
+        match std::str::from_utf8(line) {
+            Ok(text) => out.push_str(text),
+            Err(_) => out.push_str(&decode_legacy(line)),
+        }
+    }
+    out
+}
+
+#[cfg(windows)]
+fn decode_legacy(bytes: &[u8]) -> String {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetACP() -> u32;
+        fn MultiByteToWideChar(code_page: u32, flags: u32, src: *const u8, src_len: i32, dst: *mut u16, dst_len: i32)
+        -> i32;
+    }
+    let Ok(len) = i32::try_from(bytes.len()) else { return String::from_utf8_lossy(bytes).into_owned() };
+    if len == 0 {
+        return String::new();
+    }
+    // SAFETY: the pointers and lengths describe live buffers; the first call only measures the output.
+    unsafe {
+        let code_page = GetACP();
+        let need = MultiByteToWideChar(code_page, 0, bytes.as_ptr(), len, std::ptr::null_mut(), 0);
+        if need <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        let mut wide = vec![0u16; need as usize];
+        let got = MultiByteToWideChar(code_page, 0, bytes.as_ptr(), len, wide.as_mut_ptr(), need);
+        if got <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        String::from_utf16_lossy(&wide[..got as usize])
+    }
+}
+
+#[cfg(not(windows))]
+fn decode_legacy(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 pub fn shell_label(kind: ShellKind) -> &'static str {
     match kind {
         ShellKind::Pwsh => "pwsh",
@@ -111,6 +174,48 @@ pub fn display_rel(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf8_output_is_kept_as_is() {
+        assert_eq!(decode_output("こんにちは\n🐺 ok\r\nlast".as_bytes()), "こんにちは\n🐺 ok\r\nlast");
+        assert_eq!(decode_output(b""), "");
+    }
+
+    #[test]
+    fn a_legacy_line_does_not_spoil_the_utf8_lines() {
+        // "あ" in cp932 between two UTF-8 lines (a tool that ignores PYTHONIOENCODING, e.g. a Windows program).
+        let mut bytes = "前の行\n".as_bytes().to_vec();
+        bytes.extend_from_slice(b"\x82\xa0\n");
+        bytes.extend_from_slice("後の行\n".as_bytes());
+        let text = decode_output(&bytes);
+        assert!(text.starts_with("前の行\n") && text.ends_with("後の行\n"), "{text}");
+        #[cfg(windows)]
+        {
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn GetACP() -> u32;
+            }
+            // SAFETY: no arguments, returns the system's ANSI code page.
+            if unsafe { GetACP() } == 932 {
+                assert_eq!(text, "前の行\nあ\n後の行\n");
+            }
+        }
+    }
+
+    #[test]
+    fn command_env_asks_for_utf8_without_overriding_the_user() {
+        let env = command_env();
+        if cfg!(windows) {
+            if std::env::var_os("PYTHONIOENCODING").is_none() {
+                assert!(env.contains(&("PYTHONIOENCODING", "utf-8")));
+            }
+        } else {
+            assert!(env.iter().all(|(k, _)| *k == "LC_CTYPE"));
+            if std::env::var_os("LANG").is_some() || std::env::var_os("LC_ALL").is_some() {
+                assert!(env.is_empty());
+            }
+        }
+    }
 
     #[test]
     fn shell_argv_table() {
