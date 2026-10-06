@@ -46,6 +46,22 @@
       "context": 8192,
       "thinking": "off",
       "vision": false
+    },
+    {
+      "id": "presence-qwen3.5-4b",
+      "label": "Qwen3.5 4B（ゲーミングノートの llama.cpp・vrc-pilot presence）",
+      "endpoint": {"kind": "llamacpp", "url": "http://127.0.0.1:18081/v1", "model": "qwen3.5-4b"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": false
+    },
+    {
+      "id": "presence-gemma4-e4b",
+      "label": "Gemma 4 E4B（Mac の mlx-vlm・presence の軽量予備、チャットのみ）",
+      "endpoint": {"kind": "openai", "url": "http://127.0.0.1:18093/v1", "model": "mlx-community/gemma-4-e4b-it-4bit"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": true
     }
   ],
   "image": [
