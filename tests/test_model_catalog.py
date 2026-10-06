@@ -28,7 +28,9 @@ def _raw(**changes):
 
 def test_shipped_catalog_lists_the_requested_models():
     catalog = mc.load_catalog()
-    assert list(catalog.inference) == ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"]
+    assert list(catalog.inference) == ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated",
+                                       "mac-bonsai-2-27b-abliterated", "mac-bonsai-2-27b-openai"]
+    assert [m.id for m in catalog.inference.values() if not m.remote] == list(catalog.inference)[:2]
     files = {m.ckpt for m in catalog.image.values()}
     assert files == {
         "yiffInHell_yihVANTABLACK.safetensors", "yiffInHell_yihMETLLICTETR.safetensors",

@@ -497,6 +497,35 @@ async def test_search_resident_mode_keeps_27b_and_never_starts_large_bonsai(mode
     assert message.additional_kwargs["thinking"] == [{"stage": "統合", "text": "統合の思考"}]
 
 
+class FakeRemoteLLM(FakeLlamaRouter):
+    """A model on another host: it answers, but holds none of this host's memory and is never unloaded here."""
+
+    remote = True
+
+    async def chat(self, messages, **kw):
+        self.world.events.append("remote:chat")
+        return await FakeLLM.chat(self, messages, **kw)
+
+    async def loaded(self):
+        raise AssertionError("a remote model is not asked what it has loaded")
+
+    async def unload_all(self):
+        return []
+
+
+async def test_search_with_a_remote_model_keeps_it_as_leader_and_unloads_nothing(models_dir):
+    world = World(free_mb=14000)  # a local 27B would be unloaded here (see the proxy test)
+    llm = FakeRemoteLLM(world)
+    state, message = await _run("/search ROG Ally X", world, _settings(models_dir), mode="think", llm=llm)
+    assert "llm:unload" not in world.events
+    assert "bonsai-2-27b-abliterated" not in world.started  # no proxy leader: the remote model critiques and writes
+    assert world.synth == ["llm"] and world.critiques == 1
+    assert world.started.count("ternary-8b") == 2 and world.live == set() and job_lock.holder is None
+    trace = message.additional_kwargs["search_trace"]
+    assert trace["mode"] == "resident"
+    assert message.content.startswith("まとめた回答です [1]")
+
+
 async def test_zero_results_do_not_call_a_leader(models_dir):
     world = World()
     world.no_hits = True
@@ -862,6 +891,48 @@ async def test_stopped_docker_desktop_is_started_only_for_the_approved_run(model
     verbs = [" ".join(a[1:3]) for a in world.docker if a[1] in ("desktop", "run") and a[2:3] != ["version"]]
     assert verbs[-3:] == ["desktop start", "run --rm", "desktop stop"]
     assert state["code"]["last_exit"] == 0
+
+
+async def test_replies_carry_their_response_time(models_dir, monkeypatch):
+    world = World()
+    now = {"t": 1000.0}
+    monkeypatch.setattr(chat_graph.time, "time", lambda: now["t"])  # the time module is shared by every node
+
+    original = FakeLlamaRouter.chat
+
+    async def slow_chat(self, messages, **kw):
+        now["t"] += 12.34  # the model takes 12.34 s
+        return await original(self, messages, **kw)
+    monkeypatch.setattr(FakeLlamaRouter, "chat", slow_chat)
+    state, message = await _run("こんにちは", world, _settings(models_dir))
+    assert message.additional_kwargs["response_time"] == {"seconds": 12.3}
+    # The image-tab redirect is an answer too.
+    state, message = await _run("猫の獣人を描いて", world, _settings(models_dir), mode="think")
+    assert message.additional_kwargs["response_time"]["seconds"] >= 0
+
+
+async def test_progress_messages_have_no_response_time(models_dir):
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="rt1")
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    assert "response_time" not in state["messages"][-1].additional_kwargs  # waiting for approval: not an answer
+
+
+async def test_response_time_after_approval_does_not_count_the_wait(models_dir, monkeypatch):
+    import furry_agent.chat_common as cc
+    import furry_agent.code_nodes as cn
+
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="rt2")
+    now = {"t": 1000.0}
+    for module in (chat_graph, cc, cn):
+        monkeypatch.setattr(module.time, "time", lambda: now["t"])
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    now["t"] = 5000.0  # the user approves an hour later
+    state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+    assert state["messages"][-1].additional_kwargs["response_time"] == {"seconds": 0.0}
 
 
 async def test_dependencies_get_network_only_for_the_setup_step(models_dir):

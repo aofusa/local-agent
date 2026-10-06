@@ -74,7 +74,7 @@ export function ModeTabs({ className }: { className?: string }) {
       role="tablist"
       aria-label="モード"
       className={cn(
-        "bg-muted inline-flex items-center gap-1 rounded-full p-1",
+        "bg-muted inline-flex shrink-0 items-center gap-1 rounded-full p-1",
         className,
       )}
     >
@@ -86,7 +86,7 @@ export function ModeTabs({ className }: { className?: string }) {
           aria-selected={id === active}
           onClick={() => select(id)}
           className={cn(
-            "flex cursor-pointer items-center gap-1.5 rounded-full px-4 py-1.5 text-sm transition-colors",
+            "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm whitespace-nowrap transition-colors sm:px-4",
             id === active
               ? "bg-background text-foreground font-semibold shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -179,7 +179,7 @@ export function ChatModeSwitch({
       role="radiogroup"
       aria-label="応答モード"
       className={cn(
-        "bg-background inline-flex items-center gap-0.5 rounded-full border p-0.5",
+        "bg-background inline-flex shrink-0 items-center gap-0.5 rounded-full border p-0.5",
         className,
       )}
     >
@@ -192,7 +192,7 @@ export function ChatModeSwitch({
           title={title}
           onClick={() => onChange(id)}
           className={cn(
-            "cursor-pointer rounded-full px-3 py-1 text-xs transition-colors",
+            "cursor-pointer rounded-full px-3 py-1 text-xs whitespace-nowrap transition-colors",
             mode === id
               ? "bg-foreground text-background font-semibold"
               : "text-muted-foreground hover:text-foreground",

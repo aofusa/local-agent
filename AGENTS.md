@@ -9,7 +9,7 @@ LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から
 - **画像タブ**: LangGraph が ComfyUI へ投入し、ComfyUI のワークフローが llama.cpp のルータの LLM でタグ（または英語の説明文）を作り、LLM を unload してから拡散モデルで静止画を作る。画像はこの端末に保存し、同じ画像を UI に返す。
 - **チャットタブ**: 会話、Tor 経由の検索（出典と主張の突き合わせ付き）、文章、コード（承認後に Docker で実行）、自律モード。
 - **cirka**: 利用者の端末で動く CUI。モデルはこの端末の LLM を `POST /coder/turn` で使い、ツールは cirka の端末で実行する。
-- 推論モデルと画像モデルは `config/host_models.json` の一覧から、Web は送信ボタン横、cirka は `/model`・`/image-model` で選ぶ。
+- 推論モデルと画像モデルは `config/host_models.json` の一覧から、Web は送信ボタン横、cirka は `/model`・`/image-model` で選ぶ。推論モデルには別ホストの llama.cpp や OpenAI 互換サービス（項目の `endpoint`）も並べられ、チャットタブと `/coder/turn` だけがそれを使う。
 
 ## 文書
 
@@ -18,7 +18,7 @@ LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から
 | [docs/specification.md](docs/specification.md) | 変えてはいけない仕様の詳細（プロセスの分担、待受、ComfyUI と LLM の契約、チャットタブ、cirka、画像の返却、UI の変更範囲、受け入れ条件） |
 | [docs/decisions.md](docs/decisions.md) | 実装時に決めたことと理由、版ごとの経緯 |
 | [docs/models.md](docs/models.md) | 採用モデルの選定理由と評価、採らなかったもの。モデルを足す・設定値を変えるときに先に読み、結果をここに追記する |
-| 設計書（`docs/*-design.md`、`docs/*-work-instruction.md`） | 機能ごとの設計と実装記録。ComfyUI と LLM の連携は [llm-comfyui-workflow-design.md](docs/llm-comfyui-workflow-design.md)、LLM サーバは [llamacpp-router-design.md](docs/llamacpp-router-design.md)、モデルの選択と macOS は [host-model-selection-design.md](docs/host-model-selection-design.md) |
+| 設計書（`docs/*-design.md`、`docs/*-work-instruction.md`） | 機能ごとの設計と実装記録。ComfyUI と LLM の連携は [llm-comfyui-workflow-design.md](docs/llm-comfyui-workflow-design.md)、LLM サーバは [llamacpp-router-design.md](docs/llamacpp-router-design.md)、モデルの選択と macOS は [host-model-selection-design.md](docs/host-model-selection-design.md)、別ホストの LLM は [remote-llm-design.md](docs/remote-llm-design.md) |
 | [docs/architecture.md](docs/architecture.md) | ファイルの配置、ワークフローのノード、UI の変更点、ログ |
 | [docs/setup.md](docs/setup.md) / [usage.md](docs/usage.md) / [configuration.md](docs/configuration.md) / [troubleshooting.md](docs/troubleshooting.md) / [third-party-licenses.md](docs/third-party-licenses.md) | 利用者向けの詳細 |
 | [CHANGELOG.md](CHANGELOG.md) | 版ごとの変更 |
@@ -41,7 +41,7 @@ LangGraph ─> llama.cpp ルータ / 検索用 llama-server（127.0.0.1:18181〜
 
 ## 固定の規則
 
-- LangGraph は画像タブの LLM 呼び出しを置き換えない。タグ生成、eject、モデルの読み込みは ComfyUI のワークフロー内で行う。LangGraph が LLM を直接呼ぶのは、チャットタブと `/coder/turn` だけ。
+- LangGraph は画像タブの LLM 呼び出しを置き換えない。タグ生成、eject、モデルの読み込みは ComfyUI のワークフロー内で行う。LangGraph が LLM を直接呼ぶのは、チャットタブと `/coder/turn` だけ（別ホストの推論モデルを選んだときはその接続先。unload せず、つながらなければ理由を返して別のモデルへ替えない）。
 - LLM と拡散モデルは同時に常駐させない。順序は「LLM がタグを返す → `eject` が unload を確認 → `ckpt` が読み込み → KSampler」で固定。ComfyUI の中で GGUF を動かさない。
 - ノード ID、LLM の出力の JSON 契約（`{"positive","negative"}`）、unload の順は変えない。LangGraph が書き換えてよいのはマップのスロットと LoRA の挿入だけ。
 - モデル、LoRA、モデルごとのパラメータは `config/host_models.json` に書く（`.env` やコードに直書きしない）。クライアントは id を送り、ホストは未知・使えない id を拒否して、別のモデルへ自動で替えない。

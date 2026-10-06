@@ -20,6 +20,8 @@ export interface HostModel {
   family?: string;
   family_label?: string;
   ckpt_name?: string;
+  // An inference model on another host (config/host_models.json "endpoint").
+  remote?: { kind: string; host: string; model: string };
 }
 
 export interface HostModels {
@@ -130,6 +132,10 @@ export function useHostModels(apiUrl: string | undefined) {
 function detail(kind: ModelKind, model: HostModel): string {
   if (kind === "inference") {
     const parts = [];
+    if (model.remote)
+      parts.push(
+        `リモート（${model.remote.kind === "openai" ? "OpenAI 互換" : "llama.cpp"}）${model.remote.host}`,
+      );
     if (model.context) parts.push(`context ${model.context}`);
     if (model.thinking === false) parts.push("思考なし");
     return parts.join(" ・ ");
@@ -192,7 +198,16 @@ export function ModelPicker({
       void refresh();
       const rect = button.current?.getBoundingClientRect();
       if (rect) {
-        const right = Math.max(8, window.innerWidth - rect.right);
+        // Keep the whole list on screen: it is 320px wide (less on a phone), anchored to the button's right edge
+        // unless that would push its left edge out of the window.
+        const width = Math.min(320, window.innerWidth - 16);
+        const right = Math.max(
+          8,
+          Math.min(
+            window.innerWidth - rect.right,
+            window.innerWidth - width - 8,
+          ),
+        );
         const above = rect.top - 16;
         const below = window.innerHeight - rect.bottom - 16;
         setPlace(
@@ -221,7 +236,7 @@ export function ModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         title={kind === "inference" ? "推論モデルを選ぶ" : "画像モデルを選ぶ"}
-        className="text-muted-foreground hover:text-foreground flex max-w-56 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-sm"
+        className="text-muted-foreground hover:text-foreground flex max-w-[48vw] min-w-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-sm sm:max-w-56"
       >
         <span className="truncate">{name}</span>
         <ChevronDown className="size-4 shrink-0" />
@@ -240,7 +255,7 @@ export function ModelPicker({
                 }
               : undefined
           }
-          className="bg-background fixed z-50 w-80 max-w-[90vw] overflow-y-auto rounded-xl border p-1 shadow-lg"
+          className="bg-background fixed z-50 w-[min(20rem,calc(100vw-16px))] overflow-y-auto rounded-xl border p-1 shadow-lg"
         >
           <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-xs">
             {kind === "inference" ? "推論モデル" : "画像モデル"}

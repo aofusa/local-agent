@@ -226,11 +226,13 @@ async def confirm_run(state: ChatState, config: RunnableConfig) -> dict:
     response = interrupt(_hitl(RUN_ACTION, args, description))
     decision = _decision(response)
     kind = decision.get("type")
+    resumed = {"started_at": time.time()}  # the wait for the user is not part of the response time
+    state = {**state, **resumed}
     if kind == "approve":
         code["approved"] = True
         code["network"] = args["network"] == "setup"
         log.info("code run approved run_id=%s round=%d", code["run_id"], code["round"] + 1)
-        return {"code": code, "messages": [_progress(state, "コンテナを実行しています…", task=_task(code))]}
+        return {**resumed, "code": code, "messages": [_progress(state, "コンテナを実行しています…", task=_task(code))]}
     if kind == "edit":
         edited = _edited_args(decision)
         profile = sandbox.PROFILES[code["profile"]]
@@ -258,11 +260,11 @@ async def confirm_run(state: ChatState, config: RunnableConfig) -> dict:
             problems.append(str(exc))
         code.update({"approved": False, "problems": problems})
         note = "変更を反映しました。もう一度確認してください。" if not problems else f"変更を反映できませんでした: {problems[0]}"
-        return {"code": code, "messages": [_progress(state, note, task=_task(code))]}
+        return {**resumed, "code": code, "messages": [_progress(state, note, task=_task(code))]}
     code["approved"] = False
     log.info("code run rejected run_id=%s", code["run_id"])
     text = _answer(code, "実行しませんでした。ファイルはそのまま残しています。")
-    return {"code": code, "error": "rejected", "messages": [_final(state, text, task=_task(code))]}
+    return {**resumed, "code": code, "error": "rejected", "messages": [_final(state, text, task=_task(code))]}
 
 
 def _after_confirm(state: ChatState) -> str:

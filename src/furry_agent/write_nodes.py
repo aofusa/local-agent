@@ -18,6 +18,7 @@ When the control loop called the writer, every end goes to controller_record ins
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -237,14 +238,16 @@ async def chapter_confirm(state: ChatState, config: RunnableConfig) -> dict:
         "止めたあとも「続きを書いて」で次の章から再開できます。")))
     decision = _decision(response)
     kind = decision.get("type")
+    resumed = {"started_at": time.time()}  # the wait for the user is not part of the response time
+    state = {**state, **resumed}
     if kind == "approve":
-        return {"artifact": artifact, "messages": [_progress(state, f"第 {index + 1} 章を書いています…", task=_task(artifact))]}
+        return {**resumed, "artifact": artifact, "messages": [_progress(state, f"第 {index + 1} 章を書いています…", task=_task(artifact))]}
     if kind == "edit":
         artifact["instruction"] = str(_edited_args(decision).get("instruction", "")).strip()[:1000]
-        return {"artifact": artifact, "messages": [_progress(state, f"指示を反映して第 {index + 1} 章を書いています…",
+        return {**resumed, "artifact": artifact, "messages": [_progress(state, f"指示を反映して第 {index + 1} 章を書いています…",
                                                              task=_task(artifact))]}
     log.info("writing stopped by the user at chapter %d", index)
-    return {"artifact": artifact, "error": "stopped",
+    return {**resumed, "artifact": artifact, "error": "stopped",
             "messages": [_progress(state, f"第 {index} 章で止めました。「続きを書いて」で第 {index + 1} 章から再開できます。",
                                    task=_task(artifact))]}
 

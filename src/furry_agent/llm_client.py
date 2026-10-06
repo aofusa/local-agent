@@ -150,10 +150,16 @@ class OpenAICompatClient:
     any byte from the server (no token, no thinking token, no keep-alive) ends the call. A long reply that keeps
     coming is never cut off; the 27B on a small machine can take many minutes."""
 
+    # The server reads llama.cpp's chat_template_kwargs (thinking on/off). A generic OpenAI-compatible service may
+    # refuse unknown fields, so RemoteLLM of kind "openai" leaves it out.
+    template_kwargs = True
+    # The model runs on another host: nothing of it is in this host's memory (no unload, no co-residence check).
+    remote = False
+
     def __init__(self, base_url: str, model: str = "", timeout_s: float = 1200.0, *, thinking_off: bool = True,
                  transport: httpx.AsyncBaseTransport | None = None, api_key: str = "local"):
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+        self.api_key = api_key or "local"
         self.model = model
         self.timeout_s = timeout_s
         self.thinking_off = thinking_off
@@ -179,15 +185,18 @@ class OpenAICompatClient:
         think = (not self.thinking_off) if thinking is None else thinking
         # llama-server reads chat_template_kwargs; the router's preset defaults to thinking off (scripts/setup-llm.ps1),
         # and the thoughts come back in reasoning_content (--reasoning-format deepseek), never in content.
-        body["chat_template_kwargs"] = {"enable_thinking": think}
+        if self.template_kwargs:
+            body["chat_template_kwargs"] = {"enable_thinking": think}
         if tools:
             body["tools"] = tools
             if tool_choice:
                 body["tool_choice"] = tool_choice
         if json_schema:
-            # Grammar-constrained output (llama-server accepts OpenAI's json_schema format).
+            # Grammar-constrained output (llama-server accepts OpenAI's json_schema format). OpenAI's strict mode
+            # wants every schema closed (additionalProperties false); another service gets the non-strict form.
             body["response_format"] = {"type": "json_schema",
-                                       "json_schema": {"name": "reply", "strict": True, "schema": json_schema}}
+                                       "json_schema": {"name": "reply", "strict": self.template_kwargs,
+                                                       "schema": json_schema}}
         elif json_mode:
             body["response_format"] = {"type": "json_object"}
         idle = timeout_s or self.timeout_s
@@ -290,6 +299,53 @@ class LlamaRouter(OpenAICompatClient):
                     unloaded.append(model)
             await asyncio.sleep(1.0)
         raise LLMError(f"LLM サーバのモデルを unload できません: {resident}")
+
+
+class RemoteLLM(LlamaRouter):
+    """A model on another host (docs/remote-llm-design.md): a llama.cpp server (``kind="llamacpp"``, a router or a
+    single llama-server) or any OpenAI-compatible service (``kind="openai"``). Calls are the same Chat Completions
+    as the local router's. Its memory is not this host's, so ``loaded()`` is always empty and ``unload_all()`` does
+    nothing: the other host decides what it keeps loaded, and the local unload order (image tab, search readers)
+    does not depend on it."""
+
+    remote = True
+
+    def __init__(self, base_url: str, model: str = "", timeout_s: float = 1200.0, *, kind: str = "llamacpp",
+                 api_key: str = "", thinking_off: bool = True, transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__(base_url, model, timeout_s, thinking_off=thinking_off, transport=transport,
+                         api_key=api_key or "local")
+        self.kind = kind
+        self.template_kwargs = kind == "llamacpp"
+
+    def native(self) -> str:
+        return self.base_url  # the model list is the OpenAI one (GET <base>/models), not the router's root API
+
+    async def reachable(self) -> bool:
+        try:
+            await self.model_ids(5.0)
+            return True
+        except (httpx.HTTPError, ValueError):
+            return False
+
+    async def loaded(self) -> list[str]:
+        return []
+
+    async def unload_all(self, wait_s: float = 60.0) -> list[str]:
+        return []
+
+
+def remote_error(exc: BaseException) -> str:
+    """A short reason for /models when the other host's server could not list its models."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return f"接続先が認証を拒否しました（HTTP {code}。API キーを確かめてください）"
+        return f"接続先がモデルの一覧を返しません（HTTP {code}）"
+    if isinstance(exc, httpx.TimeoutException):
+        return "接続先が応答しません"
+    if isinstance(exc, httpx.HTTPError):
+        return "接続先に接続できません"
+    return f"接続先の応答を読めません（{type(exc).__name__}）"
 
 
 RESIDENT = ("loaded", "loading", "unloading", "sleeping")

@@ -313,7 +313,8 @@ export function Thread() {
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    // local-agent: h-dvh keeps the input above a phone's browser bar (100vh is taller than the visible area).
+    <div className="flex h-screen w-full overflow-hidden supports-[height:100dvh]:h-dvh">
       <div className="relative hidden lg:flex">
         <motion.div
           className="absolute z-20 h-full overflow-hidden border-r bg-white"
@@ -341,8 +342,10 @@ export function Thread() {
 
       <div
         className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
+          // local-agent: minmax(0, …) so a wide toolbar, table or code block cannot widen the column past
+          // the window (a plain 1fr track grows to its content and the right side was cut off on phones).
+          "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_0fr] transition-all duration-500",
+          artifactOpen && "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]",
         )}
       >
         <motion.div
@@ -366,8 +369,9 @@ export function Thread() {
           }
         >
           {!chatStarted && (
-            <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-              <div>
+            // local-agent: three columns (history, tabs, GitHub) so the tabs never cover the GitHub link.
+            <div className="absolute top-0 left-0 z-10 grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2 p-2 sm:pl-4">
+              <div className="justify-self-start">
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
                     className="hover:bg-gray-100"
@@ -383,14 +387,15 @@ export function Thread() {
                 )}
               </div>
               <ModeTabs />
-              <div className="absolute top-2 right-4 flex items-center">
+              <div className="flex items-center justify-self-end pr-2">
                 <OpenGitHubRepo />
               </div>
             </div>
           )}
           {chatStarted && (
-            <div className="relative z-10 flex items-center justify-between gap-3 p-2">
-              <div className="relative flex items-center justify-start gap-2">
+            // local-agent: on narrow screens the tabs take their own row under the title (they were hidden).
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 p-2 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <div className="relative flex min-w-0 items-center justify-start gap-2">
                 <div className="absolute left-0 z-10">
                   {(!chatHistoryOpen || !isLargeScreen) && (
                     <Button
@@ -407,7 +412,7 @@ export function Thread() {
                   )}
                 </div>
                 <motion.button
-                  className="flex cursor-pointer items-center gap-2"
+                  className="flex min-w-0 cursor-pointer items-center gap-2"
                   onClick={() => setThreadId(null)}
                   animate={{
                     marginLeft: !chatHistoryOpen ? 48 : 0,
@@ -421,23 +426,26 @@ export function Thread() {
                   <LangGraphLogoSVG
                     width={32}
                     height={32}
+                    className="shrink-0"
                   />
-                  <span className="text-xl font-semibold tracking-tight">
+                  <span className="truncate text-xl font-semibold tracking-tight max-sm:text-lg">
                     Agent Chat
                   </span>
                 </motion.button>
                 <ConnectedHost apiUrl={stream.apiUrl} />
               </div>
 
-              <ModeTabs className="absolute left-1/2 -translate-x-1/2 max-md:hidden" />
+              <div className="max-lg:order-last max-lg:flex max-lg:w-full max-lg:justify-center">
+                <ModeTabs />
+              </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex shrink-0 items-center gap-1 justify-self-end sm:gap-4">
                 <div className="flex items-center">
                   <OpenGitHubRepo />
                 </div>
                 <TooltipIconButton
                   size="lg"
-                  className="p-4"
+                  className="p-2 sm:p-4"
                   tooltip="New thread"
                   variant="ghost"
                   onClick={() => setThreadId(null)}
@@ -453,11 +461,12 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-                !chatStarted && "mt-[25vh] flex flex-col items-stretch",
+                "absolute inset-0 overflow-x-hidden overflow-y-scroll px-3 sm:px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+                !chatStarted &&
+                  "mt-[18dvh] flex flex-col items-stretch sm:mt-[25vh]",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
-              contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
+              contentClassName="pt-4 pb-10 sm:pt-8 sm:pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full min-w-0"
               content={
                 <>
                   {messages
@@ -509,7 +518,7 @@ export function Thread() {
                   <div
                     ref={dropRef}
                     className={cn(
-                      "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
+                      "bg-muted relative z-10 mx-auto mb-3 w-full max-w-3xl rounded-2xl shadow-xs transition-all sm:mb-8",
                       dragOver
                         ? "border-primary border-2 border-dotted"
                         : "border border-solid",
@@ -517,7 +526,7 @@ export function Thread() {
                   >
                     <form
                       onSubmit={handleSubmit}
-                      className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
+                      className="mx-auto grid w-full max-w-3xl min-w-0 grid-rows-[1fr_auto] gap-2"
                     >
                       <ContentBlocksPreview
                         blocks={contentBlocks}
@@ -546,11 +555,12 @@ export function Thread() {
                             ? "メッセージ（/search で検索、/write で文章、/code でプログラム）"
                             : "描きたい内容を日本語で（画像は 4 枚まで添付できます）"
                         }
-                        className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+                        className="field-sizing-content max-h-[40dvh] min-h-12 w-full min-w-0 resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
                       />
 
-                      <div className="flex items-center gap-6 p-2 pt-4">
-                        <div>
+                      {/* local-agent: the controls wrap on a phone; the model and Send stay together on the right */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 p-2 pt-3 sm:gap-x-6 sm:pt-4">
+                        <div className="shrink-0">
                           <div className="flex items-center space-x-2">
                             <Switch
                               id="render-tool-calls"
@@ -559,7 +569,7 @@ export function Thread() {
                             />
                             <Label
                               htmlFor="render-tool-calls"
-                              className="text-sm text-gray-600"
+                              className="text-sm whitespace-nowrap text-gray-600"
                             >
                               Hide Tool Calls
                             </Label>
@@ -574,12 +584,13 @@ export function Thread() {
                         <Label
                           htmlFor="file-input"
                           className={cn(
-                            "flex cursor-pointer items-center gap-2",
+                            "flex shrink-0 cursor-pointer items-center gap-2",
                             isChatTab && "hidden",
                           )}
+                          title="Upload PDF or Image"
                         >
                           <Plus className="size-5 text-gray-600" />
-                          <span className="text-sm text-gray-600">
+                          <span className="text-sm whitespace-nowrap text-gray-600 max-sm:sr-only">
                             Upload PDF or Image
                           </span>
                         </Label>
@@ -592,36 +603,39 @@ export function Thread() {
                           className="hidden"
                         />
                         {/* local-agent: the model of the next message (Claude / Gemini style) */}
-                        <ModelPicker
-                          key={isChatTab ? "inference" : "image"}
-                          kind={isChatTab ? "inference" : "image"}
-                          apiUrl={stream.apiUrl}
-                          value={isChatTab ? inferenceModel : imageModel}
-                          onChange={
-                            isChatTab ? setInferenceModel : setImageModel
-                          }
-                          className="ml-auto"
-                        />
-                        {stream.isLoading ? (
-                          <Button
-                            key="stop"
-                            onClick={() => stream.stop()}
-                          >
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                            Cancel
-                          </Button>
-                        ) : (
-                          <Button
-                            type="submit"
-                            className="shadow-md transition-all"
-                            disabled={
-                              isLoading ||
-                              (!input.trim() && contentBlocks.length === 0)
+                        <div className="ml-auto flex min-w-0 items-center gap-2">
+                          <ModelPicker
+                            key={isChatTab ? "inference" : "image"}
+                            kind={isChatTab ? "inference" : "image"}
+                            apiUrl={stream.apiUrl}
+                            value={isChatTab ? inferenceModel : imageModel}
+                            onChange={
+                              isChatTab ? setInferenceModel : setImageModel
                             }
-                          >
-                            Send
-                          </Button>
-                        )}
+                            className="min-w-0"
+                          />
+                          {stream.isLoading ? (
+                            <Button
+                              key="stop"
+                              onClick={() => stream.stop()}
+                              className="shrink-0"
+                            >
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                              Cancel
+                            </Button>
+                          ) : (
+                            <Button
+                              type="submit"
+                              className="shrink-0 shadow-md transition-all"
+                              disabled={
+                                isLoading ||
+                                (!input.trim() && contentBlocks.length === 0)
+                              }
+                            >
+                              Send
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </form>
                   </div>
@@ -630,7 +644,13 @@ export function Thread() {
             />
           </StickToBottom>
         </motion.div>
-        <div className="relative flex flex-col border-l">
+        <div
+          className={cn(
+            "relative flex min-w-0 flex-col",
+            // local-agent: no stray border line at the right edge while the panel is closed
+            artifactOpen && "border-l",
+          )}
+        >
           <div className="absolute inset-0 flex min-w-[30vw] flex-col">
             <div className="grid grid-cols-[1fr_auto] border-b p-4">
               <ArtifactTitle className="truncate overflow-hidden" />

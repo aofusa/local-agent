@@ -165,7 +165,7 @@ export function SearchTraceView({ trace }: { trace: SearchTrace }) {
   }
 
   return (
-    <div className="bg-muted/40 w-full rounded-xl border text-sm">
+    <div className="bg-muted/40 w-full min-w-0 rounded-xl border text-sm [overflow-wrap:anywhere]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -178,10 +178,10 @@ export function SearchTraceView({ trace }: { trace: SearchTrace }) {
         ) : (
           <ChevronRight className="size-4" />
         )}
-        <span className="text-foreground font-medium">
+        <span className="text-foreground shrink-0 font-medium whitespace-nowrap">
           {deep ? "Tor 経由の深い検索" : "Tor 経由の検索"}
         </span>
-        <span className="truncate">{summary}</span>
+        <span className="min-w-0 truncate">{summary}</span>
       </button>
       {(open || running) && (
         <div className="flex flex-col gap-3 border-t px-3 py-3">
@@ -303,7 +303,7 @@ export function SearchTraceView({ trace }: { trace: SearchTrace }) {
                     <code className="bg-background rounded px-1">
                       {card.id}
                     </code>
-                    <span className="truncate">
+                    <span className="min-w-0 truncate">
                       {card.domain || host(card.url)}
                     </span>
                     {!!card.subquestion_ids?.length && (
@@ -325,7 +325,7 @@ export function SearchTraceView({ trace }: { trace: SearchTrace }) {
                     className="flex items-baseline gap-1.5"
                   >
                     <span className="text-muted-foreground shrink-0">×</span>
-                    <span className="truncate">
+                    <span className="min-w-0 truncate">
                       {item.title || host(item.url)}
                     </span>
                     <span className="text-muted-foreground shrink-0">
@@ -385,7 +385,7 @@ export function ThinkingView({ thoughts }: { thoughts: Thought[] }) {
   const [open, setOpen] = useState(false);
   const chars = thoughts.reduce((n, t) => n + t.text.length, 0);
   return (
-    <div className="bg-muted/40 w-full rounded-xl border text-sm">
+    <div className="bg-muted/40 w-full min-w-0 rounded-xl border text-sm [overflow-wrap:anywhere]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -397,8 +397,10 @@ export function ThinkingView({ thoughts }: { thoughts: Thought[] }) {
           <ChevronRight className="size-4" />
         )}
         <Brain className="size-4" />
-        <span className="text-foreground font-medium">思考</span>
-        <span className="truncate">
+        <span className="text-foreground shrink-0 font-medium whitespace-nowrap">
+          思考
+        </span>
+        <span className="min-w-0 truncate">
           {thoughts
             .map((t) => t.stage)
             .filter(Boolean)
@@ -478,7 +480,7 @@ export function TaskTraceView({ trace }: { trace: TaskTrace }) {
             .filter(Boolean)
             .join(" · ");
   return (
-    <div className="bg-muted/40 w-full rounded-xl border text-sm">
+    <div className="bg-muted/40 w-full min-w-0 rounded-xl border text-sm [overflow-wrap:anywhere]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -490,14 +492,14 @@ export function TaskTraceView({ trace }: { trace: TaskTrace }) {
           <ChevronRight className="size-4" />
         )}
         <Icon className="size-4" />
-        <span className="text-foreground font-medium">
+        <span className="text-foreground shrink-0 font-medium whitespace-nowrap">
           {trace.kind === "code"
             ? "コードの手順"
             : trace.kind === "control"
               ? "自律の手順"
               : "執筆の手順"}
         </span>
-        <span className="truncate">{summary}</span>
+        <span className="min-w-0 truncate">{summary}</span>
       </button>
       {open && (
         <div className="flex flex-col gap-3 border-t px-3 py-3">
@@ -587,7 +589,7 @@ export function ClaimTraceView({ trace }: { trace: ClaimTrace }) {
         .filter(Boolean)
         .join(" · ");
   return (
-    <div className="bg-muted/40 w-full rounded-xl border text-sm">
+    <div className="bg-muted/40 w-full min-w-0 rounded-xl border text-sm [overflow-wrap:anywhere]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -599,8 +601,10 @@ export function ClaimTraceView({ trace }: { trace: ClaimTrace }) {
           <ChevronRight className="size-4" />
         )}
         <ShieldCheck className="size-4" />
-        <span className="text-foreground font-medium">主張の突き合わせ</span>
-        <span className="truncate">{summary}</span>
+        <span className="text-foreground shrink-0 font-medium whitespace-nowrap">
+          主張の突き合わせ
+        </span>
+        <span className="min-w-0 truncate">{summary}</span>
       </button>
       {open && (
         <div className="flex flex-col gap-3 border-t px-3 py-3">

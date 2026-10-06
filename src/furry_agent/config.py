@@ -125,6 +125,10 @@ class ChatSettings:
     # Empty = the router's LLM_MODEL with LLM_CONTEXT (no model was asked for and DEFAULT_INFERENCE_MODEL is unset).
     inference_model: str = ""
     inference_label: str = ""
+    # A picked model on another host (catalog "endpoint"): llamacpp | openai, and its API key from .env. Empty kind =
+    # this host's llama.cpp router (llm_url).
+    llm_remote_kind: str = ""
+    llm_api_key: str = ""
     llm_thinking: bool = True
     # Context window of the router's 27B (scripts/setup-llm.ps1 loads it with 4096: more does not fit).
     llm_ctx: int = 4096

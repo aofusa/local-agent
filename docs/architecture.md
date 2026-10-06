@@ -25,7 +25,7 @@ src/furry_agent/search_client.py      Tor（socks5h）経由の検索と本文�
 src/furry_agent/bonsai_select.py      タスクごとのモデル選択（順位、検証結果、空きメモリ）
 src/furry_agent/bonsai_worker.py      llama-server の起動と停止（PID）、reader のツール呼び出し
 src/furry_agent/bonsai_probe.py       検索モデルの検証（probe-bonsai.ps1）
-src/furry_agent/llm_client.py         OpenAI 互換クライアント（チャットタブ専用）、ルータの状態確認と unload（LlamaRouter）
+src/furry_agent/llm_client.py         OpenAI 互換クライアント（チャットタブ専用）、ルータの状態確認と unload（LlamaRouter）、別ホストの LLM（RemoteLLM）
 src/furry_agent/router.py, tor_service.py, html_text.py, job_lock.py   検索判定、Tor の自動起動、HTML のテキスト化、タブ共通のロック
 config/search_models.json             検索モデル 8 つ（ファイル、メモリの目安、タスクごとの順）
 config/llm_model.json                 27B の元ファイル（Hugging Face、SHA-256）、量子化、ルータのモデル名と既定値
@@ -37,7 +37,7 @@ src/furry_agent/media.py              添付画像の取り出しと検証（役
 comfyui_nodes/furry_ja/               ComfyUI カスタムノード（eject / split / ckpt / Chroma 用 ckpt / image-after / release）。llm_state.py がルータの状態確認
 src/furry_agent/families.py           モデル系統の名前（sdxl / flux / krea2 / anima）と系統ごとの参照画像の可否
 src/furry_agent/model_catalog.py      config/host_models.json の読み込み・検証、id の解決、使えるかの判定
-src/furry_agent/models_api.py         GET /models（/coder/turn と同じ http.app。ルータと ComfyUI に問い合わせて available / reason）
+src/furry_agent/models_api.py         GET /models（/coder/turn と同じ http.app。ルータ、ComfyUI、別ホストの接続先に問い合わせて available / reason）
 src/furry_agent/mlx_router.py         macOS の MLX 優先のルータ（llama.cpp のルータと同じ API、子は mlx_lm.server か llama-server）
 config/host_models.json               選べる推論モデル・画像モデルと、モデルごとのパラメータ
 scripts/host_models.py                セットアップ用: 画像モデルのファイルの一覧と、ルータのプリセットの書き出し
@@ -130,6 +130,8 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 - 思考と手順: `additional_kwargs.thinking`（思考トークン、既定で閉じた折りたたみ）、`task_trace`（執筆とコードの手順）、`chat_mode`（選ばれたモードと自動の理由）を描画します（`search-trace.tsx`、`ai.tsx`）。思考は回答本文に混ぜません。
 - 主張の突き合わせ: `additional_kwargs.claim_trace`（主張ごとの判定、出典番号、監査で削除した文）を折りたたみで描画します（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）。
 - モデルのピッカー（v0.12.0）: 送信ボタンの左に、いまのモデル名と一覧（`GET <LangGraph の URL>/models`）を出し、チャットタブは `config.configurable.inference_model`、画像タブは `config.configurable.image_model` を送ります（`components/thread/model-picker.tsx`、送信設定は `thread/index.tsx`）。使えないモデルは理由つきで無効にします。選択はスレッドごとに sessionStorage（`cirka.thread.<threadId>.inference_model` / `image_model`、新規画面は `cirka.draft.*`）に覚え、新しいチャットは既定から始めます。応答の `additional_kwargs.model_info` を、応答の下に表示名で出します（`ai.tsx`）。`chat_mode.note`（思考を表示しないモデル）もモードの横に出します（`search-trace.tsx`）。
+- 表示崩れの修正（v0.13.0、表示だけ）: 本体のグリッドを `minmax(0, …)` の列にし（素の `1fr` は中身の最小幅まで広がり、スマートフォンで右側の送信ボタンやモデル名が切れていた）、入力欄の操作の行を折り返す（モデルと送信は右にまとめる）。開始画面のヘッダは 3 列のグリッド（タブが GitHub のリンクに重なっていた）、会話中のヘッダは `lg` 未満でタブを題名の下の行に出す（以前は `md` 未満で隠れていた）。表・ツール呼び出しの表は横スクロール、コードはメッセージの幅まで、長い URL は折り返し、ラベルとスイッチは文字ごとに折り返さない。モデルの一覧は画面の中に収める。タッチ画面ではコピー / 再生成を常に出す。高さは `100dvh`（`thread/index.tsx`、`markdown-text.tsx`、`messages/human.tsx`、`messages/tool-calls.tsx`、`messages/search-trace.tsx`、`mode-tabs.tsx`、`model-picker.tsx`）。別ホストのモデルはピッカーの副行に「リモート（種類）ホスト」を出す。
+- 応答時間（v0.13.0）: チャットタブの応答の `additional_kwargs.response_time`（`{"seconds"}`。ホストが計る）を、モデル名とモードの横に「応答時間 1 分 08 秒」の形で出します（`messages/response-time.tsx`、`ai.tsx`）。
 - 自律の手順: 自律モードのメッセージの `task_trace`（`kind: "control"`。選んだ道具、理由、依頼文、結果の要約、終了理由）を、執筆・コードの手順と同じ折りたたみで描画します（`search-trace.tsx` の `TaskTraceView`）。
 
 ## ログ

@@ -1,5 +1,5 @@
 {
-  "_comment": "Models the host lets a client pick (docs/host-model-selection-design.md). Clients send an id and show the label. No absolute paths and no secrets here. Inference models are sections of the llama.cpp router preset (scripts/setup-llm writes tools/llm/models.ini from this file); their GGUF comes from config/llm_model.json or config/search_models.json, their 'params' are llama-server options (long names without --). Image models name a ComfyUI file ('ckpt': checkpoints/ or diffusion_models/), the family of workflows/<family>/ and their own sampler 'params'; 'loras' are applied in order as \"<file>:<weight>\". 'downloads' are the extra files the setup fetches from Hugging Face. Parameters come from each model's published recommendations (sources in docs/configuration.md).",
+  "_comment": "Models the host lets a client pick (docs/host-model-selection-design.md). Clients send an id and show the label. No absolute paths and no secrets here. Inference models are sections of the llama.cpp router preset (scripts/setup-llm writes tools/llm/models.ini from this file); their GGUF comes from config/llm_model.json or config/search_models.json, their 'params' are llama-server options (long names without --). Image models name a ComfyUI file ('ckpt': checkpoints/ or diffusion_models/), the family of workflows/<family>/ and their own sampler 'params'; 'endpoint' marks an inference model on another host (a llama.cpp server or an OpenAI-compatible service: kind, url, model, optional api_key; docs/remote-llm-design.md). 'loras' are applied in order as \"<file>:<weight>\". 'downloads' are the extra files the setup fetches from Hugging Face. Parameters come from each model's published recommendations (sources in docs/configuration.md).",
   "inference": [
     {
       "id": "qwen3.8-27b-abliterated",
@@ -30,6 +30,22 @@
         "presence-penalty": 1.5,
         "repeat-penalty": 1.0
       }
+    },
+    {
+      "id": "mac-bonsai-2-27b-abliterated",
+      "label": "Bonsai 2 27B abliterated（Mac の llama.cpp）",
+      "endpoint": {"kind": "llamacpp", "url": "http://127.0.0.1:18090/v1", "model": "bonsai-2-27b-abliterated"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": false
+    },
+    {
+      "id": "mac-bonsai-2-27b-openai",
+      "label": "Bonsai 2 27B abliterated（Mac・OpenAI 互換 API）",
+      "endpoint": {"kind": "openai", "url": "http://127.0.0.1:18090/v1", "model": "bonsai-2-27b-abliterated"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": false
     }
   ],
   "image": [

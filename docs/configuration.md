@@ -66,6 +66,35 @@
 
 画像のタグ生成（ComfyUI のワークフロー）は、選んだ推論モデルによらずルータの `LLM_MODEL` を使います。
 
+### 別ホストの推論モデル（`endpoint`、v0.13.0）
+
+ほかの PC で動いている llama.cpp（llama-server。ルータでも単体でもよい）や、OpenAI 互換の Chat Completions を話すサービス（vLLM、Ollama、LM Studio など）を推論モデルとして並べられます。項目に `gguf` の代わりに `endpoint` を書きます（設定は `config/host_models.json` だけで、`.env` には書きません）。設計と確認の記録は [remote-llm-design.md](remote-llm-design.md) にあります。
+
+```json
+{
+  "id": "mac-bonsai-2-27b-abliterated",
+  "label": "Bonsai 2 27B abliterated（Mac の llama.cpp）",
+  "endpoint": {"kind": "llamacpp", "url": "http://127.0.0.1:18090/v1", "model": "bonsai-2-27b-abliterated"},
+  "context": 8192,
+  "thinking": "off",
+  "vision": false
+}
+```
+
+| キー | 内容 |
+|---|---|
+| `endpoint.kind` | `llamacpp`（思考の切り替え `chat_template_kwargs` を送る）か `openai`（汎用。llama.cpp 固有のフィールドを送らない） |
+| `endpoint.url` | ベース URL（`http://` / `https://`。この下の `/chat/completions` と `/models` を使う） |
+| `endpoint.model` | 接続先に送るモデル名（llama.cpp のルータならプリセットの節の名前） |
+| `endpoint.api_key` | 任意。`Authorization: Bearer` に載せる。`GET /models` やログには出ません。git で管理するファイルなので、本物の鍵を書いたらコミットしないでください |
+| `context` / `thinking` / `vision` | ローカルのモデルと同じ。`context` は接続先の文脈の大きさに合わせます |
+
+- 一覧（`GET /models`）は接続先の `GET <url>/models` を聞き、つながらない・認証を拒否した・モデルが無いときは理由つきで使えないと出します。選んで送ると接続先が答え、つながらなければエラーになります（ローカルのモデルに替わりません）。
+- 別ホストのモデルはこの端末のメモリを使わないので、unload しません。検索で計画を担当したときは、そのまま批評と統合も行い、代理リーダー（Ternary-Bonsai-2-27B）を起動しません。
+- 画像タブのタグ生成は、このリストの選択によらず、この端末のルータ（`LLM_URL` / `LLM_MODEL`）です。
+- ローカルのルータのプリセットには入りません（`setup-llm` は飛ばします）。一覧の先頭は `setup-llm.sh` が既定に使うため、別ホストの項目は後ろに置いてください。
+- 同梱の `mac-bonsai-2-27b-abliterated`（`llamacpp`）と `mac-bonsai-2-27b-openai`（`openai`）は、開発時の確認機（macOS）のルータへ SSH のポート転送（`ssh -L 127.0.0.1:18090:127.0.0.1:8090 <mac>`）で届く URL です。確認の後にサーバと転送は止めたので、ふだんは「接続先に接続できません」と出るだけです（`HOST_MODELS_DISABLE` で隠せます）。
+
 ### 画像モデル
 
 選定の理由と評価は [models.md](models.md)。`params` は `steps`、`cfg`、`sampler_name`、`scheduler`、`width`、`height`、`quality_prefix`、`negative`（`split` の既定の negative）だけで、系統のマップ（`workflows/maps/<family>.json` の `defaults`）の上に重ねます。`loras` は `"<ファイル>:<強度>"` の配列（0 より大きく 2 以下、CLIP も同じ強度）で、`ckpt` の直後に順に挿入します。

@@ -17,6 +17,10 @@
 | Huihui Qwen3.8 27B Abliterated（IQ3_M、mmproj 付き） | 既定の推論モデル。画像のタグ生成、チャットの会話・文章・コード、検索の計画、cirka | 利用者の指定（v0.1.0）。Danbooru タグの JSON を安定して返し、拒否で止まらない abliterated 版を使う |
 | Ternary-Bonsai-2-27B abliterated（PTQ1_0、Override-6） | 選べる推論モデル（v0.12.0）。検索の代理リーダーと同じファイル | 利用者の指定。思考を表示しないモデルとして扱う。context 8192 で、Qwen（4096）より長い会話が入る |
 
+### 別ホストの推論モデル（v0.13.0）
+
+`config/host_models.json` の `endpoint` で、ほかの PC の llama.cpp や OpenAI 互換サービスのモデルも推論モデルとして選べる（[remote-llm-design.md](remote-llm-design.md)）。同梱の 2 項目は、確認機（Mac）のルータで動く Ternary-Bonsai-2-27B abliterated（ローカルの項目と同じ GGUF とパラメータ、context 8192、思考なし）を、`llamacpp` と `openai` の 2 つの話し方で呼ぶもので、新しいモデルの採用ではない。評価は接続（一覧、補完、tool calling、検索の計画と統合、主張の検証）だけで、モデルの質はローカルの Bonsai と同じとみなした。
+
 ### Qwen3.8 27B の量子化と設定
 
 - **IQ3_M に再量子化する（約 12.7GB）。** 配布されている Q4_K_S（15.6GB + mmproj）は、OS・画面・ComfyUI の常駐分と合わせると物理メモリに収まらず、ページングでほぼ止まった。設計書の想定（Q4_K_M / IQ4_XS）も同じ理由で使えない。セットアップが同じモデルを IQ3_M にして使う（元ファイルは残す）。

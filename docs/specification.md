@@ -10,7 +10,7 @@
 - ComfyUI は、設計書のワークフローで参照画像の取り込み、LLM サーバの呼び出し、モデルの eject、タグの分割、チェックポイントによる静止画生成、Save Image を行う。
 - LLM サーバ（ルータ）の 27B は、日本語と参照画像から Danbooru / e621 系タグの JSON を返す。画素は作らない。画素を作るのは ComfyUI のチェックポイントと KSampler である。
 
-LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）と cirka のモデルゲート（`POST /coder/turn`）だけである。チャットタブは会話と検索の計画・統合のために LLM サーバ（ルータ）を直接呼び、検索の前後で unload する。モデルゲートは cirka の 1 ターン分の補完（tool calling）だけを LLM サーバに渡し、ツールは実行せず、`job_lock`（tab `coder`）を握るあいだだけ呼ぶ。画像タブ（graph `agent`）の経路は変えない。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
+LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）と cirka のモデルゲート（`POST /coder/turn`）だけである。チャットタブは会話と検索の計画・統合のために LLM サーバ（ルータ）を直接呼び、検索の前後で unload する。モデルゲートは cirka の 1 ターン分の補完（tool calling）だけを LLM サーバに渡し、ツールは実行せず、`job_lock`（tab `coder`）を握るあいだだけ呼ぶ。推論モデルに別ホストのモデル（`config/host_models.json` の `endpoint`。リモートの llama.cpp か OpenAI 互換のサービス、[remote-llm-design.md](remote-llm-design.md)）を選んだ実行では、チャットタブとモデルゲートはこの端末のルータではなくその接続先を呼ぶ。この端末のメモリを使わないので unload せず、`job_lock` は今までどおり握る。接続できないときは理由を返し、ほかのモデルへ替えない。画像タブ（graph `agent`）の経路は変えない（タグ生成はこの端末のルータのまま）。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
 
 ## 待受と到達範囲
 
@@ -20,6 +20,7 @@ LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成�
 | ComfyUI | `127.0.0.1:8188` | この端末の LangGraph だけ |
 | LangGraph | 他ホストから到達できるアドレス。開発時の既定ポートは `2024` | agent-chat-ui、および他ホスト |
 | agent-chat-ui | 他ホストから到達できるアドレス。開発時の既定ポートは `3000` | 利用者のブラウザ |
+| 別ホストの LLM（`config/host_models.json` の `endpoint`） | 相手のホストの待受（このリポジトリは開かない） | この端末の LangGraph（チャットタブ、`/coder/turn`、`/models` の確認）だけ。ComfyUI と cirka は直接つながない |
 | Tor | `127.0.0.1:9050`（SOCKS） | この端末の LangGraph（チャットタブの検索）だけ |
 | PrismML llama-server | `127.0.0.1:18181〜18190` | この端末の LangGraph だけ。検索中だけ起動する |
 | Docker サンドボックス | 待受なし（`--network none`、ポートを公開しない） | この端末の LangGraph が承認後に起動する。`docker` がエンジンにつながればそれを使い、つながらないときだけ Docker Desktop を実行のあいだ起動して止める。`docker` コマンドが無ければ何も起動しない |
@@ -112,7 +113,7 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 
 プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と llama.cpp は、セットアップが `tools/comfyui`（検証済みコミット、専用の Python 3.12 venv と GPU に合う PyTorch）と `tools/llama-prism` に導入する（git 管理外）。カスタムノードの導入先は `tools/comfyui/custom_nodes/`、モデルは `tools/comfyui/models/` だけである（外部フォルダは参照しない）。セットアップは指定なしで、この端末に既にあるモデル（LM Studio・以前の ComfyUI のモデルフォルダ、`hf download` の Hugging Face キャッシュ）を探して `tools/` へハードリンクし、無いものだけを Hugging Face のキャッシュ経由（`hf download`）で取得する（`docs/setup.md`「モデルの探し方」）。同じモデルを二重に取得しない。パスは `.env`（`COMFYUI_*`、`LLM_*`。git 管理外）に保存する。
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）、送信ボタン横のモデルのピッカーと応答のモデル名（`model-picker.tsx`、`thread/index.tsx` の送信設定、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を `docs/architecture.md`（UI の変更点）と README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）、送信ボタン横のモデルのピッカーと応答のモデル名（`model-picker.tsx`、`thread/index.tsx` の送信設定、`ai.tsx`）、PC とモバイルの表示崩れの修正（v0.13.0。表示だけで、送る内容と操作は変えない: `thread/index.tsx` のグリッド・ヘッダ・入力欄の折り返し、`markdown-text.tsx`・`human.tsx`・`tool-calls.tsx`・`search-trace.tsx`・`mode-tabs.tsx`・`model-picker.tsx` のはみ出しと折り返し）、応答時間の表示（`messages/response-time.tsx`、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を `docs/architecture.md`（UI の変更点）と README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
