@@ -3,7 +3,7 @@
 LAN 内の別の PC やスマートフォンのブラウザから日本語の指示（任意で参照画像 0〜4 枚）を送ると、Windows 機または Mac（Apple silicon）の上で静止画を作って返すローカルエージェントです。
 クラウド API は使わず、すべてこの PC の上で動きます。
 
-- **画像タブ**: LangGraph がワークフローを選んで ComfyUI に投入し、ComfyUI が llama.cpp 上の 27B LLM（Huihui Qwen3.8 27B Abliterated）でタグを作り、LLM を unload してから画像を生成します。画像モデルは SDXL（yiffInHell 3 種、Rekemono）、Anima（Indigo Furry Mix Anima）、Chroma1-HD、Krea 2（Wulver）から選べます。参照画像は役割（キャラクター・ポーズ・画風・元画像・マスク）付きで使えます。
+- **画像タブ**: LangGraph がワークフローを選んで ComfyUI に投入し、ComfyUI が llama.cpp 上の 27B LLM（Huihui Qwen3.8 27B Abliterated）でタグを作り、LLM を unload してから画像を生成します。画像モデルは SDXL（yiffInHell 3 種、Rekemono、Indigo Furry Mix XL）、Anima（Indigo Furry Mix Anima）、Chroma1-HD、Krea 2（Wulver）から選べます。参照画像は役割（キャラクター・ポーズ・画風・元画像・マスク）付きで使えます。
 - **モデルの選択**: 送信ボタンの横（cirka は `/model`・`/image-model`）で推論モデル（Qwen3.8 27B / Bonsai 2 27B）と画像モデルを選べます。候補とモデルごとのパラメータは `config/host_models.json` にあります。
 - **チャットタブ**: 27B との会話、Tor 経由の Web 検索（出典付き、主張ごとに出典と照合）、文章、コード（承認後に Docker で実行）、道具を順に使う自律モード。
 - **cirka**: 別 PC の端末で動く CUI のコーディングエージェント（Rust、`client/`）。モデルはこの PC の 27B を使い、ファイル操作とコマンドは cirka を動かす PC で実行します。

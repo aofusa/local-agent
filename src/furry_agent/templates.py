@@ -34,7 +34,7 @@ class LoraSpec:
 
 
 def parse_loras(value: str | None) -> list[LoraSpec]:
-    """``LORAS=a.safetensors:0.8, b:0.6:0.4`` -> specs. Separators: comma, semicolon or newline.
+    """``a.safetensors:0.8, b:0.6:0.4`` -> specs (an image model's loras joined). Separators: comma, semicolon or newline.
 
     ``name[:model_strength[:clip_strength]]``; clip strength defaults to the model strength.
     """
@@ -47,14 +47,14 @@ def parse_loras(value: str | None) -> list[LoraSpec]:
         # A Windows drive-less path cannot contain ':', so everything after the first ':' is numbers.
         name, numbers = parts[0], parts[1:]
         if not name or len(numbers) > 2:
-            raise TemplateError(f"LORAS の書式が不正です: {item!r}（name[:強度[:clip強度]]）")
+            raise TemplateError(f"LoRA の書式が不正です: {item!r}（name[:強度[:clip強度]]）")
         try:
             values = [float(n) for n in numbers]
         except ValueError as exc:
-            raise TemplateError(f"LORAS の強度が数値ではありません: {item!r}") from exc
+            raise TemplateError(f"LoRA の強度が数値ではありません: {item!r}") from exc
         low, high = LORA_STRENGTH_RANGE
         if any(not low <= v <= high for v in values):
-            raise TemplateError(f"LORAS の強度は {low}〜{high} です: {item!r}")
+            raise TemplateError(f"LoRA の強度は {low}〜{high} です: {item!r}")
         model = values[0] if values else 1.0
         clip = values[1] if len(values) > 1 else model
         specs.append(LoraSpec(name, model, clip))

@@ -48,7 +48,7 @@ scripts/stop-all.sh       # start-all.sh で起動したものを止める
 
 入力欄の送信ボタンの左に、いまのモデル名が出ます（Claude や Gemini のモデル選択と同じ形）。押すとホストの一覧（`GET http://<LAN IP>:2024/models`）が開き、選ぶと次の送信から効きます（実行中の応答は止めません）。
 
-- **チャットタブ**は推論モデル（Qwen 3.8 27B abliterated / Bonsai 2 27B abliterated）、**画像タブ**は画像モデル（yiffInHell 3 種、Rekemono、Indigo Furry Mix Anima、Chroma1-HD、Wulver）の一覧です。2 つは別々で、チャットで Bonsai を選んでも画像のモデルは変わりません。
+- **チャットタブ**は推論モデル（Qwen 3.8 27B abliterated / Bonsai 2 27B abliterated）、**画像タブ**は画像モデル（yiffInHell 3 種、Rekemono、Indigo Furry Mix XL、Indigo Furry Mix Anima、Chroma1-HD、Wulver）の一覧です。2 つは別々で、チャットで Bonsai を選んでも画像のモデルは変わりません。
 - 選択は会話（スレッド）ごとに覚えます（同じブラウザのタブを再読み込みしても残る）。新しいチャットはホストの既定（`（既定）` の印）で始まります。
 - 使えないモデル（ファイルが無い、`HOST_MODELS_DISABLE`）は一覧に残り、理由つきで選べなくなります。
 - 各応答の下に、その応答を作ったモデル名が出ます（途中で切り替えても、どの応答がどのモデルか分かる）。
@@ -103,7 +103,7 @@ cirka は `/model` と `/image-model` で選びます（下の「CUI（cirka）�
 
 ### LoRA
 
-画像モデルごとに `config/host_models.json` の `loras`（`"<ファイル>:<強度>"` の配列）を、チェックポイントの直後に順に適用します。SDXL のモデル（yiffInHell 3 種、Rekemono）は `novabeast xl v1 rank64 pony.safetensors:1.0` を使います（v0.11 までの `.env` の `LORAS` の値。`LORAS` はもう読みません）。
+画像モデルごとに `config/host_models.json` の `loras`（`"<ファイル>:<強度>"` の配列）を、チェックポイントの直後に順に適用します。SDXL のモデル（yiffInHell 3 種、Rekemono、Indigo Furry Mix XL）は `novabeast xl v1 rank64 pony.safetensors:1.0` を使います。
 強度は 0 より大きく 2 以下で、CLIP 強度も同じ値です。ComfyUI の `models\loras` に無い LoRA があると、そのモデルは一覧で使えないと表示され、選んで送ると投入前にエラーを返します。トリガーワードが必要な LoRA は指示に含めてください。
 
 ### 画像モデル（系統ごとの違い）
@@ -112,7 +112,7 @@ cirka は `/model` と `/image-model` で選びます（下の「CUI（cirka）�
 
 | 系統 | モデル | LLM の出力 | ローダー | 参照画像 |
 |---|---|---|---|---|
-| `sdxl` | yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono | Danbooru / e621 タグ列（`prompts/system_furry_tags.txt`） | チェックポイント | 4 種の役割（上記） |
+| `sdxl` | yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix XL | Danbooru / e621 タグ列（`prompts/system_furry_tags.txt`） | チェックポイント | 4 種の役割（上記） |
 | `anima` | Indigo Furry Mix Anima | Danbooru タグ列。先頭に `masterpiece, best quality, very aesthetic, score_8, furry` | 拡散モデル + Qwen3 0.6B（CLIPLoader `stable_diffusion`）+ qwen_image_vae | 元画像 1 枚の img2img だけ |
 | `flux` | Chroma1-HD | 英語の説明文（`prompts/system_chroma_prose.txt`） | 拡散モデル（fp8）+ T5-XXL fp8 + Flux VAE | 元画像 1 枚の img2img だけ |
 | `krea2` | Wulver (Krea 2) | 英語の説明文 60〜120 語、背景も書く（`prompts/system_krea2_prose.txt`） | 拡散モデル（fp8）+ Qwen3-VL-4B fp8（CLIPLoader `krea2`）+ qwen_image_vae | 元画像 1 枚の img2img だけ |

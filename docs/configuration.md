@@ -53,7 +53,7 @@
 | `DEFAULT_IMAGE_MODEL` | 一覧の先頭（`yiffinhell-vantablack`） | 画像モデルを指定しない実行のモデル |
 | `HOST_MODELS_DISABLE` | 空 | カンマ区切りの id を使えないものとして出す |
 
-v0.11 までの `CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME` は読みません（チェックポイント、系統、LoRA は画像モデルの項目）。`CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` / `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` はこの端末の Chroma の部品と速さの調整として残ります。
+チェックポイント、系統、LoRA は画像モデルの項目です。以前の版の `.env` に残っている `CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME`、`LMSTUDIO_*`、`LOCAL_DOC_ROOTS`、`DOC_EXTENSIONS` は削除してください（読みません）。`CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` / `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` はこの端末の Chroma の部品と速さの調整として残ります。
 
 ### 推論モデル
 
@@ -76,6 +76,7 @@ v0.11 までの `CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、
 | `yiffinhell-metallictetra` | yiffInHell METALLIC TETRA | sdxl | `yiffInHell_yihMETLLICTETR.safetensors` | 24 / 3.5 / euler_ancestral sgm_uniform / 832×1216 | 同上 | [Yiff in Hell の配布ページ](https://civarchive.com/models/1570986)（v4.0: 24 steps、CFG 2〜4、Euler A、Beta / SGM Uniform） |
 | `yiffinhell-xxxtended-v2` | yiffInHell XXX-TENDED V2.0 | sdxl | `yiffInHell_yihxxxTENDEDV20.safetensors` | 24 / 3.0 / euler_ancestral sgm_uniform / 832×1216 | 同上 | 同上（XXX-TENDED: 24 steps、CFG 2〜4、Euler A） |
 | `rekemono` | Rekemono v1.0 | sdxl | `rekemono_v100.safetensors` | 28 / 4.5 / euler_ancestral normal / 832×1216 | 同上 | 配布ページが見つからないため、同系統の kemono SDXL（[Nova Kemono XL](https://civitai.com/models/1641408)、Mol_Keun Mix など: Euler A、20〜30 steps、CFG 3〜5）の中央値 |
+| `indigofurrymix-xl` | Indigo Furry Mix XL (Noob EPS 11) | sdxl | `indigoFurryMixXL_cknoobEPS11.safetensors`（NoobAI EPS 1.1 系） | 28 / 5.0 / euler_ancestral normal / 832×1216、quality prefix `masterpiece, best quality, very aesthetic` | novabeast xl v1 rank64 pony 1.0 | [配布ページ](https://civitai.com/models/579632/indigo-furry-mix-xl)（CFG 3〜7・推奨 5、Euler a）、NoobAI XL の一般的な推奨（20〜30 steps、832×1216、`masterpiece, best quality, very aesthetic`） |
 | `indigofurrymix-anima` | Indigo Furry Mix Anima | anima | `indigoFurryMixAnima_v10.safetensors`（拡散モデルのみ）+ `qwen_3_06b_base` + `qwen_image_vae` | 28 / 4.0 / er_sde simple / 832×1216 | なし | [配布ページ](https://civitai.com/models/2787288)（Euler A か ER SDE、30 steps 未満、CFG 3〜6・作者は 4、1024px 前後、`furry` を入れる）、ComfyUI の Anima ブループリント |
 | `chroma-hd` | Chroma1-HD | flux | `chroma_v10HD.safetensors` + T5-XXL fp8 + Flux VAE | 28 / 3.5 / euler beta / 1024×1024 | なし | v0.11 の既定値のまま（公式ワークフロー） |
 | `wulver` | Wulver (Krea 2) | krea2 | `wulverKrea2_v05_fp8.safetensors`（拡散モデルのみ）+ `qwen3vl_4b_fp8_scaled` + `qwen_image_vae` | 8 / 1.0 / euler simple / 1024×1024 | なし | [配布ページ](https://civitai.com/models/2881657)（Turbo: 8 steps、CFG 1.0・1.0 より上は焼ける・negative は効かない、euler / simple、shift 1.15、1024 ネイティブ、自然文 60〜120 語） |
@@ -117,5 +118,5 @@ cirka 向けの `POST /coder/turn` は、`LLM_URL`、`LLM_MODEL`、`LLM_CONTEXT`
 - 次のものは時間の上限を既定で持ちません（設定すれば掛かります）: 思考モードの検索全体（`SEARCH_WALL_CLOCK_S`）、主張の検証（`CLAIM_TIMEOUT_S`）、自律モード（`CONTROLLER_WALL_CLOCK_S`）、reader 1 体（`SEARCH_TOTAL_TIMEOUT_S`）、ほかのタブを待つ時間（`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）。量はラウンド・ページ・手数・主張の数で決まります。
 - 次のものは短い上限を残しています。エージェント全体を止めるものではなく、その 1 件を諦めて先へ進むためのものです: Tor 経由の検索・ページ取得の HTTP リクエスト 1 回（`SEARCH_TIMEOUT_S`、30 秒。止まったページは飛ばします）、Tor の起動（`TOR_BOOTSTRAP_TIMEOUT_S`、90 秒）、reader の 1 ページの取得（`BONSAI_PAGE_TIMEOUT_S`、20 秒）、ComfyUI・ルータ・Docker への状態確認の HTTP リクエスト。
 - チャットタブのコンテナ実行は 1 回 60 秒で止めます（モデルが書いたコードの安全のための固定の上限で、このリポジトリの規則で決めています）。
-- `COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は読まなくなりました（`AGENT_IDLE_TIMEOUT_S` にまとめました）。v0.11.0 で `LMSTUDIO_URL` / `LMSTUDIO_MODEL` / `LMSTUDIO_CONTEXT` は `LLM_URL` / `LLM_MODEL` / `LLM_CONTEXT` になりました（古い名前は読みません。`setup-llm.ps1` が新しい名前を書きます）。
+- 待ちの上限は `AGENT_IDLE_TIMEOUT_S` にまとめています（以前の `COMFYUI_TIMEOUT_S` などは削除してください）。LLM の設定は `LLM_URL` / `LLM_MODEL` / `LLM_CONTEXT` です（`setup-llm` が書きます）。
 - cirka 側の上限は cirka の設定 `idle_timeout_s`（既定 1200 秒）です（[client/README.md](../client/README.md)）。

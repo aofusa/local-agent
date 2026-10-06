@@ -74,7 +74,6 @@ def test_settings_ignore_the_old_model_switches(monkeypatch):
     monkeypatch.setenv("COMFY_MODEL_FAMILY", "flux")
     monkeypatch.setenv("CKPT_NAME", "chroma_v10HD.safetensors")
     monkeypatch.setenv("LORAS", "sdxl_style:0.8")
-    monkeypatch.setenv("CHROMA_UNET_NAME", "other.safetensors")
     monkeypatch.setenv("CHROMA_VAE", "flux_ae.safetensors")
     settings = Settings.from_env()
     assert not hasattr(settings, "model_family") and not hasattr(settings, "ckpt_name")

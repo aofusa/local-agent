@@ -2,10 +2,12 @@
 
 ## v0.12.0 — 推論モデル・画像モデルの選択、Krea 2（Wulver）と Anima、macOS（MLX 優先）
 
-- モデルの一覧 `config/host_models.json`（`docs/host-model-selection-design.md`）: 推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 7 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix Anima、Chroma1-HD、Wulver）。モデルごとにパラメータを持つ（推論: context、思考の有無、llama-server のサンプリング。画像: steps、cfg、サンプラー、スケジューラ、サイズ、quality prefix、negative、LoRA）。値は各モデルの配布ページの推奨から決め、出典を `docs/configuration.md` に書いた。SDXL のモデルはすべて以前の `LORAS` の LoRA を使う。
+- モデルの一覧 `config/host_models.json`（`docs/host-model-selection-design.md`）: 推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 8 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix XL（Noob EPS 11）、Indigo Furry Mix Anima、Chroma1-HD、Wulver）。モデルごとにパラメータを持つ（推論: context、思考の有無、llama-server のサンプリング。画像: steps、cfg、サンプラー、スケジューラ、サイズ、quality prefix、negative、LoRA）。値は各モデルの配布ページの推奨から決め、出典を `docs/configuration.md` に書いた。SDXL のモデルはすべて以前の `LORAS` の LoRA を使う。
   - `GET /models`（`/coder/turn` と同じ http.app）: 一覧と、使えるか（ルータのプリセットの節、ComfyUI のファイル、`HOST_MODELS_DISABLE`）とその理由。
   - 画像グラフ: `configurable.image_model`（無ければ `DEFAULT_IMAGE_MODEL`）の系統・ファイル・LoRA・パラメータをジョブに焼く。`CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME` は読まない。本文のモデル名では切り替えない。SDXL のマップにサンプラーと `split` のスロットを足した（テンプレートは変えていない。既定のモデルの投入 JSON は v0.11 と同じ）。
   - チャットタブと `POST /coder/turn`: `configurable.inference_model` / body の `inference_model`（無ければ `DEFAULT_INFERENCE_MODEL`、それも無ければ v0.11 と同じ `LLM_MODEL`）。推論モデルはルータのプリセットの節（`scripts/host_models.py preset` が導入済みの GGUF ごとに書く）で、文脈と思考の有無もモデルに従う。Bonsai は思考を表示しない。未知・使えない id は拒否し、別のモデルへ替えない。応答に `model_info`、`/coder/health` に既定の id。
+- 画像モデル Indigo Furry Mix XL（`indigoFurryMixXL_cknoobEPS11.safetensors`、NoobAI EPS 1.1 系の SDXL）: 28 steps、CFG 5、Euler a、quality prefix `masterpiece, best quality, very aesthetic`、LoRA は他の SDXL と同じ。
+- `.env` の整理: 役割が `config/host_models.json` に移った設定と使わなくなった設定（`CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME`、`LMSTUDIO_*`、`LOCAL_DOC_ROOTS`、`DOC_EXTENSIONS`）を `.env.example` とコードから消した（`build_workflows.py` も環境変数でチェックポイント名を変えない）。
 - 画像系統 `krea2`（Wulver: Qwen3-VL-4B fp8 と qwen_image_vae、8 steps、cfg 1、英語の説明文、`prompts/system_krea2_prose.txt`）と `anima`（Indigo Furry Mix Anima: Qwen3 0.6B と qwen_image_vae、er_sde、cfg 4、タグ）。Chroma と同じ形（`ckpt` が eject の後に拡散モデル・テキストエンコーダ・VAE を読む、ノード ID は同じ、参照画像は元画像だけ）。`setup-image-models.ps1` / `.sh` が画像モデルのファイルを取り込み、エンコーダを Hugging Face から取得する（SHA-256 照合）。
 - Web UI: 送信ボタンの横にモデルのピッカー（Claude / Gemini 型）。チャットタブは推論モデル、画像タブは画像モデル。使えないモデルは理由つきで無効、選択はスレッドごと（新しいチャットは既定）、応答の下にモデル名。
 - cirka 0.4.0: `/model`、`/image-model`、`/models`。id は完全一致、`--save`（`--project`）、`CIRKA_INFERENCE_MODEL` / `CIRKA_IMAGE_MODEL`、セッションに保存して `/resume` で戻す。入力欄の下に `model:… image:…`（端末の幅に収める）。`cirka status` に両方の id。
@@ -15,6 +17,7 @@
   - yiffInHell METALLIC TETRA を UI のピッカーで選んで送信（`configurable.image_model`、24 steps / cfg 3.5 / sgm_uniform が投入された）。
   - Wulver（Krea 2）: 英語の説明文、eject の確認の後に拡散モデル・Qwen3-VL・VAE を読み込み、1024×1024、約 12 分。
   - Indigo Furry Mix Anima: タグ + score タグ、er_sde / cfg 4、約 4 分。
+  - Indigo Furry Mix XL（Noob EPS 11）: 28 steps / cfg 5 / euler_ancestral、novabeast の LoRA、約 5 分。
   - Chroma1-HD（`CHROMA_MAX_PIXELS` を一時的に 512×512 相当に下げた）。
   - Tor 検索（速いモード）: 計画（ルータの 27B）→ reader → 代理リーダーの統合、主張 12 件の突き合わせ。
   - チャットタブで Bonsai 2 27B を UI から選んで送信（ルータの Bonsai の節が答え、応答にモデル名）。

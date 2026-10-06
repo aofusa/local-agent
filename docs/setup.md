@@ -47,7 +47,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
   - セットアップ後に `tools\comfyui\models\checkpoints` に置く
   - 以前の ComfyUI（Comfy Desktop、`Documents\ComfyUI\models`）のモデルフォルダにあれば、セットアップが自動で取り込む（ハードリンク）。ほかの場所なら `-ModelsDir <models フォルダ>`
   - `-CheckpointUrl <URL>` でダウンロードする
-  ほかの画像モデル（yiffInHell METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix Anima、Wulver）も同じように置きます。一覧とファイル名は `config/host_models.json`。置いたモデルは画面の一覧で選べるようになり、置いていないモデルは「使えない」と表示されます。Krea 2 / Anima のテキストエンコーダと VAE は `.\scripts\setup-image-models.ps1` が Hugging Face から取得します。
+  ほかの画像モデル（yiffInHell METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix XL、Indigo Furry Mix Anima、Wulver）も同じように置きます。一覧とファイル名は `config/host_models.json`。置いたモデルは画面の一覧で選べるようになり、置いていないモデルは「使えない」と表示されます。Krea 2 / Anima のテキストエンコーダと VAE は `.\scripts\setup-image-models.ps1` が Hugging Face から取得します。
 - （任意）**Chroma1-HD** を使う場合は、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) の拡散モデル
   （BF16 約 17.8GB。Civitai 配布名 `chroma_v10HD.safetensors`）を `models\diffusion_models` か `models\checkpoints` に置き、
   セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 と VAE を取得し、拡散モデルを fp8 に変換。[usage.md › 画像モデル](usage.md#画像モデル系統ごとの違い)）。
@@ -73,7 +73,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 |---|---|
 | `-OpenFirewall` | TCP 2024 / 3000 の受信を Private プロファイルで許可（UAC が出ます） |
 | `-ModelsDir <path>[,<path>]` | 自動では探さない場所にあるモデルフォルダ（`checkpoints\`、`loras\` などを含むフォルダ）。使うモデルを `tools\comfyui\models` に取り込む |
-| `-CheckpointUrl <URL>` | チェックポイント（`CKPT_NAME`）をダウンロードする |
+| `-CheckpointUrl <URL>` | 既定の画像モデル（`config/host_models.json`）のチェックポイントをダウンロードする |
 | `-Torch auto`（既定） / `rocm` / `cuda` / `cpu` | ComfyUI の PyTorch。auto は GPU の名前から選ぶ（Radeon → ROCm、NVIDIA → CUDA、ほか → CPU） |
 | `-SourceModel <GGUF>` | 自動では探さない場所にある LLM のファイルを使う（ハードリンク） |
 | `-Quant IQ3_M`（既定） / `none` | LLM を再量子化するか（下の「メモリと LLM の量子化」） |

@@ -291,7 +291,7 @@ function Import-ComfyModel($Layout, [string[]]$Folders, [string]$Name, [string[]
 }
 
 function Resolve-LoraName([string]$Name, [string[]]$Dirs) {
-    # The file of a LORAS entry ("name" with or without extension, any case) under <dir>\loras, as a relative path.
+    # The file of an image model's LoRA ("name" with or without extension, any case) under <dir>\loras, as a relative path.
     $Name = $Name.Trim().Replace("/", "\")
     foreach ($dir in $Dirs) {
         $root = Join-Path $dir "loras"

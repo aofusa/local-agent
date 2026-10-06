@@ -2,7 +2,7 @@
 
 Only the inputs that design doc §4.1 lets the caller rewrite are touched:
 the Japanese instruction, reference image filenames, the seed, and (for
-img2img) the latent side. The checkpoint name can be overridden by CKPT_NAME.
+img2img) the latent side. The checkpoint name is the run's image model (config/host_models.json).
 Reference nodes are removed ("bypassed") when there is no reference image.
 """
 

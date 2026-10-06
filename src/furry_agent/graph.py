@@ -312,7 +312,7 @@ def _family(state: State) -> str:
 
 
 def _loras(state: State) -> list[LoraSpec]:
-    """The image entry's LoRAs (config/host_models.json), in order. LORAS / CHROMA_LORAS in .env are not read."""
+    """The image entry's LoRAs (config/host_models.json), in order."""
     return parse_loras(",".join((state.get("job") or {}).get("loras") or []))
 
 

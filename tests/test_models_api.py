@@ -64,7 +64,7 @@ async def test_lists_every_model_with_availability():
     assert "プリセット" in inference["bonsai-2-27b-abliterated"]["reason"]
     assert inference["bonsai-2-27b-abliterated"]["context"] == 8192
     image = {m["id"]: m for m in body["image"]}
-    assert len(image) == 7
+    assert len(image) == 8
     assert image["yiffinhell-vantablack"]["available"] and image["rekemono"]["available"]
     assert image["wulver"]["available"] and image["wulver"]["family_label"] == "Krea 2"
     assert image["chroma-hd"]["available"]
@@ -77,7 +77,7 @@ async def test_lists_every_model_with_availability():
 async def test_hosts_down_still_lists_everything(monkeypatch, tmp_path):
     monkeypatch.setenv("BONSAI_MODELS_DIR", str(tmp_path))
     status, body = await _get(Comfy(down=True), None)
-    assert status == 200 and len(body["image"]) == 7
+    assert status == 200 and len(body["image"]) == 8
     assert all(m["available"] for m in body["image"])  # files are checked again when a run queues
     assert {m["id"] for m in body["inference"] if not m["available"]} >= {"bonsai-2-27b-abliterated"}
 

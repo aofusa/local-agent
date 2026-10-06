@@ -74,6 +74,16 @@
                  "width": 832, "height": 1216}
     },
     {
+      "id": "indigofurrymix-xl",
+      "label": "Indigo Furry Mix XL (Noob EPS 11)",
+      "family": "sdxl",
+      "ckpt": "indigoFurryMixXL_cknoobEPS11.safetensors",
+      "prompt_style": "danbooru",
+      "loras": ["novabeast xl v1 rank64 pony.safetensors:1.0"],
+      "params": {"steps": 28, "cfg": 5.0, "sampler_name": "euler_ancestral", "scheduler": "normal",
+                 "width": 832, "height": 1216, "quality_prefix": "masterpiece, best quality, very aesthetic"}
+    },
+    {
       "id": "indigofurrymix-anima",
       "label": "Indigo Furry Mix Anima",
       "family": "anima",

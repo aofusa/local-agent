@@ -32,7 +32,8 @@ def test_shipped_catalog_lists_the_requested_models():
     files = {m.ckpt for m in catalog.image.values()}
     assert files == {
         "yiffInHell_yihVANTABLACK.safetensors", "yiffInHell_yihMETLLICTETR.safetensors",
-        "yiffInHell_yihxxxTENDEDV20.safetensors", "indigoFurryMixAnima_v10.safetensors",
+        "yiffInHell_yihxxxTENDEDV20.safetensors", "indigoFurryMixXL_cknoobEPS11.safetensors",
+        "indigoFurryMixAnima_v10.safetensors",
         "chroma_v10HD.safetensors", "wulverKrea2_v05_fp8.safetensors", "rekemono_v100.safetensors"}
     # Every SDXL model uses the LoRA that LORAS had before the catalog.
     for model in catalog.image.values():

@@ -6,7 +6,9 @@ so re-run this script after editing a prompt:
 
     uv run python scripts/build_workflows.py
 
-LLM_MODEL / CKPT_NAME environment variables override the model key and checkpoint name.
+LLM_MODEL / LLM_URL environment variables set the router's model and URL (scripts/setup-llm writes them). The
+checkpoint names in the templates are only defaults: each run injects its image model's file
+(config/host_models.json).
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ WORKFLOWS = ROOT / "workflows"
 # to .env and regenerates the workflows when they differ).
 LLM_URL = os.environ.get("LLM_URL") or "http://127.0.0.1:8080/v1"
 LLM_MODEL = os.environ.get("LLM_MODEL") or "qwen3.8-27b-abliterated"
-CKPT_NAME = os.environ.get("CKPT_NAME") or "yiffInHell_yihVANTABLACK.safetensors"
+CKPT_NAME = "yiffInHell_yihVANTABLACK.safetensors"
 REF_PLACEHOLDER = "furry_ja_ref.png"
 REF_JOIN_DELIMITER = "\n\n[Reference image tags]\n"
 VISION_USER_PROMPT = "Tag the reference image(s)."
@@ -473,7 +475,7 @@ def node_map(api: dict | None = None) -> tuple[dict, dict[str, dict]]:
 # the encoders and the sampler defaults differ; the model's own values come from config/host_models.json.
 
 CHROMA_FAMILY = "flux"
-CHROMA_UNET = os.environ.get("CHROMA_UNET_NAME") or "chroma_v10HD.safetensors"
+CHROMA_UNET = "chroma_v10HD.safetensors"
 CHROMA_MODELS = {
     "unet_name": CHROMA_UNET,
     # The 17.8 GB BF16 file is cast to fp8 at load: ~8.9 GB, which fits next to the T5 on a 24 GB UMA machine.

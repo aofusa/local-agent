@@ -9,9 +9,8 @@ from furry_agent.families import FLUX
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Chroma1-HD model files: env name -> template slot. Empty = the value stored in workflows/maps/flux.json.
-# CHROMA_UNET_NAME is no longer read: the image entry's "ckpt" (config/host_models.json) names the model.
+# The diffusion model itself is the image entry's "ckpt" (config/host_models.json).
 CHROMA_MODEL_ENV = {
-    "CHROMA_UNET_NAME": "ckpt_name",
     "CHROMA_TEXT_ENCODER": "clip_name",
     "CHROMA_VAE": "vae_name",
     "CHROMA_WEIGHT_DTYPE": "weight_dtype",
@@ -56,8 +55,7 @@ class Settings:
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", REPO_ROOT / "outputs")),
             logs_dir=Path(os.environ.get("LOGS_DIR", REPO_ROOT / "logs")),
             timeout_s=idle_timeout_from_env(),
-            chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items()
-                           if os.environ.get(env) and slot != "ckpt_name"},
+            chroma_models={slot: os.environ[env] for env, slot in CHROMA_MODEL_ENV.items() if os.environ.get(env)},
             # Machine-specific speed knobs: 1024x1024 x 28 steps takes ~30 min on a Radeon 890M.
             chroma_defaults={key: int(os.environ[env]) for env, key in CHROMA_DEFAULT_ENV.items()
                              if os.environ.get(env, "").strip()},
