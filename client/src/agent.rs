@@ -149,6 +149,7 @@ impl<B: Brain> Agent<B> {
             tools,
             max_tokens: self.reply_tokens(),
             temperature: 0.2,
+            inference_model: self.tools.config.inference_model.clone(),
         };
         (request, fit)
     }
@@ -333,6 +334,7 @@ commands run and their results, open items. Under 200 words, in the user's langu
             tools: vec![],
             max_tokens: self.reply_tokens().min(600),
             temperature: 0.2,
+            inference_model: self.tools.config.inference_model.clone(),
         };
         self.cancel.store(false, Ordering::SeqCst);
         let reply = self.brain.turn(&request, ui, &self.cancel).await?;

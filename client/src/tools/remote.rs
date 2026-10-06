@@ -38,7 +38,10 @@ pub async fn web_search(ctx: &ToolCtx, args: &Value, ui: &mut dyn Frontend) -> T
     };
     let Some(host) = ctx.host.clone() else { return ToolOutput::err("ホストに接続していません") };
     // task=search fixes the chat graph's kind: one explicit search, never its own control loop.
-    let configurable = json!({"mode": ctx.config.mode.as_str(), "task": "search"});
+    let mut configurable = json!({"mode": ctx.config.mode.as_str(), "task": "search"});
+    if let Some(model) = &ctx.config.inference_model {
+        configurable["inference_model"] = json!(model); // /model: the search plan and answer use it too
+    }
     let cancel = ctx.cancel.clone();
     let cancelled = move || cancel.load(std::sync::atomic::Ordering::SeqCst);
     let mut on_progress = progress(ui);
@@ -120,7 +123,12 @@ pub async fn image_generate(ctx: &ToolCtx, args: &Value, ui: &mut dyn Frontend) 
     let cancelled = move || cancel.load(std::sync::atomic::Ordering::SeqCst);
     let result = {
         let mut on_progress = progress(ui);
-        host.run_graph("agent", Value::Array(content), json!({}), Duration::from_secs(ctx.config.idle_timeout_s),
+        // /image-model: the image graph's model (the host's default when none was picked).
+        let configurable = match &ctx.config.image_model {
+            Some(model) => json!({"image_model": model}),
+            None => json!({}),
+        };
+        host.run_graph("agent", Value::Array(content), configurable, Duration::from_secs(ctx.config.idle_timeout_s),
                        &mut on_progress, &cancelled)
             .await
     };

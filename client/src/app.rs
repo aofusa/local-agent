@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::agent::{Agent, HostBrain, StopReason};
 use crate::config::{self, Config, Mode, Permission};
 use crate::host::{HostClient, Msg, ToolCall};
+use crate::models::{self, Kind};
 use crate::platform;
 use crate::policy;
 use crate::session::{self, Session};
@@ -53,6 +54,8 @@ pub struct App {
     gate_ok: bool,
     model: String,
     problem: Option<String>,
+    /// The last `GET /models` answer (labels for the status line; None until fetched).
+    host_models: Option<serde_json::Value>,
 }
 
 const HELP: &str = "\
@@ -60,6 +63,9 @@ const HELP: &str = "\
 /status               接続先、モデル、モード、許可、タスク
 /host [URL] [--save]  接続先を表示 / 変更（--save でユーザー設定に保存）
 /mode fast|think|auto ホストの思考予算
+/model [id] [--save]  推論モデルを表示 / 切り替え（ホストの一覧の id。--save で設定に保存）
+/image-model [id]     画像モデルを表示 / 切り替え（/image と画像生成ツールが使う。--save も可）
+/models               ホストのモデル一覧（使えない理由つき）
 /auto                 確認なしで実行（既定。危険な操作だけ確認）
 /default              編集とコマンドの前に確認する
 /accept-edits         編集は自動、コマンドは確認
@@ -98,7 +104,11 @@ impl App {
         let tools = ToolCtx::new(ws, config.clone(), Some(host.clone()), cancel.clone());
         let mut agent = Agent::new(HostBrain { host: host.clone() }, tools, config.permission, config.mode, config.max_turns, context);
         agent.env_snapshot = env_snapshot(&agent.tools.ws.root, &config);
-        let mut app = App { config, agent, ui, busy: Arc::new(AtomicBool::new(false)), gate_ok, model: health.model, problem };
+        let mut app = App { config, agent, ui, busy: Arc::new(AtomicBool::new(false)), gate_ok, model: health.model, problem,
+                            host_models: None };
+        if health.ok {
+            app.load_models().await;
+        }
         app.welcome();
         Ok(app)
     }
@@ -210,6 +220,108 @@ impl App {
         }
     }
 
+    /// Fetch `GET /models` and fit the context window to the picked inference model.
+    async fn load_models(&mut self) {
+        match HostClient::new(&self.config).models().await {
+            Ok(list) => {
+                self.host_models = Some(list);
+                self.apply_inference_context();
+                if let Some(id) = &self.config.inference_model {
+                    self.model = id.clone();
+                }
+            }
+            Err(_) => self.host_models = None, // an older host: ids are sent as they are
+        }
+    }
+
+    fn apply_inference_context(&mut self) {
+        let Some(list) = &self.host_models else { return };
+        let id = self.config.inference_model.clone().unwrap_or_else(|| models::default_id(list, Kind::Inference));
+        if let Some(e) = models::entries(list, Kind::Inference).into_iter().find(|e| e.id == id) {
+            if e.context > 0 {
+                self.agent.set_context_window(e.context);
+            }
+        }
+    }
+
+    fn model_label(&self, kind: Kind) -> String {
+        let current = match kind {
+            Kind::Inference => self.config.inference_model.clone(),
+            Kind::Image => self.config.image_model.clone(),
+        };
+        let id = current.or_else(|| self.host_models.as_ref().map(|m| models::default_id(m, kind))).unwrap_or_default();
+        if id.is_empty() { "既定".into() } else { models::label_of(self.host_models.as_ref(), kind, &id) }
+    }
+
+    /// The status line under the input box: `model:<label>  image:<label>`.
+    pub fn models_line(&self) -> String {
+        format!("model:{}  image:{}", self.model_label(Kind::Inference), self.model_label(Kind::Image))
+    }
+
+    /// `/model [id] [--save] [--project]` and `/image-model ...`. Without an id: the current model and the
+    /// candidates. With one: an exact id the host offers (checked against `GET /models`), from the next turn on.
+    async fn model_command(&mut self, kind: Kind, arg: &str) {
+        let words: Vec<&str> = arg.split_whitespace().collect();
+        let save = words.contains(&"--save");
+        let project = words.contains(&"--project");
+        let id = words.iter().find(|w| !w.starts_with("--")).copied();
+        self.load_models().await;
+        let Some(list) = self.host_models.clone() else {
+            self.ui.styled("  ✗ ホストのモデル一覧（GET /models）を取得できません。ホストの local-agent を確認してください", "err");
+            return;
+        };
+        let Some(id) = id else {
+            let current = match kind {
+                Kind::Inference => self.config.inference_model.clone(),
+                Kind::Image => self.config.image_model.clone(),
+            };
+            self.ui.note(&models::describe(&list, kind, current.as_deref()));
+            return;
+        };
+        let entry = match models::pick(&list, kind, id) {
+            Ok(e) => e,
+            Err(e) => {
+                self.ui.styled(&format!("  ✗ {e}（選択は変えていません）"), "err");
+                return;
+            }
+        };
+        match kind {
+            Kind::Inference => {
+                self.config.inference_model = Some(entry.id.clone());
+                self.model = entry.id.clone();
+                self.apply_inference_context();
+            }
+            Kind::Image => self.config.image_model = Some(entry.id.clone()),
+        }
+        self.agent.tools.config = self.config.clone();
+        if let Some(s) = self.agent.session.as_mut() {
+            s.append_models(self.config.inference_model.as_deref(), self.config.image_model.as_deref());
+        }
+        self.ui.note(&format!("{}: {}（{}）。次のターンから。", kind.label(), entry.label, entry.id));
+        if save {
+            let path = if project { Some(config::project_config_path(&self.agent.tools.ws.root)) } else { platform::user_config_path() };
+            match path {
+                Some(path) => match config::write_key(&path, kind.config_key(), Some(&entry.id)) {
+                    Ok(_) => self.ui.note(&format!("{} に保存しました", path.display())),
+                    Err(e) => self.ui.styled(&format!("  ✗ {e}"), "err"),
+                },
+                None => self.ui.styled("  ✗ ユーザー設定の場所が分かりません", "err"),
+            }
+        }
+    }
+
+    async fn models_command(&mut self) {
+        match HostClient::new(&self.config).models().await {
+            Ok(list) => {
+                let text = format!("{}\n\n{}", models::describe(&list, Kind::Inference, self.config.inference_model.as_deref()),
+                                   models::describe(&list, Kind::Image, self.config.image_model.as_deref()));
+                self.host_models = Some(list);
+                self.ui.note(&text);
+            }
+            Err(e) => self.ui.styled(&format!("  ✗ {e}"), "err"),
+        }
+    }
+
     async fn status(&mut self) {
         let host = HostClient::new(&self.config);
         let h = host.health().await;
@@ -217,7 +329,8 @@ impl App {
             format!("ワークスペース: {}", self.agent.tools.ws.root.display()),
             format!("ホスト: {}（到達 {}、ゲート {}、LLM {}、使用中 {}）", self.config.host, h.ok, h.gate, h.llm,
                     h.busy.unwrap_or_else(|| "なし".into())),
-            format!("モデル: {}（文脈 {} トークン）", h.model, self.agent.context_window),
+            format!("推論モデル: {}（文脈 {} トークン）  画像モデル: {}", self.model_label(Kind::Inference),
+                    self.agent.context_window, self.model_label(Kind::Image)),
             format!("思考: {}  許可: {}  最大ターン: {}", self.agent.mode.as_str(), self.agent.policy.mode.as_str(), self.agent.max_turns),
             format!("会話: {} 件  編集の取り消し: {} 件", self.agent.history.len(), self.agent.tools.undo.len()),
             format!("セッション: {}", self.agent.session.as_ref().map(|s| s.path.display().to_string()).unwrap_or_else(|| "なし".into())),
@@ -242,7 +355,14 @@ impl App {
                         let _ = old.forget(); // the empty session of this start
                     }
                     self.agent.session = Some(Session::open(&path));
-                    self.ui.note(&format!("{} を再開しました（{n} 件）", path.display()));
+                    // The session's models win over the environment and the config files (design §9).
+                    if let Some((inference, image)) = loaded.models {
+                        self.config.inference_model = inference;
+                        self.config.image_model = image;
+                        self.agent.tools.config = self.config.clone();
+                        self.apply_inference_context();
+                    }
+                    self.ui.note(&format!("{} を再開しました（{n} 件）。{}", path.display(), self.models_line()));
                 }
                 Err(e) => self.ui.styled(&format!("  ✗ 読めません: {e}"), "err"),
             },
@@ -276,6 +396,9 @@ impl App {
                 }
                 None => self.ui.note("/mode fast|think|auto"),
             },
+            "/model" => self.model_command(Kind::Inference, arg).await,
+            "/image-model" => self.model_command(Kind::Image, arg).await,
+            "/models" => self.models_command().await,
             "/auto" => self.set_permission(Permission::Auto),
             "/plan" => self.set_permission(Permission::Plan),
             "/accept-edits" => self.set_permission(Permission::AcceptEdits),
@@ -365,7 +488,8 @@ impl App {
 
     pub async fn repl(&mut self) {
         loop {
-            let status = tui::mode_line(&self.ui.theme, self.agent.policy.mode, self.agent.mode, None);
+            let status = format!("{}  {}", tui::mode_line(&self.ui.theme, self.agent.policy.mode, self.agent.mode, None),
+                                 self.ui.theme.dim(&self.models_line()));
             match self.ui.read_input(&status, "依頼を書いてください（/help でコマンド一覧）") {
                 Input::Eof => break,
                 Input::CycleMode => {

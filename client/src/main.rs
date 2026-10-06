@@ -8,6 +8,7 @@ mod art_data;
 mod config;
 mod context;
 mod host;
+mod models;
 mod platform;
 mod policy;
 mod session;
@@ -154,6 +155,14 @@ async fn status(config: &Config) -> ExitCode {
     println!("llm: {}", h.llm);
     println!("model:    {}", h.model);
     println!("context:  {}", h.context);
+    // The models the next turn / image run use: the configured id, else the host's default.
+    let pick = |own: &Option<String>, default: &str| match own {
+        Some(id) => format!("{id}（設定）"),
+        None if !default.is_empty() => format!("{default}（ホストの既定）"),
+        None => "ホストの既定".into(),
+    };
+    println!("inference_model: {}", pick(&config.inference_model, &h.inference_default));
+    println!("image_model:     {}", pick(&config.image_model, &h.image_default));
     println!("busy:     {}", h.busy.as_deref().unwrap_or("-"));
     if let Some(e) = h.error {
         println!("error:    {e}");

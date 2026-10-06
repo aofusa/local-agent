@@ -24,7 +24,7 @@ use crate::ui::{Answer, ApprovalRequest, Frontend, UiEvent};
 const SPINNER: &[&str] = &["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 const BOX_MAX: usize = 100;
 pub const SLASH: &[&str] = &[
-    "/help", "/status", "/host", "/mode", "/plan", "/auto", "/accept-edits", "/default", "/cd", "/undo", "/compact",
+    "/help", "/status", "/host", "/mode", "/model", "/image-model", "/models", "/plan", "/auto", "/accept-edits", "/default", "/cd", "/undo", "/compact",
     "/search", "/image", "/todos", "/resume", "/forget", "/logo", "/clear", "/quit",
 ];
 
