@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -34,10 +35,13 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from furry_agent import modes
-from furry_agent.chat_common import _image_tab_busy, prompt_tokens
+from furry_agent.chat_common import _image_tab_busy, check_router_model, prompt_tokens, with_inference
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LlamaRouter, idle_timeout
+from furry_agent.model_catalog import (CatalogError, ModelChoiceError, default_ids, load_catalog, requested_id,
+                                       resolve_inference)
+from furry_agent.models_api import models_endpoint
 from furry_agent.router import CHAT, Route as ChatRoute
 
 log = logging.getLogger("furry_agent.coder")
@@ -61,6 +65,8 @@ class Turn:
     mode: str
     max_tokens: int
     temperature: float = 0.2
+    # A config/host_models.json inference id ("" = the host's default).
+    inference_model: str = ""
 
 
 @dataclass
@@ -140,8 +146,12 @@ def parse_turn(body: Any) -> Turn:
         temperature = float(body.get("temperature", 0.2))
     except (TypeError, ValueError) as exc:
         raise GateError("max_tokens / temperature は数値です") from exc
+    try:
+        inference_model = requested_id(body.get("inference_model"))
+    except ModelChoiceError as exc:
+        raise GateError(str(exc)) from exc
     return Turn(messages, tools, resolve_mode(body.get("mode"), messages), max(1, max_tokens),
-                min(max(temperature, 0.0), 1.5))
+                min(max(temperature, 0.0), 1.5), inference_model)
 
 
 def budget(turn: Turn, settings: ChatSettings, client: LlamaRouter) -> tuple[int, int]:
@@ -259,6 +269,9 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LlamaRouter | 
                    comfy_config: dict | None = None) -> AsyncIterator[bytes]:
     """The SSE body of one turn. Tool calls are sent only after the stream ended (a broken stream sends none)."""
     client = client or LlamaRouter(settings.llm_url, settings.llm_model, settings.idle_timeout_s)
+    if settings.inference_model and client.model != settings.llm_model:
+        # The picked model is another section of the same router (it unloads the previous model itself).
+        client = LlamaRouter(client.base_url, settings.llm_model, settings.idle_timeout_s)
     token = None
     started = time.monotonic()
     try:
@@ -283,10 +296,11 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LlamaRouter | 
         usage = {"input_tokens": out.usage.get("prompt_tokens", estimate),
                  "output_tokens": out.usage.get("completion_tokens", 0)}
         # Sizes only: the workspace's text is never logged on the host.
-        log.info("coder turn mode=%s messages=%d tools=%d calls=%d finish=%s tokens=%s seconds=%.1f", turn.mode,
-                 len(turn.messages), len(turn.tools), len(out.calls), finish, usage["output_tokens"],
-                 time.monotonic() - started)
-        yield sse("done", {"finish_reason": finish, "usage": usage, "mode": turn.mode})
+        log.info("coder turn model=%s mode=%s messages=%d tools=%d calls=%d finish=%s tokens=%s seconds=%.1f",
+                 settings.inference_model or settings.llm_model, turn.mode, len(turn.messages), len(turn.tools),
+                 len(out.calls), finish, usage["output_tokens"], time.monotonic() - started)
+        yield sse("done", {"finish_reason": finish, "usage": usage, "mode": turn.mode,
+                            "model": settings.inference_model or settings.llm_model})
     except GateError as exc:
         log.info("coder turn failed code=%s: %s", exc.code, exc)
         yield sse("error", {"message": str(exc), "code": exc.code})
@@ -310,8 +324,11 @@ async def turn_endpoint(request: Request):
         return JSONResponse({"error": "JSON を送ってください", "code": "bad_request"}, status_code=400)
     try:
         turn = parse_turn(body)
+        settings = await _turn_settings(request, settings, turn)
     except GateError as exc:
         return JSONResponse({"error": str(exc), "code": exc.code}, status_code=400)
+    except (ModelChoiceError, CatalogError) as exc:
+        return JSONResponse({"error": str(exc), "code": getattr(exc, "code", "model_unavailable")}, status_code=400)
     state = request.app.state
     stream = run_turn(turn, settings, client=getattr(state, "llm", None),
                       transport=getattr(state, "transport", None), comfy_config=getattr(state, "comfy_config", None))
@@ -319,15 +336,37 @@ async def turn_endpoint(request: Request):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+async def _turn_settings(request: Request, settings: ChatSettings, turn: Turn) -> ChatSettings:
+    """The settings of a turn on its inference model (body inference_model, else DEFAULT_INFERENCE_MODEL). The id
+    must be in the catalog and in the router's preset; another model is never used instead."""
+    catalog = getattr(request.app.state, "host_catalog", None) or await asyncio.to_thread(load_catalog)
+    if not turn.inference_model and not os.environ.get("DEFAULT_INFERENCE_MODEL", "").strip():
+        return settings
+    settings = with_inference(settings, resolve_inference(turn.inference_model, catalog))
+    if getattr(request.app.state, "llm", None) is None:
+        await check_router_model(None, settings)
+    return settings
+
+
 async def health_endpoint(request: Request):
     settings = _settings(request)
     client = getattr(request.app.state, "llm", None) or LlamaRouter(settings.llm_url, settings.llm_model, 5)
     reachable = await client.reachable()
+    try:
+        catalog = getattr(request.app.state, "host_catalog", None) or await asyncio.to_thread(load_catalog)
+        defaults = default_ids(catalog)
+        default_model = catalog.inference.get(os.environ.get("DEFAULT_INFERENCE_MODEL", "").strip() or "")
+    except CatalogError:
+        defaults, default_model = {"inference": "", "image": ""}, None
+    model = default_model.id if default_model else (settings.llm_model or defaults["inference"])
+    context = default_model.context if default_model else settings.llm_ctx
     # "lmstudio" is the same flag under its name before v0.11.0 (cirka 0.3 and older read it).
     return JSONResponse({"ok": True, "gate": "coder", "version": 1, "llm": reachable, "lmstudio": reachable,
-                         "model": settings.llm_model, "context": settings.llm_ctx,
+                         "model": model, "context": context,
+                         "inference_default": defaults["inference"], "image_default": defaults["image"],
                          "busy": job_lock.holder, "graphs": ["agent", "chat"]})
 
 
 app = Starlette(routes=[Route("/coder/turn", turn_endpoint, methods=["POST"]),
-                        Route("/coder/health", health_endpoint, methods=["GET"])])
+                        Route("/coder/health", health_endpoint, methods=["GET"]),
+                        Route("/models", models_endpoint, methods=["GET"])])

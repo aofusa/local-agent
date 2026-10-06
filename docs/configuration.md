@@ -5,16 +5,14 @@
 | キー | 既定 | 説明 |
 |---|---|---|
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | LangGraph から見た ComfyUI |
-| `CKPT_NAME` | `yiffInHell_yihVANTABLACK.safetensors` | 使うチェックポイント（実行時にワークフローの値を上書き） |
 | `AGENT_IDLE_TIMEOUT_S` | `1200` | 何も返ってこない時間の上限（秒）。画像タブ・チャットタブ・`/coder/turn` で共通（下の「タイムアウト」） |
-| `LORAS` | 空 | 適用する LoRA（[usage.md](usage.md) の「LoRA」） |
-| `COMFY_MODEL_FAMILY` | `sdxl` | モデル系統（`workflows/<系統>/`）。`sdxl`（yiffInHell、タグ）または `flux`（Chroma1-HD、英語の説明文） |
-| `CHROMA_UNET_NAME` / `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | Chroma のモデルファイルと読み込み精度（[usage.md](usage.md) の「Chroma1-HD」） |
-| `CHROMA_LORAS` | 空 | Chroma に適用する LoRA（書式は `LORAS` と同じ） |
+| `HOST_MODELS_PATH` / `DEFAULT_INFERENCE_MODEL` / `DEFAULT_IMAGE_MODEL` / `HOST_MODELS_DISABLE` | 下の「モデルの一覧とパラメータ」 | 選べるモデルの一覧と、指定の無い実行のモデル |
+| `CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` | 空（マップの値） | この端末の Chroma のテキストエンコーダ・VAE・読み込み精度（[usage.md](usage.md) の「画像モデル」） |
 | `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` | 空（1048576 / 28） | Chroma の画素数の上限とステップ数（遅い GPU 向け） |
 | `LLM_SERVER` / `LLM_PRESET` / `LLM_PORT` | セットアップが設定 / `tools\llm\models.ini` / `8080` | 27B を動かす llama-server とルータのプリセット、待受ポート（`start-llm.ps1` が使う。ループバックのみ） |
-| `LLM_URL` / `LLM_MODEL` | `http://127.0.0.1:8080/v1` / `qwen3.8-27b-abliterated` | ルータの OpenAI 互換 URL と、プリセットのモデル名。ワークフロー、チャットタブ、`/coder/turn` が使う |
-| `LLM_CONTEXT` | `4096` | 27B の context（プリセットの `ctx-size`）。1 回の呼び出しの量（回答 + 思考）をこの範囲に収める |
+| `LLM_URL` / `LLM_MODEL` | `http://127.0.0.1:8080/v1` / `qwen3.8-27b-abliterated` | ルータの OpenAI 互換 URL と、画像のタグ生成（ワークフロー）が使うプリセットの節。推論モデルを選ばない実行のチャットタブと `/coder/turn` もこれを使う |
+| `LLM_CONTEXT` | `4096` | `LLM_MODEL` の context。選んだ推論モデルは一覧の `context` を使う |
+| `LLM_ENGINE` | `llamacpp` | macOS だけ: `mlx` なら `start-llm.sh` が MLX 優先のルータ（`furry_agent.mlx_router`）を起動する（`setup-llm.sh` が書く） |
 | `COMFYUI_MAIN_DIR` ほか `COMFYUI_*` | セットアップが設定 | `start-comfyui.ps1` が使う ComfyUI（`tools\comfyui`）、その Python、モデルの置き場、`extra_model_paths.yaml` |
 | `COMFYUI_EXTRA_ARGS` | 空 | ComfyUI の追加引数 |
 | `COMFYUI_EXTRA_MODEL_PATHS` | 空 | ComfyUI に別のモデルフォルダを読ませる YAML（手で設定したときだけ使う。v0.11.0 からセットアップは書かず、モデルを `tools\comfyui\models` に取り込む） |
@@ -43,6 +41,49 @@
 | `CLAIM_MAX` / `CLAIM_QUOTE_CHARS` / `CLAIM_TIMEOUT_S` | `12` / `400` / `0` | 主張の上限（1〜200）、判定に見せる抜粋の長さ（80〜20000）、抽出 + 判定 + 監査の時間の予算（0 = なし） |
 | `CONTROLLER_MAX_STEPS` | `3` | 自律モードで道具を使う回数の上限（1〜50） |
 | `CONTROLLER_WALL_CLOCK_S` | 空（`SEARCH_WALL_CLOCK_S`） | 自律モード全体の時間の予算（どちらも 0 なら無し）。`SEARCH_WALL_CLOCK_S` を設定したときは、それを超えない |
+
+## モデルの一覧とパラメータ（`config/host_models.json`、v0.12.0）
+
+利用者が選べる推論モデルと画像モデル、その表示名・ファイル・パラメータは `config/host_models.json` にあります（git 管理。パスと秘密は書かない）。Web の画面とcirka はホストの `GET /models`（LangGraph の `:2024`）で一覧を取り、選んだモデルの `id` を送ります。送らなければ `.env` の既定を使います。ファイルが無いモデルや `HOST_MODELS_DISABLE` のモデルは一覧に残り、理由つきで「使えない」と表示されます（選んで送るとエラーになり、別のモデルに自動で替わりません）。
+
+| キー（`.env`） | 既定 | 説明 |
+|---|---|---|
+| `HOST_MODELS_PATH` | `config/host_models.json` | モデルの一覧 |
+| `DEFAULT_INFERENCE_MODEL` | 空 | 推論モデルを指定しない実行のモデル。空ならルータの `LLM_MODEL` と `LLM_CONTEXT`（v0.11 までと同じ） |
+| `DEFAULT_IMAGE_MODEL` | 一覧の先頭（`yiffinhell-vantablack`） | 画像モデルを指定しない実行のモデル |
+| `HOST_MODELS_DISABLE` | 空 | カンマ区切りの id を使えないものとして出す |
+
+チェックポイント、系統、LoRA は画像モデルの項目です。以前の版の `.env` に残っている `CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME`、`LMSTUDIO_*`、`LOCAL_DOC_ROOTS`、`DOC_EXTENSIONS` は削除してください（読みません）。`CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` / `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` はこの端末の Chroma の部品と速さの調整として残ります。
+
+### 推論モデル
+
+`params` は llama-server のオプション名（`--` なし）で、セットアップ（`setup-llm.ps1` / `setup-llm.sh` が `scripts/host_models.py preset` を呼ぶ）がルータのプリセット `tools/llm/models.ini` の各節に書きます。GGUF が無いモデルの節は書かれず、一覧で使えないと表示されます。変えたら `setup-llm` を再実行してルータを再起動します。
+
+| id | 表示名 | ファイル | context | 思考 | パラメータ | 出典 |
+|---|---|---|---|---|---|---|
+| `qwen3.8-27b-abliterated` | Qwen 3.8 27B abliterated | `config/llm_model.json`（IQ3_M、mmproj あり）。macOS は MLX 4bit 版（`setup-mlx.sh`）も可 | 4096 | あり | temp 0.4、repeat-penalty 1.1（v0.11 と同じ。タグの JSON を閉じさせるため） | 公式の推奨（思考なし: temp 0.7、top-p 0.8、top-k 20、presence-penalty 1.5）より低い温度は、タグ生成の安定を優先して v0.11 の値を保った |
+| `bonsai-2-27b-abliterated` | Bonsai 2 27B abliterated | `config/search_models.json` の同じ id（PTQ1_0、5.9GB。検索の代理リーダーと同じファイル） | 8192 | なし（思考モードでも本文だけ） | temp 0.7、top-p 0.8、top-k 20、min-p 0.05、presence-penalty 1.5、repeat-penalty 1.0、GPU にすべての層 | [Ternary Bonsai 2 27B の推奨](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)（思考なし: temperature 0.7、top_p 0.8。min_p 0.05 は llama.cpp の既定）、[Qwen3.8 の思考なしの推奨](https://unsloth.ai/docs/models/qwen3.8)（top_k 20、presence_penalty 1.5） |
+
+画像のタグ生成（ComfyUI のワークフロー）は、選んだ推論モデルによらずルータの `LLM_MODEL` を使います。
+
+### 画像モデル
+
+`params` は `steps`、`cfg`、`sampler_name`、`scheduler`、`width`、`height`、`quality_prefix`、`negative`（`split` の既定の negative）だけで、系統のマップ（`workflows/maps/<family>.json` の `defaults`）の上に重ねます。`loras` は `"<ファイル>:<強度>"` の配列（0 より大きく 2 以下、CLIP も同じ強度）で、`ckpt` の直後に順に挿入します。
+
+| id | 表示名 | 系統 | ファイル | steps / cfg / サンプラー / サイズ | LoRA | 出典 |
+|---|---|---|---|---|---|---|
+| `yiffinhell-vantablack` | yiffInHell VANTABLACK | sdxl | `yiffInHell_yihVANTABLACK.safetensors` | 28 / 5.5 / euler_ancestral normal / 832×1216 | novabeast xl v1 rank64 pony 1.0 | v0.11 の既定値のまま（ワークフローのテンプレートと同じ） |
+| `yiffinhell-metallictetra` | yiffInHell METALLIC TETRA | sdxl | `yiffInHell_yihMETLLICTETR.safetensors` | 24 / 3.5 / euler_ancestral sgm_uniform / 832×1216 | 同上 | [Yiff in Hell の配布ページ](https://civarchive.com/models/1570986)（v4.0: 24 steps、CFG 2〜4、Euler A、Beta / SGM Uniform） |
+| `yiffinhell-xxxtended-v2` | yiffInHell XXX-TENDED V2.0 | sdxl | `yiffInHell_yihxxxTENDEDV20.safetensors` | 24 / 3.0 / euler_ancestral sgm_uniform / 832×1216 | 同上 | 同上（XXX-TENDED: 24 steps、CFG 2〜4、Euler A） |
+| `rekemono` | Rekemono v1.0 | sdxl | `rekemono_v100.safetensors` | 28 / 4.5 / euler_ancestral normal / 832×1216 | 同上 | 配布ページが見つからないため、同系統の kemono SDXL（[Nova Kemono XL](https://civitai.com/models/1641408)、Mol_Keun Mix など: Euler A、20〜30 steps、CFG 3〜5）の中央値 |
+| `indigofurrymix-xl` | Indigo Furry Mix XL (Noob EPS 11) | sdxl | `indigoFurryMixXL_cknoobEPS11.safetensors`（NoobAI EPS 1.1 系） | 28 / 5.0 / euler_ancestral normal / 832×1216、quality prefix `masterpiece, best quality, very aesthetic` | novabeast xl v1 rank64 pony 1.0 | [配布ページ](https://civitai.com/models/579632/indigo-furry-mix-xl)（CFG 3〜7・推奨 5、Euler a）、NoobAI XL の一般的な推奨（20〜30 steps、832×1216、`masterpiece, best quality, very aesthetic`） |
+| `indigofurrymix-anima` | Indigo Furry Mix Anima | anima | `indigoFurryMixAnima_v10.safetensors`（拡散モデルのみ）+ `qwen_3_06b_base` + `qwen_image_vae` | 28 / 4.0 / er_sde simple / 832×1216 | なし | [配布ページ](https://civitai.com/models/2787288)（Euler A か ER SDE、30 steps 未満、CFG 3〜6・作者は 4、1024px 前後、`furry` を入れる）、ComfyUI の Anima ブループリント |
+| `chroma-hd` | Chroma1-HD | flux | `chroma_v10HD.safetensors` + T5-XXL fp8 + Flux VAE | 28 / 3.5 / euler beta / 1024×1024 | なし | v0.11 の既定値のまま（公式ワークフロー） |
+| `wulver` | Wulver (Krea 2) | krea2 | `wulverKrea2_v05_fp8.safetensors`（拡散モデルのみ）+ `qwen3vl_4b_fp8_scaled` + `qwen_image_vae` | 8 / 1.0 / euler simple / 1024×1024 | なし | [配布ページ](https://civitai.com/models/2881657)（Turbo: 8 steps、CFG 1.0・1.0 より上は焼ける・negative は効かない、euler / simple、shift 1.15、1024 ネイティブ、自然文 60〜120 語） |
+
+テキストエンコーダと VAE（`downloads`）は `setup-image-models.ps1` / `.sh` が Hugging Face から取得し、SHA-256 を照合します（Krea 2: [Comfy-Org/Krea-2](https://huggingface.co/Comfy-Org/Krea-2)、Anima: [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima)）。Civitai のチェックポイントは取得しません（利用者が置く）。
+
+モデルを足すときは一覧に 1 件足すだけです（id は英小文字・数字・`.`・`-`）。系統は `sdxl` / `flux` / `krea2` / `anima` から選び、`prompt_style` は系統に合わせます（`sdxl`・`anima` は `danbooru`、`flux`・`krea2` は `prose`）。
 
 ## 量と長さの上限（v0.10.0）
 
@@ -77,5 +118,5 @@ cirka 向けの `POST /coder/turn` は、`LLM_URL`、`LLM_MODEL`、`LLM_CONTEXT`
 - 次のものは時間の上限を既定で持ちません（設定すれば掛かります）: 思考モードの検索全体（`SEARCH_WALL_CLOCK_S`）、主張の検証（`CLAIM_TIMEOUT_S`）、自律モード（`CONTROLLER_WALL_CLOCK_S`）、reader 1 体（`SEARCH_TOTAL_TIMEOUT_S`）、ほかのタブを待つ時間（`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）。量はラウンド・ページ・手数・主張の数で決まります。
 - 次のものは短い上限を残しています。エージェント全体を止めるものではなく、その 1 件を諦めて先へ進むためのものです: Tor 経由の検索・ページ取得の HTTP リクエスト 1 回（`SEARCH_TIMEOUT_S`、30 秒。止まったページは飛ばします）、Tor の起動（`TOR_BOOTSTRAP_TIMEOUT_S`、90 秒）、reader の 1 ページの取得（`BONSAI_PAGE_TIMEOUT_S`、20 秒）、ComfyUI・ルータ・Docker への状態確認の HTTP リクエスト。
 - チャットタブのコンテナ実行は 1 回 60 秒で止めます（モデルが書いたコードの安全のための固定の上限で、このリポジトリの規則で決めています）。
-- `COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は読まなくなりました（`AGENT_IDLE_TIMEOUT_S` にまとめました）。v0.11.0 で `LMSTUDIO_URL` / `LMSTUDIO_MODEL` / `LMSTUDIO_CONTEXT` は `LLM_URL` / `LLM_MODEL` / `LLM_CONTEXT` になりました（古い名前は読みません。`setup-llm.ps1` が新しい名前を書きます）。
+- 待ちの上限は `AGENT_IDLE_TIMEOUT_S` にまとめています（以前の `COMFYUI_TIMEOUT_S` などは削除してください）。LLM の設定は `LLM_URL` / `LLM_MODEL` / `LLM_CONTEXT` です（`setup-llm` が書きます）。
 - cirka 側の上限は cirka の設定 `idle_timeout_s`（既定 1200 秒）です（[client/README.md](../client/README.md)）。

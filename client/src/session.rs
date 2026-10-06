@@ -56,6 +56,11 @@ impl Session {
         self.write(&json!({"type": "stop", "reason": reason, "at": now()}));
     }
 
+    /// The models picked with /model and /image-model (None = the host's default), restored by /resume.
+    pub fn append_models(&mut self, inference: Option<&str>, image: Option<&str>) {
+        self.write(&json!({"type": "models", "inference_model": inference, "image_model": image}));
+    }
+
     pub fn append_compact(&mut self, summary: &str) {
         self.write(&json!({"type": "compact", "summary": summary}));
     }
@@ -70,6 +75,8 @@ pub struct Loaded {
     pub messages: Vec<Msg>,
     pub todos: Vec<Todo>,
     pub cwd: String,
+    /// The last models line of the file: (inference, image); None when the session never picked one.
+    pub models: Option<(Option<String>, Option<String>)>,
 }
 
 /// Replay a session file: messages in order, a compaction replaces what came before it.
@@ -87,6 +94,10 @@ pub fn load(path: &Path) -> std::io::Result<Loaded> {
             }
             Some("todos") => {
                 loaded.todos = v.get("todos").and_then(|t| serde_json::from_value(t.clone()).ok()).unwrap_or_default();
+            }
+            Some("models") => {
+                let id = |k: &str| v.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
+                loaded.models = Some((id("inference_model"), id("image_model")));
             }
             Some("compact") => {
                 let summary = v.get("summary").and_then(Value::as_str).unwrap_or("");
@@ -150,6 +161,18 @@ mod tests {
         assert_eq!(latest_for(&dir, cwd, Some(&s.path)), None);
         assert!(latest_for(&dir, Path::new("/work/b"), None).unwrap() == other.path);
         s.forget().unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_last_models_line_is_restored() {
+        let dir = std::env::temp_dir().join(format!("cirka-sess-{}", uuid::Uuid::new_v4()));
+        let mut s = Session::create(&dir, Path::new("/w"), "h").unwrap();
+        assert_eq!(load(&s.path).unwrap().models, None);
+        s.append_models(Some("bonsai-2-27b-abliterated"), None);
+        s.append_models(Some("bonsai-2-27b-abliterated"), Some("wulver"));
+        let loaded = load(&s.path).unwrap();
+        assert_eq!(loaded.models, Some((Some("bonsai-2-27b-abliterated".into()), Some("wulver".into()))));
         std::fs::remove_dir_all(dir).ok();
     }
 

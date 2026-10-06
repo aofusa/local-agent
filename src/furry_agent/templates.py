@@ -2,9 +2,9 @@
 
 Templates are the reviewed API JSON files under ``workflows/<family>/``; ``workflows/maps/<family>.json``
 names every slot as ``node.inputs.field``. Nothing here invents node ids: values only go to mapped slots.
-The two structural edits are also map/env driven: the pose preprocessor variant (from the map) and the
-LoRA chain (from the ``LORAS`` environment variable), inserted right after the checkpoint loader so it
-still runs after the LLM eject.
+The two structural edits are also map/catalog driven: the pose preprocessor variant (from the map) and the
+LoRA chain (the image model's ``loras`` in config/host_models.json), inserted right after the checkpoint loader
+so it still runs after the LLM eject.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class LoraSpec:
 
 
 def parse_loras(value: str | None) -> list[LoraSpec]:
-    """``LORAS=a.safetensors:0.8, b:0.6:0.4`` -> specs. Separators: comma, semicolon or newline.
+    """``a.safetensors:0.8, b:0.6:0.4`` -> specs (an image model's loras joined). Separators: comma, semicolon or newline.
 
     ``name[:model_strength[:clip_strength]]``; clip strength defaults to the model strength.
     """
@@ -47,14 +47,14 @@ def parse_loras(value: str | None) -> list[LoraSpec]:
         # A Windows drive-less path cannot contain ':', so everything after the first ':' is numbers.
         name, numbers = parts[0], parts[1:]
         if not name or len(numbers) > 2:
-            raise TemplateError(f"LORAS の書式が不正です: {item!r}（name[:強度[:clip強度]]）")
+            raise TemplateError(f"LoRA の書式が不正です: {item!r}（name[:強度[:clip強度]]）")
         try:
             values = [float(n) for n in numbers]
         except ValueError as exc:
-            raise TemplateError(f"LORAS の強度が数値ではありません: {item!r}") from exc
+            raise TemplateError(f"LoRA の強度が数値ではありません: {item!r}") from exc
         low, high = LORA_STRENGTH_RANGE
         if any(not low <= v <= high for v in values):
-            raise TemplateError(f"LORAS の強度は {low}〜{high} です: {item!r}")
+            raise TemplateError(f"LoRA の強度は {low}〜{high} です: {item!r}")
         model = values[0] if values else 1.0
         clip = values[1] if len(values) > 1 else model
         specs.append(LoraSpec(name, model, clip))
@@ -196,6 +196,10 @@ def build_run_prompt(
     for slot, cast in (("steps", int), ("cfg", float), ("sampler_name", str), ("scheduler", str)):
         if slot in slots and plan.get(slot) is not None:
             _set(prompt, slots[slot], cast(plan[slot]))
+    # The model's own quality prefix / default negative (config/host_models.json params), when it sets them.
+    for slot, key in (("quality_prefix", "quality_prefix"), ("negative", "default_negative")):
+        if slot in slots and plan.get(key) is not None:
+            _set(prompt, slots[slot], str(plan[key]))
     if "denoise" in slots and plan.get("denoise") is not None:
         _set(prompt, slots["denoise"], float(plan["denoise"]))
     for role, filename in images.items():

@@ -33,11 +33,18 @@ src/furry_agent/templates.py          テンプレートの読み込み、ノー
 src/furry_agent/comfy_client.py       ComfyUI HTTP / WebSocket クライアント
 src/furry_agent/media.py              添付画像の取り出しと検証（役割・強度は block の metadata）
 comfyui_nodes/furry_ja/               ComfyUI カスタムノード（eject / split / ckpt / Chroma 用 ckpt / image-after / release）。llm_state.py がルータの状態確認
-src/furry_agent/families.py           モデル系統の名前（COMFY_MODEL_FAMILY）と系統ごとの参照画像の可否
+src/furry_agent/families.py           モデル系統の名前（sdxl / flux / krea2 / anima）と系統ごとの参照画像の可否
+src/furry_agent/model_catalog.py      config/host_models.json の読み込み・検証、id の解決、使えるかの判定
+src/furry_agent/models_api.py         GET /models（/coder/turn と同じ http.app。ルータと ComfyUI に問い合わせて available / reason）
+src/furry_agent/mlx_router.py         macOS の MLX 優先のルータ（llama.cpp のルータと同じ API、子は mlx_lm.server か llama-server）
+config/host_models.json               選べる推論モデル・画像モデルと、モデルごとのパラメータ
+scripts/host_models.py                セットアップ用: 画像モデルのファイルの一覧と、ルータのプリセットの書き出し
+scripts/*.sh, scripts/lib/common.sh   macOS のセットアップ・起動（Windows の *.ps1 に対応）
 workflows/sdxl/<テンプレートID>.api.json  役割別のテンプレート 24 本。LangGraph が読む
 workflows/maps/sdxl.json              テンプレートごとのスロット（node.inputs.field）とポーズ前処理の候補
 workflows/flux/*.api.json             Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
 workflows/maps/flux.json         Chroma のスロット、モデルファイル、サンプラーの既定値、対応する役割
+workflows/krea2/, workflows/anima/    Krea 2（Wulver）と Anima（Indigo Furry Mix Anima）のテンプレート。maps/krea2.json・anima.json
 workflows/reference/                  公式 ComfyUI_Chroma1-HD_T2I-workflow.json（Chroma テンプレートの写し元）
 workflows/furry_ja_api.json           フェーズ 1 の API 形式（t2i_basic / i2i_basic の元。ノード ID は設計書 §4.1）
 workflows/furry_ja.json               UI 形式。ComfyUI で開ける（ノードのタイトル = ノード ID）
@@ -100,7 +107,7 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 | `pose_preview` | PreviewImage | 抽出結果をチャットに返す |
 | `mask_channel` / `latent_mask` | ImageToMask / SetLatentNoiseMask | inpaint |
 | `release` | FurryJaReleaseEncoders | すべての条件付け（テキスト・IP-Adapter）ができた後、KSampler の直前でテキストエンコーダと CLIP-Vision を GPU から外す |
-| `lora_1`… | LoraLoader | `LORAS` があるときだけ、実行時に `ckpt` の直後へ挿入 |
+| `lora_1`… | LoraLoader | 画像モデルの `loras`（`config/host_models.json`）があるときだけ、実行時に `ckpt` の直後へ挿入 |
 
 `t2i_basic` / `i2i_basic` は、フェーズ 1 の `furry_ja_api.json` から作る投入 JSON と完全に同じです（テストで確認）。
 
@@ -120,6 +127,7 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 - 応答モード: チャットタブの入力欄に「自動 / 速い / 思考」を置き、送信ごとに `config.configurable.mode`（`auto` / `fast` / `think`）として送ります（`mode-tabs.tsx` の `ChatModeSwitch`、配置は `thread/index.tsx`）。選択はブラウザの localStorage に覚えます。
 - 思考と手順: `additional_kwargs.thinking`（思考トークン、既定で閉じた折りたたみ）、`task_trace`（執筆とコードの手順）、`chat_mode`（選ばれたモードと自動の理由）を描画します（`search-trace.tsx`、`ai.tsx`）。思考は回答本文に混ぜません。
 - 主張の突き合わせ: `additional_kwargs.claim_trace`（主張ごとの判定、出典番号、監査で削除した文）を折りたたみで描画します（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）。
+- モデルのピッカー（v0.12.0）: 送信ボタンの左に、いまのモデル名と一覧（`GET <LangGraph の URL>/models`）を出し、チャットタブは `config.configurable.inference_model`、画像タブは `config.configurable.image_model` を送ります（`components/thread/model-picker.tsx`、送信設定は `thread/index.tsx`）。使えないモデルは理由つきで無効にします。選択はスレッドごとに sessionStorage（`cirka.thread.<threadId>.inference_model` / `image_model`、新規画面は `cirka.draft.*`）に覚え、新しいチャットは既定から始めます。応答の `additional_kwargs.model_info` を、応答の下に表示名で出します（`ai.tsx`）。`chat_mode.note`（思考を表示しないモデル）もモードの横に出します（`search-trace.tsx`）。
 - 自律の手順: 自律モードのメッセージの `task_trace`（`kind: "control"`。選んだ道具、理由、依頼文、結果の要約、終了理由）を、執筆・コードの手順と同じ折りたたみで描画します（`search-trace.tsx` の `TaskTraceView`）。
 
 ## ログ

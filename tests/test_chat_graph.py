@@ -303,7 +303,7 @@ class World:
 
 
 def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=None, thread="t", desktop_exe=None,
-            launcher=None):
+            launcher=None, **extra):
     lm = llm or FakeLlamaRouter(world)
     world.lm = lm
 
@@ -324,6 +324,7 @@ def _config(world, settings, llm=None, comfy=None, mode=None, task=None, docker=
         conf["docker_desktop_exe"] = desktop_exe
     if launcher:
         conf["docker_desktop_launcher"] = launcher
+    conf.update(extra)
     return {"configurable": conf}
 
 
@@ -903,3 +904,53 @@ async def test_no_blocking_calls_in_event_loop(models_dir):
         await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
         state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
         assert not state.get("error") and _runs(world)
+
+
+# --- inference model picked by the client (docs/host-model-selection-design.md §7) -------------------------------
+
+
+async def test_picked_model_writes_the_reply_and_is_named(models_dir, monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    world = World()
+    settings = _settings(models_dir)
+    state, message = await _run("こんにちは", world, settings, inference_model="bonsai-2-27b-abliterated")
+    assert message.content == "こんにちは！"
+    info = message.additional_kwargs["model_info"]
+    assert info == {"kind": "inference", "id": "bonsai-2-27b-abliterated", "label": "Bonsai 2 27B abliterated",
+                    "thinking": False}
+
+
+async def test_model_without_thinking_answers_without_it_in_think_mode(models_dir, monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    world = World()
+    state, message = await _run("こんにちは", world, _settings(models_dir), mode="think",
+                                inference_model="bonsai-2-27b-abliterated")
+    assert [t for t in world.thinking if t[0] == "llm"] and all(not t[2] for t in world.thinking if t[0] == "llm")
+    assert "thinking" not in message.additional_kwargs
+    assert "思考を表示しません" in message.additional_kwargs["chat_mode"]["note"]
+    world = World()
+    state, message = await _run("こんにちは", world, _settings(models_dir), mode="think",
+                                inference_model="qwen3.8-27b-abliterated")
+    assert any(t[2] for t in world.thinking if t[0] == "llm")
+
+
+async def test_unknown_inference_model_ends_the_run(models_dir):
+    world = World()
+    state, message = await _run("こんにちは", world, _settings(models_dir), inference_model="gpt-4")
+    assert "［モデル選択］" in message.content and "ホストのモデル一覧にありません" in message.content
+    assert world.calls == [] and job_lock.holder is None
+
+
+async def test_no_model_keeps_the_env_router_model(models_dir, monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    world = World()
+    state, message = await _run("こんにちは", world, _settings(models_dir))
+    assert "model_info" not in message.additional_kwargs
+
+
+async def test_search_plan_runs_on_the_picked_model(models_dir, monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    world = World()
+    state, message = await _run("検索: alpha の最新", world, _settings(models_dir),
+                                inference_model="bonsai-2-27b-abliterated")
+    assert state["search"]["roles"]["planner"] == "Bonsai 2 27B abliterated（llama.cpp）"

@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +27,7 @@ from furry_agent.comfy_client import ComfyClient
 from furry_agent.config import ChatSettings, env_float, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
 from furry_agent.llm_client import LlamaRouter
+from furry_agent.model_catalog import InferenceModel, ModelChoiceError, load_catalog, requested_id, resolve_inference
 from furry_agent.modes import THINK
 
 log = logging.getLogger("furry_agent.chat")
@@ -73,6 +76,8 @@ class ChatState(MessagesState):
     verify_error: str | None
     # The control loop (docs/autonomous-controller-design.md §6): active, steps, trace, decision, answer ...
     control: dict[str, Any]
+    # The inference model of this run (kind, id, label, thinking), shown under the reply
+    model_info: dict[str, Any]
 
 
 CONTROL_RECORD = "controller_record"
@@ -98,8 +103,53 @@ def _conf(config: RunnableConfig | None) -> dict:
     return (config or {}).get("configurable", {})
 
 
+def inference_choice(config: RunnableConfig | None) -> InferenceModel | None:
+    """The run's inference model: configurable.inference_model, else DEFAULT_INFERENCE_MODEL; None when neither is
+    set (the router's LLM_MODEL is used as before). Raises ModelChoiceError for an id the host does not offer."""
+    requested = requested_id(_conf(config).get("inference_model"))
+    if not requested and not os.environ.get("DEFAULT_INFERENCE_MODEL", "").strip():
+        return None
+    return resolve_inference(requested, _conf(config).get("host_catalog") or load_catalog(cached=True))
+
+
+def with_inference(settings: ChatSettings, model: InferenceModel | None) -> ChatSettings:
+    """Settings for one run on ``model``: its router section, context window and thinking."""
+    if model is None:
+        return settings
+    return replace(settings, llm_model=model.id, llm_ctx=model.context, llm_thinking=model.thinks,
+                   inference_model=model.id, inference_label=model.label)
+
+
+def leader_label(settings: ChatSettings) -> str:
+    """The router's model as the search and control traces name it."""
+    return f"{settings.inference_label or 'Qwen3.8 27B abliterated'}（llama.cpp）"
+
+
+def model_info(settings: ChatSettings) -> dict:
+    """additional_kwargs.model_info of a reply: the inference model that wrote it (UI: under the message)."""
+    if not settings.inference_model:
+        return {}
+    return {"kind": "inference", "id": settings.inference_model, "label": settings.inference_label,
+            "thinking": settings.llm_thinking}
+
+
+async def check_router_model(config: RunnableConfig | None, settings: ChatSettings) -> None:
+    """The picked model must be a section of the router's preset (scripts/setup-llm writes one per installed GGUF).
+    A router that does not answer is not an error here: the first model call reports it."""
+    if not settings.inference_model or _conf(config).get("llm") is not None:
+        return
+    try:
+        offered = await LlamaRouter(settings.llm_url, "", 5).model_ids()
+    except Exception:  # router down or an older router without /models
+        return
+    if settings.inference_model not in offered:
+        raise ModelChoiceError(f"推論モデル {settings.inference_label}（{settings.inference_model}）は LLM ルータのプリセットに"
+                               "ありません。scripts/setup-llm でモデルを導入してください", "model_unavailable")
+
+
 def _settings(config: RunnableConfig | None) -> ChatSettings:
-    return _conf(config).get("chat_settings") or ChatSettings.from_env()
+    base = _conf(config).get("chat_settings") or ChatSettings.from_env()
+    return with_inference(base, inference_choice(config))
 
 
 def _llm(config: RunnableConfig | None, settings: ChatSettings) -> LlamaRouter:
@@ -173,6 +223,8 @@ def _kwargs(state: ChatState, trace: dict | None = None, *, thinking: bool = Fal
         out["search_trace"] = trace
     if state.get("mode_info"):
         out["chat_mode"] = state["mode_info"]
+    if state.get("model_info"):
+        out["model_info"] = state["model_info"]
     if task:
         out["task_trace"] = task
     claims = claim_trace(state)
@@ -372,7 +424,8 @@ async def _ask(state: ChatState, settings: ChatSettings, client, messages: list[
     everything and no answer came, the call is made once more without thinking (the thoughts are kept).
     """
     window = context or settings.llm_ctx
-    want_think = thinking and _is_think(state)
+    # A model without visible thinking (catalog "thinking": "off") answers without it in think mode too.
+    want_think = thinking and _is_think(state) and settings.llm_thinking
     messages = fit_messages(messages, window - answer_min - (THINK_RESERVE if want_think else 0) - 48)
     room = capped(settings, client, max(256, window - prompt_tokens(messages) - 48))
     think = want_think and room >= answer_min + THINK_RESERVE

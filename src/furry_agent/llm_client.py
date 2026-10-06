@@ -251,6 +251,14 @@ class LlamaRouter(OpenAICompatClient):
         except httpx.HTTPError:
             return False
 
+    async def model_ids(self, timeout_s: float = 5.0) -> list[str]:
+        """Every model the router offers (its preset sections, and anything else it lists)."""
+        async with self._http(timeout_s) as http:
+            response = await http.get(f"{self.native()}/models")
+            response.raise_for_status()
+            payload = response.json()
+        return [str(e.get("id") or e.get("name") or "") for e in payload.get("data") or payload.get("models") or []]
+
     async def loaded(self) -> list[str]:
         """Models whose child process exists (loaded, loading or still unloading)."""
         async with self._http(15) as http:

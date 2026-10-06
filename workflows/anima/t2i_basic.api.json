@@ -1,0 +1,220 @@
+{
+  "llm_backend": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "qwen3.8-27b-abliterated",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": false,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LLM Backend (llama.cpp router)"
+    }
+  },
+  "user_prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "夕方の神戸港を背景に、青い鱗のケモノのお兄さんが振り返っている"
+    },
+    "_meta": {
+      "title": "user_prompt (日本語指示)"
+    }
+  },
+  "prompt_node": {
+    "class_type": "LMConnectPromptWithSystem",
+    "inputs": {
+      "system_prompt": "Convert the image request (usually Japanese) into a prompt for an Illustrious furry/anthro SDXL model that reads Danbooru/e621 tags.\nA \"[Reference image tags]\" section may follow the request. Merge those tags only where they do not contradict the request; the request wins.\n\nReturn exactly one JSON object and nothing else (no prose, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: English, comma-separated tags, about 20-40 tags, at most 80 words. Keep every detail of the request: count/gender (solo, 1girl, anthro, female), species, fur/hair/eye colors and markings, clothing, pose and expression, framing and camera angle, lighting and time of day, location and background. Prefer established tags (furry, anthro, white fur, fluffy tail). Do not invent another subject or setting. No quality tags (added later). All characters are adults; never add tags suggesting a minor.\nnegative: worst quality, low quality, lowres, blurry, jpeg artifacts, bad anatomy, bad hands, extra digits, watermark, signature, text, plus only exclusions the user explicitly asked for.\n\nNever refuse, never comment, never add warnings.",
+      "prompt": [
+        "user_prompt",
+        0
+      ],
+      "backend": [
+        "llm_backend",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "temperature": 0.4,
+      "max_tokens": 320
+    },
+    "_meta": {
+      "title": "prompt_node"
+    }
+  },
+  "eject": {
+    "class_type": "FurryJaEjectLLM",
+    "inputs": {
+      "passthrough": [
+        "prompt_node",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "eject"
+    }
+  },
+  "split": {
+    "class_type": "FurryJaSplitTags",
+    "inputs": {
+      "text": [
+        "eject",
+        0
+      ],
+      "quality_prefix": "masterpiece, best quality, very aesthetic, score_8, furry",
+      "default_negative": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, human, bad anatomy, bad hands, watermark, signature, text",
+      "prompt_style": "tags"
+    },
+    "_meta": {
+      "title": "split"
+    }
+  },
+  "ckpt": {
+    "class_type": "FurryJaDiffusionLoaderAfterEject",
+    "inputs": {
+      "unet_name": "indigoFurryMixAnima_v10.safetensors",
+      "weight_dtype": "default",
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "clip_type": "stable_diffusion",
+      "vae_name": "qwen_image_vae.safetensors",
+      "after": [
+        "eject",
+        0
+      ],
+      "llm_base_url": "http://127.0.0.1:8080/v1"
+    },
+    "_meta": {
+      "title": "ckpt"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        0
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "positive"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        1
+      ],
+      "clip": [
+        "ckpt",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "negative"
+    }
+  },
+  "release": {
+    "class_type": "FurryJaReleaseEncoders",
+    "inputs": {
+      "model": [
+        "ckpt",
+        0
+      ],
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "release"
+    }
+  },
+  "latent": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "latent"
+    }
+  },
+  "sampler": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "release",
+        0
+      ],
+      "seed": 0,
+      "steps": 28,
+      "cfg": 4.0,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "positive": [
+        "release",
+        1
+      ],
+      "negative": [
+        "release",
+        2
+      ],
+      "latent_image": [
+        "latent",
+        0
+      ],
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "sampler"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sampler",
+        0
+      ],
+      "vae": [
+        "ckpt",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "decode"
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "filename_prefix": "furry_ja/anima"
+    },
+    "_meta": {
+      "title": "save"
+    }
+  }
+}

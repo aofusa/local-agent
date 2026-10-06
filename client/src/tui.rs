@@ -24,7 +24,7 @@ use crate::ui::{Answer, ApprovalRequest, Frontend, UiEvent};
 const SPINNER: &[&str] = &["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 const BOX_MAX: usize = 100;
 pub const SLASH: &[&str] = &[
-    "/help", "/status", "/host", "/mode", "/plan", "/auto", "/accept-edits", "/default", "/cd", "/undo", "/compact",
+    "/help", "/status", "/host", "/mode", "/model", "/image-model", "/models", "/plan", "/auto", "/accept-edits", "/default", "/cd", "/undo", "/compact",
     "/search", "/image", "/todos", "/resume", "/forget", "/logo", "/clear", "/quit",
 ];
 
@@ -260,6 +260,27 @@ pub fn mode_line(theme: &Theme, permission: Permission, mode: Mode, hint: Option
     format!("  {left}  {right}")
 }
 
+/// The status line with the picked models (`model:<label>  image:<label>`), never wider than `cols` cells: a line
+/// that wraps breaks the input box's redraw. The key hint is shortened first, then the models are cut.
+pub fn status_line(theme: &Theme, permission: Permission, mode: Mode, models: &str, cols: usize) -> String {
+    let max = cols.saturating_sub(1);
+    let full = format!("{}  {}", mode_line(theme, permission, mode, None), theme.dim(models));
+    if width(&full) <= max {
+        return full;
+    }
+    let short = mode_line(theme, permission, mode, Some(""));
+    let base = format!("{}{}", short.trim_end(), theme.dim(&format!(" 思考 {} ·", mode.as_str())));
+    let room = max.saturating_sub(width(&base) + 1);
+    if room < 8 {
+        return truncate_ansi_free(&short, max);
+    }
+    format!("{base} {}", theme.dim(&truncate(models, room)))
+}
+
+fn truncate_ansi_free(line: &str, max: usize) -> String {
+    if width(line) <= max { line.to_string() } else { truncate(&strip_ansi(line), max) }
+}
+
 // --- spinner ----------------------------------------------------------------------------------------------------
 
 struct Spinner {
@@ -310,6 +331,8 @@ impl Terminal {
     pub fn new(interactive: bool) -> Terminal {
         let tty = std::io::stdout().is_terminal();
         let mode = ColorMode::detect(tty);
+        // Windows consoles need ANSI turned on; other terminals already speak it (the module is Windows-only).
+        #[cfg(windows)]
         if mode != ColorMode::Plain {
             let _ = crossterm::ansi_support::supports_ansi();
         }
@@ -1088,6 +1111,18 @@ impl Frontend for Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_line_never_wraps() {
+        let theme = Theme { mode: crate::art::ColorMode::Plain };
+        let models = "model:Bonsai 2 27B abliterated  image:Wulver (Krea 2)";
+        for cols in [60usize, 80, 110, 160] {
+            let line = status_line(&theme, Permission::Auto, Mode::Auto, models, cols);
+            assert!(width(&line) < cols, "{cols}: {line}");
+        }
+        assert!(status_line(&theme, Permission::Auto, Mode::Auto, models, 200).contains("image:Wulver (Krea 2)"));
+        assert!(status_line(&theme, Permission::Auto, Mode::Auto, models, 110).contains("model:Bonsai"));
+    }
 
     #[test]
     fn widths_and_wrapping() {

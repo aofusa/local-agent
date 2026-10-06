@@ -14,6 +14,7 @@ from PIL import Image
 from furry_agent import graph as graph_module
 from furry_agent.comfy_client import ComfyError, WaitResult
 from furry_agent.config import Settings
+from furry_agent.model_catalog import parse_catalog
 
 ROOT = Path(__file__).resolve().parent.parent
 NODE_TYPES = {
@@ -28,11 +29,27 @@ NODE_TYPES = {
 
 
 MODEL_FILES = {
-    "ckpt_name": ["yiffInHell_yihVANTABLACK.safetensors"],
-    "unet_name": ["chroma_v10HD.safetensors", "yiffInHell_yihVANTABLACK.safetensors"],
-    "clip_name": ["t5xxl_fp8_e4m3fn.safetensors"],
-    "vae_name": ["ae.safetensors"],
+    "ckpt_name": ["yiffInHell_yihVANTABLACK.safetensors", "yiffInHell_yihMETLLICTETR.safetensors"],
+    "unet_name": ["chroma_v10HD.safetensors", "yiffInHell_yihVANTABLACK.safetensors",
+                  "wulverKrea2_v05_fp8.safetensors", "indigoFurryMixAnima_v10.safetensors"],
+    "clip_name": ["t5xxl_fp8_e4m3fn.safetensors", "qwen3vl_4b_fp8_scaled.safetensors", "qwen_3_06b_base.safetensors"],
+    "vae_name": ["ae.safetensors", "qwen_image_vae.safetensors"],
 }
+
+
+def with_model(settings, image_model):
+    """Settings plus the configurable.image_model the run sends (what the UI picker / cirka would send)."""
+    copy = replace(settings)
+    object.__setattr__(copy, "_image_model", image_model)
+    return copy
+
+
+def _catalog_with(**entry):
+    """config/host_models.json plus one sdxl test entry (id "test-sdxl")."""
+    raw = json.loads((ROOT / "config" / "host_models.json").read_text(encoding="utf-8"))
+    raw["image"].append({"id": "test-sdxl", "label": "Test SDXL", "family": "sdxl",
+                         "ckpt": "yiffInHell_yihVANTABLACK.safetensors", "prompt_style": "danbooru", **entry})
+    return parse_catalog(raw)
 
 
 def _png(color=(200, 80, 40)) -> bytes:
@@ -69,7 +86,7 @@ class FakeComfy:
         return MODEL_FILES.get(field, [])
 
     async def loras(self):
-        return ["KemonoStyleAV1.safetensors", "CiviFur-30.safetensors"]
+        return ["KemonoStyleAV1.safetensors", "CiviFur-30.safetensors", "novabeast xl v1 rank64 pony.safetensors"]
 
     async def node_types(self):
         return set(self.types)
@@ -124,7 +141,6 @@ class FakeComfy:
 def settings(tmp_path):
     return Settings(
         comfyui_url="http://127.0.0.1:8188",
-        ckpt_name=None,
         workflows_dir=ROOT / "workflows",
         outputs_dir=tmp_path / "outputs",
         logs_dir=tmp_path / "logs",
@@ -141,6 +157,9 @@ def fast_sleep_and_fresh_cache(monkeypatch):
 
 
 def _config(fake, settings, **extra):
+    model = getattr(settings, "_image_model", None)
+    if model:
+        extra.setdefault("image_model", model)
     return {"configurable": {"comfy_client": fake, "settings": settings, **extra}}
 
 
@@ -161,7 +180,10 @@ async def test_text_only_returns_image_and_saves(settings):
     prompt = fake.submitted
     assert prompt["user_prompt"]["inputs"]["value"] == "夕焼けの海辺に立つ白い狼獣人の女性、和服"
     assert prompt["latent"]["class_type"] == "EmptyLatentImage"
-    assert "ref_image" not in prompt and "lora_1" not in prompt
+    assert "ref_image" not in prompt
+    # The default model (yiffInHell VANTABLACK) brings its LoRA from config/host_models.json.
+    assert prompt["lora_1"]["inputs"]["lora_name"] == "novabeast xl v1 rank64 pony.safetensors"
+    assert prompt["lora_1"]["inputs"]["strength_model"] == 1.0
 
     messages = state["messages"]
     assert len(messages) == 2  # human + one AI message (progress replaced in place)
@@ -317,9 +339,10 @@ async def test_previous_output_is_reused_as_base(hitl_graph, settings):
 # --- LoRA -------------------------------------------------------------------------------------------
 
 
-async def test_loras_from_settings(settings):
+async def test_loras_from_the_catalog_entry(settings):
     fake = FakeComfy()
-    state = await _run("白い狼", fake, replace(settings, loras="kemonostyleav1:0.7, CiviFur-30"))
+    state = await _run("白い狼", fake, settings, image_model="test-sdxl",
+                       host_catalog=_catalog_with(loras=["kemonostyleav1:0.7", "CiviFur-30:1"]))
     prompt = fake.submitted
     assert prompt["lora_1"]["inputs"]["lora_name"] == "KemonoStyleAV1.safetensors"
     assert prompt["lora_1"]["inputs"]["strength_model"] == 0.7
@@ -330,7 +353,7 @@ async def test_loras_from_settings(settings):
 
 async def test_missing_lora_fails_before_submit(settings):
     fake = FakeComfy()
-    state = await _run("白い狼", fake, replace(settings, loras="nothere"))
+    state = await _run("白い狼", fake, settings, image_model="test-sdxl", host_catalog=_catalog_with(loras=["nothere:1"]))
     assert fake.submitted is None and "nothere" in state["messages"][-1].content
 
 
@@ -368,10 +391,17 @@ async def test_missing_nodes_point_to_setup_script(settings):
     assert "IPAdapterAdvanced" in content and "setup-comfyui-refs.ps1" in content
 
 
-async def test_unknown_family(settings):
+async def test_unknown_image_model_is_refused(settings):
     fake = FakeComfy()
-    state = await _run("夜", fake, replace(settings, model_family="chroma"))
-    assert fake.submitted is None and "chroma" in state["messages"][-1].content
+    state = await _run("夜", fake, settings, image_model="chroma")
+    text = state["messages"][-1].content
+    assert fake.submitted is None and "［モデル選択］" in text and "ホストのモデル一覧にありません" in text
+
+
+async def test_disabled_image_model_is_refused(settings, monkeypatch):
+    monkeypatch.setenv("HOST_MODELS_DISABLE", "wulver")
+    state = await _run("夜", FakeComfy(), settings, image_model="wulver")
+    assert "無効" in state["messages"][-1].content
 
 
 async def test_missing_unload_verification_fails(settings):
@@ -384,8 +414,9 @@ async def test_missing_unload_verification_fails(settings):
 
 async def test_unknown_checkpoint(settings):
     fake = FakeComfy()
-    state = await _run("テスト", fake, replace(settings, ckpt_name="missing.safetensors"))
-    assert "missing.safetensors" in state["messages"][-1].content
+    state = await _run("テスト", fake, settings, image_model="rekemono")  # not in this ComfyUI
+    assert "rekemono_v100.safetensors" in state["messages"][-1].content
+    assert "Rekemono" in state["messages"][-1].content
     assert fake.submitted is None
 
 
@@ -472,8 +503,7 @@ async def test_default_request_stays_on_sdxl(settings):
 
 @pytest.fixture
 def chroma(settings):
-    return replace(settings, model_family="flux", ckpt_name="chroma_v10HD.safetensors",
-                   loras="KemonoStyleAV1.safetensors")
+    return with_model(settings, "chroma-hd")
 
 
 async def test_env_family_runs_chroma(chroma):
@@ -487,7 +517,7 @@ async def test_env_family_runs_chroma(chroma):
     assert prompt["user_prompt"]["inputs"]["value"] == "夕方の神戸港で振り返る青い鱗のケモノ"
     assert 3.0 <= prompt["sampler"]["inputs"]["cfg"] <= 4.0
     assert prompt["split"]["inputs"]["default_negative"]
-    assert "lora_1" not in prompt  # LORAS are SDXL LoRAs; Chroma uses CHROMA_LORAS
+    assert "lora_1" not in prompt  # the chroma-hd entry has no LoRA
     text = state["messages"][-1].content[0]["text"]
     assert "Chroma1-HD" in text and "euler beta" in text and "1024×1024" in text
     assert len(_final_images(state)) == 1
@@ -508,16 +538,17 @@ async def test_message_commands_do_not_switch_family(settings, chroma):
     assert fake.submitted["ckpt"]["class_type"] == "FurryJaDiffusionLoaderAfterEject"
 
 
-async def test_chroma_ckpt_under_sdxl_family_is_explained(settings):
+async def test_model_names_in_the_text_do_not_switch_the_model(settings):
     fake = FakeComfy()
-    state = await _run("港", fake, replace(settings, ckpt_name="chroma_v10HD.safetensors"))
-    assert "COMFY_MODEL_FAMILY=flux " in state["messages"][-1].content
-    assert fake.submitted is None
+    state = await _run("wulver で夕方の港、Chroma で", fake, settings)
+    assert fake.submitted["ckpt"]["inputs"]["ckpt_name"] == "yiffInHell_yihVANTABLACK.safetensors"
+    assert state["messages"][-1].additional_kwargs["model_info"]["id"] == "yiffinhell-vantablack"
 
 
 async def test_missing_chroma_file_is_named_without_fallback(chroma):
     fake = FakeComfy()
-    state = await _run("港", fake, replace(chroma, chroma_models={"vae_name": "renamed_ae.safetensors"}))
+    state = await _run("港", fake, with_model(replace(chroma, chroma_models={"vae_name": "renamed_ae.safetensors"}),
+                                             "chroma-hd"))
     text = state["messages"][-1].content
     assert "renamed_ae.safetensors" in text and "setup-comfyui-chroma.ps1" in text
     assert fake.submitted is None and "free" in fake.calls
@@ -586,3 +617,68 @@ async def test_image_run_releases_the_job_lock(settings):
 
     await _run("夕焼けの海辺", FakeComfy(), settings)
     assert job_lock.holder is None
+
+
+# --- per-model parameters, Krea 2 (Wulver) and Anima -----------------------------------------------------------
+
+
+async def test_sdxl_model_params_go_into_the_sampler(settings):
+    fake = FakeComfy()
+    state = await _run("夕方の港", fake, settings, image_model="yiffinhell-metallictetra")
+    sampler = fake.submitted["sampler"]["inputs"]
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]) == (
+        24, 3.5, "euler_ancestral", "sgm_uniform")
+    assert fake.submitted["ckpt"]["inputs"]["ckpt_name"] == "yiffInHell_yihMETLLICTETR.safetensors"
+    assert fake.submitted["lora_1"]["inputs"]["lora_name"] == "novabeast xl v1 rank64 pony.safetensors"
+    assert "yiffInHell METALLIC TETRA" in state["messages"][-1].content[0]["text"]
+
+
+async def test_default_sdxl_run_keeps_the_template_values(settings):
+    # yiffInHell VANTABLACK's params equal the phase-1 template: the submitted sampler is unchanged.
+    fake = FakeComfy()
+    await _run("夕方の港", fake, settings)
+    template = json.loads((ROOT / "workflows" / "sdxl" / "t2i_basic.api.json").read_text(encoding="utf-8"))
+    for key in ("steps", "cfg", "sampler_name", "scheduler"):
+        assert fake.submitted["sampler"]["inputs"][key] == template["sampler"]["inputs"][key]
+    assert fake.submitted["split"]["inputs"] == {**template["split"]["inputs"], "text": ["eject", 0]}
+
+
+async def test_wulver_runs_the_krea2_family(settings):
+    fake = FakeComfy()
+    state = await _run("夕方の神戸港で振り返る青い鱗のケモノ", fake, settings, image_model="wulver")
+    prompt = fake.submitted
+    ckpt = prompt["ckpt"]["inputs"]
+    assert prompt["ckpt"]["class_type"] == "FurryJaDiffusionLoaderAfterEject"
+    assert (ckpt["unet_name"], ckpt["clip_name"], ckpt["clip_type"], ckpt["vae_name"]) == (
+        "wulverKrea2_v05_fp8.safetensors", "qwen3vl_4b_fp8_scaled.safetensors", "krea2", "qwen_image_vae.safetensors")
+    sampler = prompt["sampler"]["inputs"]
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]) == (8, 1.0, "euler", "simple")
+    assert prompt["split"]["inputs"]["prompt_style"] == "prose"
+    assert prompt["positive"]["inputs"]["clip"] == ["ckpt", 1] and "t5_options" not in prompt
+    # The eject still gates the diffusion model.
+    assert ckpt["after"] == ["eject", 0] and prompt["release"]["inputs"]["model"] == ["ckpt", 0]
+    text = state["messages"][-1].content[0]["text"]
+    assert "Wulver (Krea 2)" in text and "1024×1024" in text
+    meta = json.loads(next(settings.outputs_dir.glob("*.json")).read_text(encoding="utf-8"))
+    assert meta["image_model"] == "wulver" and meta["family"] == "krea2" and meta["steps"] == 8
+
+
+async def test_indigo_anima_runs_the_anima_family(settings):
+    fake = FakeComfy()
+    await _run([{"type": "text", "text": "背景を夜に"}, _block(_png())], fake, settings,
+               image_model="indigofurrymix-anima")
+    prompt = fake.submitted
+    ckpt = prompt["ckpt"]["inputs"]
+    assert (ckpt["unet_name"], ckpt["clip_name"], ckpt["clip_type"]) == (
+        "indigoFurryMixAnima_v10.safetensors", "qwen_3_06b_base.safetensors", "stable_diffusion")
+    assert prompt["split"]["inputs"]["prompt_style"] == "tags"
+    assert "furry" in prompt["split"]["inputs"]["quality_prefix"]
+    assert prompt["sampler"]["inputs"]["sampler_name"] == "er_sde" and prompt["sampler"]["inputs"]["cfg"] == 4.0
+    assert prompt["latent"]["class_type"] == "VAEEncode" and prompt["sampler"]["inputs"]["denoise"] == 0.45
+
+
+async def test_krea2_style_reference_is_refused_with_the_model_name(settings):
+    fake = FakeComfy()
+    state = await _run([{"type": "text", "text": "この画風で"}, _block(_png(), role="style")], fake, settings,
+                       image_model="wulver")
+    assert "Wulver (Krea 2)" in state["messages"][-1].content and fake.submitted is None

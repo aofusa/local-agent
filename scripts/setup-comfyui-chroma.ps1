@@ -1,10 +1,10 @@
 ﻿<#
 .SYNOPSIS
-  Download the text encoder and VAE that the Chroma1-HD family (COMFY_MODEL_FAMILY=flux) needs. Idempotent.
+  Download the text encoder and VAE that the Chroma1-HD family (image model chroma-hd) needs. Idempotent.
 
 .DESCRIPTION
   Chroma1-HD ships as a diffusion model only (no text encoder, no VAE inside the file). The workflow loads:
-    diffusion model  CHROMA_UNET_NAME (default chroma_v10HD.safetensors) from models\diffusion_models or models\checkpoints
+    diffusion model  the "ckpt" of chroma-hd in config\host_models.json (chroma_v10HD.safetensors) from models\diffusion_models or models\checkpoints
                      (place it yourself; this script does not download the 17.8 GB model)
     text encoder     models\text_encoders\t5xxl_fp8_e4m3fn.safetensors   (comfyanonymous/flux_text_encoders)
     VAE              models\vae\ae.safetensors                          (lodestones/Chroma1-HD vae, Flux VAE)
@@ -40,7 +40,8 @@ Write-Step "Chroma1-HD のテキストエンコーダと VAE（$ModelsDir）"
 Get-Model "comfyanonymous/flux_text_encoders" "t5xxl_fp8_e4m3fn.safetensors" "text_encoders" "t5xxl_fp8_e4m3fn.safetensors"
 Get-Model "lodestones/Chroma1-HD" "vae/diffusion_pytorch_model.safetensors" "vae" "ae.safetensors"
 
-$unet = Get-DotEnvValue "CHROMA_UNET_NAME" "chroma_v10HD.safetensors"
+$unet = (@((Read-JsonFile (Join-Path (Get-RepoRoot) "config\host_models.json")).image) | Where-Object { $_.id -eq "chroma-hd" } | Select-Object -First 1).ckpt
+if (-not $unet) { $unet = "chroma_v10HD.safetensors" }
 $found = Import-ComfyModel $layout @("diffusion_models", "unet", "checkpoints") $unet (Get-KnownModelDirs)
 if ($found) {
     $source = @($found)[0]
@@ -60,4 +61,4 @@ if ($found) {
 }
 else { Write-Warn2 "$unet が models\diffusion_models / checkpoints にありません。Chroma1-HD を置いてください（https://huggingface.co/lodestones/Chroma1-HD）" }
 
-Write-Step "完了。.env の COMFY_MODEL_FAMILY=flux と CKPT_NAME で Chroma に切り替え、LangGraph を再起動してください"
+Write-Step "完了。画面のモデル一覧（画像タブ）で Chroma1-HD を選ぶと使えます"

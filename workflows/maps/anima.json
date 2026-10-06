@@ -1,0 +1,75 @@
+{
+  "family": "anima",
+  "label": "Anima",
+  "models": {
+    "unet_name": "indigoFurryMixAnima_v10.safetensors",
+    "weight_dtype": "default",
+    "clip_name": "qwen_3_06b_base.safetensors",
+    "clip_type": "stable_diffusion",
+    "vae_name": "qwen_image_vae.safetensors"
+  },
+  "defaults": {
+    "width": 832,
+    "height": 1216,
+    "steps": 28,
+    "cfg": 4.0,
+    "sampler_name": "er_sde",
+    "scheduler": "simple",
+    "size_min": 512,
+    "size_max": 1536,
+    "max_pixels": 2359296
+  },
+  "supported_roles": [
+    "base"
+  ],
+  "pose_enabled": false,
+  "pose_fallback": "refuse",
+  "pose_fallback_denoise": 0.65,
+  "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
+  "model_setup_hint": "scripts の setup-image-models を実行して Anima のテキストエンコーダと VAE を入れてください",
+  "templates": {
+    "t2i_basic": {
+      "file": "anima/t2i_basic.api.json",
+      "roles": [],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height"
+      }
+    },
+    "i2i_basic": {
+      "file": "anima/i2i_basic.api.json",
+      "roles": [
+        "base"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise"
+      }
+    }
+  },
+  "prompt_style": "danbooru"
+}

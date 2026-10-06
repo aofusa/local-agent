@@ -1,0 +1,75 @@
+{
+  "family": "krea2",
+  "label": "Krea 2",
+  "models": {
+    "unet_name": "wulverKrea2_v05_fp8.safetensors",
+    "weight_dtype": "default",
+    "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+    "clip_type": "krea2",
+    "vae_name": "qwen_image_vae.safetensors"
+  },
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "size_min": 512,
+    "size_max": 1536,
+    "max_pixels": 1048576
+  },
+  "supported_roles": [
+    "base"
+  ],
+  "pose_enabled": false,
+  "pose_fallback": "refuse",
+  "pose_fallback_denoise": 0.65,
+  "node_setup_hint": "ComfyUI を再起動して furry_ja ノード（FurryJaDiffusionLoaderAfterEject）を読み込んでください",
+  "model_setup_hint": "scripts の setup-image-models を実行して Krea 2 のテキストエンコーダと VAE を入れてください",
+  "templates": {
+    "t2i_basic": {
+      "file": "krea2/t2i_basic.api.json",
+      "roles": [],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
+        "width": "latent.inputs.width",
+        "height": "latent.inputs.height"
+      }
+    },
+    "i2i_basic": {
+      "file": "krea2/i2i_basic.api.json",
+      "roles": [
+        "base"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "seed": "sampler.inputs.seed",
+        "ckpt_name": "ckpt.inputs.unet_name",
+        "weight_dtype": "ckpt.inputs.weight_dtype",
+        "clip_name": "ckpt.inputs.clip_name",
+        "vae_name": "ckpt.inputs.vae_name",
+        "steps": "sampler.inputs.steps",
+        "cfg": "sampler.inputs.cfg",
+        "sampler_name": "sampler.inputs.sampler_name",
+        "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
+        "base_image": "ref_image.inputs.image",
+        "denoise": "sampler.inputs.denoise"
+      }
+    }
+  },
+  "prompt_style": "prose"
+}

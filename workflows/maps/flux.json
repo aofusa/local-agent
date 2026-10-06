@@ -52,6 +52,8 @@
         "cfg": "sampler.inputs.cfg",
         "sampler_name": "sampler.inputs.sampler_name",
         "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
         "width": "latent.inputs.width",
         "height": "latent.inputs.height"
       }
@@ -72,9 +74,12 @@
         "cfg": "sampler.inputs.cfg",
         "sampler_name": "sampler.inputs.sampler_name",
         "scheduler": "sampler.inputs.scheduler",
+        "quality_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
         "base_image": "ref_image.inputs.image",
         "denoise": "sampler.inputs.denoise"
       }
     }
-  }
+  },
+  "prompt_style": "prose"
 }

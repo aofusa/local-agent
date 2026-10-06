@@ -103,7 +103,8 @@ async def test_tool_calls_are_assembled_and_sent_after_the_stream():
     calls = [d for e, d in events if e == "tool_call"]
     assert calls == [{"id": "c1", "name": "grep", "arguments": '{"pattern":"main"}'},
                      {"id": "c2", "name": "read_file", "arguments": "{}"}]
-    assert events[-1] == ("done", {"finish_reason": "tool_calls", "usage": events[-1][1]["usage"], "mode": "fast"})
+    assert events[-1] == ("done", {"finish_reason": "tool_calls", "usage": events[-1][1]["usage"], "mode": "fast",
+                          "model": "qwen"})
     sent = lm.bodies[0]
     assert sent["stream"] is True and sent["tool_choice"] == "auto"
     assert sent["tools"][0] == {"type": "function", "function": {"name": "grep", "description": "search",
@@ -213,3 +214,60 @@ def _reset_state():
     for name in ("chat_settings", "llm", "transport", "comfy_config"):
         if hasattr(gate.app.state, name):
             delattr(gate.app.state, name)
+
+
+# --- inference model (docs/host-model-selection-design.md §7) ---------------------------------------------------
+
+
+async def test_turn_sends_the_picked_inference_model(monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    lm = LM(_chunks({"content": "ok"}))
+    status, raw = await _post(_app(lm), {"messages": [{"role": "user", "content": "hi"}],
+                                         "inference_model": "bonsai-2-27b-abliterated"})
+    assert status == 200
+    assert lm.bodies[0]["model"] == "bonsai-2-27b-abliterated"
+    done = [d for e, d in _events(raw) if e == "done"][0]
+    assert done["model"] == "bonsai-2-27b-abliterated"
+
+
+async def test_turn_without_a_model_keeps_the_router_default(monkeypatch):
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    lm = LM(_chunks({"content": "ok"}))
+    await _post(_app(lm), {"messages": [{"role": "user", "content": "hi"}]})
+    assert lm.bodies[0]["model"] == "qwen"
+
+
+async def test_turn_uses_the_models_context(monkeypatch):
+    # Bonsai's 8192-token window lets a prompt through that the 27B's 4096 refuses.
+    monkeypatch.delenv("DEFAULT_INFERENCE_MODEL", raising=False)
+    long = [{"role": "user", "content": "あ" * 5000}]
+    status, raw = await _post(_app(LM()), {"messages": long})
+    assert ("error", "context_overflow") in [(e, d.get("code")) for e, d in _events(raw)]
+    lm = LM(_chunks({"content": "ok"}))
+    status, raw = await _post(_app(lm), {"messages": long, "inference_model": "bonsai-2-27b-abliterated"})
+    assert [e for e, _ in _events(raw)][-1] == "done"
+
+
+@pytest.mark.parametrize("value, code", [("qwen", "unknown_model"), ("nothere", "unknown_model"), (5, "bad_request")])
+async def test_unknown_inference_model_is_400(value, code):
+    lm = LM()
+    status, raw = await _post(_app(lm), {"messages": [{"role": "user", "content": "hi"}], "inference_model": value})
+    assert status == 400 and json.loads(raw)["code"] == code
+    assert lm.bodies == []  # nothing reached the router
+
+
+async def test_disabled_inference_model_is_400(monkeypatch):
+    monkeypatch.setenv("HOST_MODELS_DISABLE", "bonsai-2-27b-abliterated")
+    status, raw = await _post(_app(LM()), {"messages": [{"role": "user", "content": "hi"}],
+                                           "inference_model": "bonsai-2-27b-abliterated"})
+    assert status == 400 and json.loads(raw)["code"] == "model_unavailable"
+
+
+async def test_health_reports_the_defaults(monkeypatch):
+    monkeypatch.setenv("DEFAULT_INFERENCE_MODEL", "bonsai-2-27b-abliterated")
+    monkeypatch.setenv("DEFAULT_IMAGE_MODEL", "wulver")
+    app = _app(LM())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://host") as client:
+        body = (await client.get("/coder/health")).json()
+    assert body["inference_default"] == "bonsai-2-27b-abliterated" and body["image_default"] == "wulver"
+    assert body["model"] == "bonsai-2-27b-abliterated" and body["context"] == 8192

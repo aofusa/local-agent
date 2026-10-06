@@ -95,6 +95,9 @@ pub struct TurnRequest {
     pub tools: Vec<Value>,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// The catalog id picked with `/model` (absent = the host's default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -107,6 +110,9 @@ pub struct Health {
     pub model: String,
     pub busy: Option<String>,
     pub error: Option<String>,
+    /// The host's default ids (`GET /models` "defaults"; empty on an older host).
+    pub inference_default: String,
+    pub image_default: String,
 }
 
 /// SSE framing: `event:` / `data:` lines, blank line ends one event. Feeds partial chunks.
@@ -296,12 +302,33 @@ impl HostClient {
                     h.context = v.get("context").and_then(Value::as_u64).unwrap_or(4096) as u32;
                     h.model = v.get("model").and_then(Value::as_str).unwrap_or("").to_string();
                     h.busy = v.get("busy").and_then(Value::as_str).map(String::from);
+                    let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                    h.inference_default = s("inference_default");
+                    h.image_default = s("image_default");
                 }
             }
             Ok(r) => h.error = Some(format!("/coder/health が HTTP {}（ホストの local-agent が古い可能性）", r.status())),
             Err(e) => h.error = Some(e.to_string()),
         }
         h
+    }
+
+    /// `GET /models`: the models the host lets a client pick, with `available` and `reason`.
+    pub async fn models(&self) -> Result<Value, HostError> {
+        let response = self
+            .req(reqwest::Method::GET, "/models")
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| HostError::Unreachable(e.to_string()))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(HostError::Refused {
+                message: format!("/models が HTTP {status}（ホストの local-agent が古い可能性）"),
+                code: "http".into(),
+            });
+        }
+        response.json::<Value>().await.map_err(|e| HostError::Unreachable(e.to_string()))
     }
 
     /// One model turn. `on_event` sees every event as it arrives (tokens are printed while they stream);
@@ -497,6 +524,15 @@ mod tests {
         let s = last_ai(&json!({"messages": [{"type": "ai", "content": "answer [1]"}], "__interrupt__": [{"value": 1}]}));
         assert_eq!(s.text, "answer [1]");
         assert!(s.interrupted);
+    }
+
+    #[test]
+    fn turn_body_carries_the_picked_model_only_when_set() {
+        let mut r = TurnRequest { mode: "fast".into(), messages: vec![], tools: vec![], max_tokens: 10, temperature: 0.2,
+                                  inference_model: None };
+        assert!(serde_json::to_value(&r).unwrap().get("inference_model").is_none());
+        r.inference_model = Some("bonsai-2-27b-abliterated".into());
+        assert_eq!(serde_json::to_value(&r).unwrap()["inference_model"], "bonsai-2-27b-abliterated");
     }
 
     #[test]

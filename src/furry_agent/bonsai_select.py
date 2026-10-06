@@ -117,6 +117,8 @@ def free_memory_mb() -> int:
         status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
         return int(status.ullAvailPhys // (1024 * 1024))
+    if sys.platform == "darwin":
+        return _darwin_free_mb()
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
@@ -124,6 +126,40 @@ def free_memory_mb() -> int:
     except OSError:
         pass
     return 0
+
+
+_DARWIN_PAGES = ("vm.page_free_count", "vm.page_speculative_count", "vm.page_purgeable_count",
+                 "vm.page_pageable_external_count")
+
+
+def _sysctl_int(name: str) -> int:
+    libc = ctypes.CDLL(None)
+    value = ctypes.c_uint64(0)
+    size = ctypes.c_size_t(ctypes.sizeof(value))
+    if libc.sysctlbyname(name.encode(), ctypes.byref(value), ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
+        return 0
+    return int(value.value) & ((1 << (8 * size.value)) - 1)
+
+
+def _darwin_free_mb() -> int:
+    """macOS: free + speculative + purgeable + file-backed pageable pages (what the kernel hands out without
+    swapping; vm_stat's free + inactive + speculative). Unified memory: Metal (llama.cpp, MLX, ComfyUI on MPS)
+    allocates from the same pool. sysctlbyname through ctypes: no subprocess, so it can run on the event loop."""
+    page = _sysctl_int("hw.pagesize") or 16384
+    return sum(_sysctl_int(name) for name in _DARWIN_PAGES) * page // (1024 * 1024)
+
+
+def parse_vm_stat(out: str) -> int:
+    import re
+
+    size = re.search(r"page size of (\d+) bytes", out)
+    page = int(size.group(1)) if size else 16384
+    pages = 0
+    for name in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+        match = re.search(rf"{name}:\s+(\d+)", out)
+        if match:
+            pages += int(match.group(1))
+    return pages * page // (1024 * 1024)
 
 
 def available_models(catalog: Catalog, models_dir: Path) -> dict[str, Path]:

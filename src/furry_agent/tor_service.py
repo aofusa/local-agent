@@ -57,8 +57,8 @@ async def ensure_tor(settings: ChatSettings, timeout_s: float | None = None) -> 
         return "running"
     exe_ok = bool(settings.tor_exe) and await asyncio.to_thread(Path(settings.tor_exe).is_file)
     if not settings.tor_autostart or not exe_ok:
-        raise TorUnavailable("Tor が 127.0.0.1:9050 で待ち受けていません。scripts\\start-tor.ps1 で起動してください"
-                             "（未導入なら scripts\\setup-tor.ps1）")
+        raise TorUnavailable("Tor が 127.0.0.1:9050 で待ち受けていません。scripts の start-tor（Windows は .ps1、"
+                             "macOS は .sh）で起動してください（未導入なら setup-tor）")
     async with _start_lock:
         if await asyncio.to_thread(tor_listening, settings.tor_socks_url):
             return "running"

@@ -23,6 +23,8 @@ pub const KEYS: &[&str] = &[
     "locale",
     "auth_header",
     "idle_timeout_s",
+    "inference_model",
+    "image_model",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +120,9 @@ pub struct FileConfig {
     pub locale: Option<String>,
     pub auth_header: Option<String>,
     pub idle_timeout_s: Option<u64>,
+    /// A local-agent catalog id (`GET /models`); empty = the host's default.
+    pub inference_model: Option<String>,
+    pub image_model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +139,10 @@ pub struct Config {
     /// command without output. Anything that keeps answering (tokens, progress, output) is waited for without a
     /// limit; the host's 27B on a small machine can take long.
     pub idle_timeout_s: u64,
+    /// The host's inference / image model for this session (`/model`, `/image-model`): a catalog id, or None for
+    /// the host's default. Only the id's shape is checked here; the host says whether it exists.
+    pub inference_model: Option<String>,
+    pub image_model: Option<String>,
     /// Where each value came from, for `cirka config show`.
     pub sources: Vec<String>,
 }
@@ -149,6 +158,8 @@ impl Default for Config {
             locale: "ja".into(),
             auth_header: None,
             idle_timeout_s: DEFAULT_IDLE_TIMEOUT_S,
+            inference_model: None,
+            image_model: None,
             sources: vec!["defaults".into()],
         }
     }
@@ -236,6 +247,14 @@ impl Config {
             self.idle_timeout_s = n.max(MIN_IDLE_TIMEOUT_S);
             used = true;
         }
+        if let Some(m) = &layer.inference_model {
+            self.inference_model = model_id(m)?;
+            used = true;
+        }
+        if let Some(m) = &layer.image_model {
+            self.image_model = model_id(m)?;
+            used = true;
+        }
         if used {
             self.sources.push(source.to_string());
         }
@@ -263,7 +282,20 @@ pub fn project_config_path(cwd: &Path) -> PathBuf {
     cwd.join(".cirka").join("config.toml")
 }
 
-/// CIRKA_HOST, CIRKA_MODE, CIRKA_PERMISSION, CIRKA_AUTH_HEADER, CIRKA_IDLE_TIMEOUT_S.
+/// An empty value is the host's default (not an override); anything else must look like a catalog id.
+pub fn model_id(raw: &str) -> Result<Option<String>, ConfigError> {
+    let v = raw.trim();
+    if v.is_empty() {
+        return Ok(None);
+    }
+    if !crate::models::valid_id(v) {
+        return Err(ConfigError(format!("モデルの id は英小文字・数字・.・- です: {v}")));
+    }
+    Ok(Some(v.to_string()))
+}
+
+/// CIRKA_HOST, CIRKA_MODE, CIRKA_PERMISSION, CIRKA_AUTH_HEADER, CIRKA_IDLE_TIMEOUT_S, CIRKA_INFERENCE_MODEL,
+/// CIRKA_IMAGE_MODEL.
 pub fn env_layer(get: impl Fn(&str) -> Option<String>) -> FileConfig {
     let pick = |k: &str| get(k).filter(|v| !v.trim().is_empty());
     FileConfig {
@@ -272,6 +304,8 @@ pub fn env_layer(get: impl Fn(&str) -> Option<String>) -> FileConfig {
         permission: pick("CIRKA_PERMISSION"),
         auth_header: pick("CIRKA_AUTH_HEADER"),
         idle_timeout_s: pick("CIRKA_IDLE_TIMEOUT_S").and_then(|v| v.trim().parse().ok()),
+        inference_model: pick("CIRKA_INFERENCE_MODEL"),
+        image_model: pick("CIRKA_IMAGE_MODEL"),
         ..FileConfig::default()
     }
 }
@@ -307,6 +341,8 @@ pub fn write_key(path: &Path, key: &str, value: Option<&str>) -> Result<FileConf
         "locale" => file.locale = v,
         "auth_header" => file.auth_header = v,
         "idle_timeout_s" => file.idle_timeout_s = num(&v)?,
+        "inference_model" => file.inference_model = v,
+        "image_model" => file.image_model = v,
         _ => unreachable!(),
     }
     // Validate the whole file as it will be read back.
@@ -329,6 +365,8 @@ pub fn get_key(config: &Config, key: &str) -> Option<String> {
         "locale" => config.locale.clone(),
         "auth_header" => config.auth_header.as_ref().map(|(n, _)| format!("{n}: ***")).unwrap_or_default(),
         "idle_timeout_s" => config.idle_timeout_s.to_string(),
+        "inference_model" => config.inference_model.clone().unwrap_or_default(),
+        "image_model" => config.image_model.clone().unwrap_or_default(),
         _ => return None,
     })
 }
@@ -370,6 +408,17 @@ mod tests {
             parse_auth_header("Authorization: Bearer x").unwrap(),
             Some(("Authorization".into(), "Bearer x".into()))
         );
+    }
+
+    #[test]
+    fn model_ids_are_shape_checked_and_empty_is_the_default() {
+        let mut c = Config::default();
+        let env = env_layer(|k| (k == "CIRKA_INFERENCE_MODEL").then(|| "bonsai-2-27b-abliterated".to_string()));
+        c.apply(&env, "environment").unwrap();
+        assert_eq!(c.inference_model.as_deref(), Some("bonsai-2-27b-abliterated"));
+        c.apply(&FileConfig { inference_model: Some("".into()), ..Default::default() }, "project").unwrap();
+        assert_eq!(c.inference_model, None);
+        assert!(c.apply(&FileConfig { image_model: Some("Wulver XL".into()), ..Default::default() }, "x").is_err());
     }
 
     #[test]

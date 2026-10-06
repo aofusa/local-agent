@@ -70,9 +70,14 @@ def port_in_use(port: int) -> bool:
 
 
 def pids_on_port(port: int) -> list[int]:
-    """PIDs listening on 127.0.0.1:<port> (Windows netstat; empty elsewhere)."""
+    """PIDs listening on 127.0.0.1:<port> (Windows netstat, lsof elsewhere)."""
     if sys.platform != "win32":
-        return []
+        try:
+            out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True,
+                                 text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
+        return sorted({int(x) for x in out.split() if x.isdigit()})
     try:
         out = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=10,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
@@ -90,7 +95,7 @@ def kill_pid(pid: int) -> None:
     if sys.platform == "win32":
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    else:  # pragma: no cover - the target machine is Windows
+    else:
         try:
             os.kill(pid, 9)
         except OSError:

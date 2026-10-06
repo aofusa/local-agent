@@ -113,10 +113,10 @@ def test_build_workflows_env_override(tmp_path, monkeypatch):
 
     spec = importlib.util.spec_from_file_location("build_workflows", ROOT / "scripts" / "build_workflows.py")
     monkeypatch.setenv("LLM_MODEL", "some-model@q4_k_m")
-    monkeypatch.setenv("CKPT_NAME", "other.safetensors")
+    monkeypatch.setenv("CKPT_NAME", "other.safetensors")  # no longer read: the run injects its model's file
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     api = module.api_workflow()
     assert api["llm_backend"]["inputs"]["model"] == "some-model@q4_k_m"
     assert api["llm_backend_vision"]["inputs"]["model"] == "some-model@q4_k_m"
-    assert api["ckpt"]["inputs"]["ckpt_name"] == "other.safetensors"
+    assert api["ckpt"]["inputs"]["ckpt_name"] == "yiffInHell_yihVANTABLACK.safetensors"
