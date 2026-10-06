@@ -86,6 +86,8 @@ for s in sections:
 ids=[s["id"] for s in sections if "id" in s]
 print(ids[0] if ids else "")')"
 [ -n "$first" ] || die "使える推論モデルがありません（setup-search-models.sh で Bonsai を、--source-model で Qwen を入れてください）"
+# The MLX-first router only when a model really runs on MLX; GGUF-only presets keep llama-server's own router.
+grep -q '^engine = mlx' "$preset" || engine="llamacpp"
 ok "$preset（engine: $engine）"
 
 step ".env"
@@ -98,6 +100,12 @@ env_set LLM_MODEL "$first"
 env_set LLM_CONTEXT "$ctx"
 env_set LLM_ENGINE "$engine"
 ok "LLM_URL=$url LLM_MODEL=$first（画像のタグ生成のモデル）"
+catalog_first="$(json_get "$REPO_ROOT/config/host_models.json" "d['inference'][0]['id']")"
+if [ -z "$(env_get DEFAULT_INFERENCE_MODEL)" ] && [ "$first" != "$catalog_first" ]; then
+  # The catalog's first model is not on this Mac: requests without a model use one that is.
+  env_set DEFAULT_INFERENCE_MODEL "$first"
+  ok "DEFAULT_INFERENCE_MODEL=$first（$catalog_first はこの Mac にありません）"
+fi
 
 step "ワークフローの接続先"
 current="$(json_get "$REPO_ROOT/workflows/furry_ja_api.json" "d['llm_backend']['inputs']['model'] + ' ' + d['llm_backend']['inputs']['base_url']")"
