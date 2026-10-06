@@ -128,16 +128,25 @@ def free_memory_mb() -> int:
     return 0
 
 
-def _darwin_free_mb() -> int:
-    """macOS: free + inactive + speculative + purgeable pages of vm_stat (what the kernel hands out without
-    swapping). Unified memory: Metal (llama.cpp, MLX, ComfyUI on MPS) allocates from the same pool."""
-    import subprocess
+_DARWIN_PAGES = ("vm.page_free_count", "vm.page_speculative_count", "vm.page_purgeable_count",
+                 "vm.page_pageable_external_count")
 
-    try:
-        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
+
+def _sysctl_int(name: str) -> int:
+    libc = ctypes.CDLL(None)
+    value = ctypes.c_uint64(0)
+    size = ctypes.c_size_t(ctypes.sizeof(value))
+    if libc.sysctlbyname(name.encode(), ctypes.byref(value), ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
         return 0
-    return parse_vm_stat(out)
+    return int(value.value) & ((1 << (8 * size.value)) - 1)
+
+
+def _darwin_free_mb() -> int:
+    """macOS: free + speculative + purgeable + file-backed pageable pages (what the kernel hands out without
+    swapping; vm_stat's free + inactive + speculative). Unified memory: Metal (llama.cpp, MLX, ComfyUI on MPS)
+    allocates from the same pool. sysctlbyname through ctypes: no subprocess, so it can run on the event loop."""
+    page = _sysctl_int("hw.pagesize") or 16384
+    return sum(_sysctl_int(name) for name in _DARWIN_PAGES) * page // (1024 * 1024)
 
 
 def parse_vm_stat(out: str) -> int:

@@ -14,7 +14,8 @@ check "llama-server (LLM_SERVER)" bash -c '"$0" --version 2>&1 | grep -m1 versio
 check "preset (LLM_PRESET)" bash -c 'grep -c "^\[" "$0" | sed "s/$/ sections/"' "$(env_get LLM_PRESET)"
 check "ComfyUI python" test -x "$(env_get COMFYUI_PYTHON)"
 check "Tor (TOR_EXE)" test -x "$(env_get TOR_EXE)"
-check "docker" bash -c 'docker version --format "{{.Server.Os}}"'
+# Optional: only the chat tab's code execution needs it.
+if out="$(docker version --format '{{.Server.Os}}' 2>&1)"; then ok "docker — $out"; else warn "docker — コード実行は使えません（$(printf '%s' "$out" | grep -m1 .)）"; fi
 step "待受（ループバックのままか）"
 check "LLM router 127.0.0.1:$(env_get LLM_PORT 8080)" bash -c 'curl -sf -m 5 "$0/models" | python3 -c "import json,sys; print(\", \".join(m[\"id\"]+\":\"+m.get(\"status\",{}).get(\"value\",\"?\") for m in json.load(sys.stdin)[\"data\"]))"' "$(env_get LLM_URL http://127.0.0.1:8080/v1)"
 check "ComfyUI 127.0.0.1:8188" bash -c 'curl -sf -m 5 http://127.0.0.1:8188/system_stats | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[\"system\"][\"comfyui_version\"], d[\"devices\"][0][\"type\"])"'
