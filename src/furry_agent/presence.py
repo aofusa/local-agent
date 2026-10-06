@@ -29,12 +29,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from furry_agent.config import REPO_ROOT, ChatSettings, env_float
-from furry_agent.llm_client import LLMError, parse_json_object
+from furry_agent.llm_client import LLMError, idle_timeout, parse_json_object
 from furry_agent.model_catalog import CatalogError, ModelChoiceError, resolve_inference
 
 log = logging.getLogger("furry_agent.presence")
@@ -176,13 +177,46 @@ def check_turn(obj: dict, policy: dict) -> tuple[list[dict], str]:
 
 # -- the model -----------------------------------------------------------------------------------------------------
 
+class _Borrowed:
+    """``async with`` that hands out a long-lived client and leaves it open."""
+
+    def __init__(self, client: httpx.AsyncClient):
+        self.client = client
+
+    async def __aenter__(self) -> httpx.AsyncClient:
+        return self.client
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+
+_CLIENTS: dict[tuple, httpx.AsyncClient] = {}
+
+
+def keep_alive(llm):
+    """Make an llm_client client reuse one httpx.AsyncClient per event loop and server. Building a client costs
+    0.45-0.6 s on Windows (httpx loads the system CA store even for plain http) and llm_client builds one per call,
+    which took up to half of the 4 s presence budget."""
+
+    def http(timeout: float | None = None):
+        key = (id(asyncio.get_running_loop()), llm.base_url, llm.api_key)
+        client = _CLIENTS.get(key)
+        if client is None or client.is_closed:
+            client = _CLIENTS[key] = httpx.AsyncClient(timeout=idle_timeout(30.0), trust_env=False,
+                                                       headers={"Authorization": f"Bearer {llm.api_key}"})
+        return _Borrowed(client)
+
+    llm._http = http
+    return llm
+
+
 def make_presence_llm(model_id: str | None, timeout_s: float):
     """The client of the presence model (an entry of config/host_models.json, usually on another host)."""
     from furry_agent.chat_common import make_llm, with_inference
 
     settings = ChatSettings.from_env()
     model = resolve_inference(model_id or os.environ.get("PRESENCE_MODEL", "").strip() or None)
-    return make_llm(with_inference(settings, model), timeout_s), model.id
+    return keep_alive(make_llm(with_inference(settings, model), timeout_s)), model.id
 
 
 async def run_turn(body: dict, llm, timeout_s: float = TIMEOUT_S) -> dict:
