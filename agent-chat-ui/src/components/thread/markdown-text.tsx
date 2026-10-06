@@ -151,14 +151,14 @@ const defaultComponents: any = {
       {...props}
     />
   ),
+  // local-agent: a wide table scrolls sideways inside the message instead of widening the page.
   table: ({ className, ...props }: { className?: string }) => (
-    <table
-      className={cn(
-        "my-5 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
-      )}
-      {...props}
-    />
+    <div className="my-5 w-full max-w-full overflow-x-auto">
+      <table
+        className={cn("w-full border-separate border-spacing-0", className)}
+        {...props}
+      />
+    </div>
   ),
   th: ({ className, ...props }: { className?: string }) => (
     <th
@@ -196,7 +196,7 @@ const defaultComponents: any = {
   pre: ({ className, ...props }: { className?: string }) => (
     <pre
       className={cn(
-        "max-w-4xl overflow-x-auto rounded-lg bg-black text-white",
+        "max-w-full overflow-x-auto rounded-lg bg-black text-white",
         className,
       )}
       {...props}
@@ -245,7 +245,7 @@ const defaultComponents: any = {
 
 const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
   return (
-    <div className="markdown-content">
+    <div className="markdown-content min-w-0 [overflow-wrap:anywhere]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}

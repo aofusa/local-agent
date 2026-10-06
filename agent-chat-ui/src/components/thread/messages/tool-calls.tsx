@@ -15,14 +15,14 @@ export function ToolCalls({
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+    <div className="mx-auto grid w-full max-w-3xl min-w-0 grid-rows-[1fr_auto] gap-2">
       {toolCalls.map((tc, idx) => {
         const args = tc.args as Record<string, any>;
         const hasArgs = Object.keys(args).length > 0;
         return (
           <div
             key={idx}
-            className="overflow-hidden rounded-lg border border-gray-200"
+            className="overflow-x-auto rounded-lg border border-gray-200"
           >
             <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
               <h3 className="font-medium text-gray-900">
@@ -94,8 +94,8 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       : contentStr;
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
-      <div className="overflow-hidden rounded-lg border border-gray-200">
+    <div className="mx-auto grid w-full max-w-3xl min-w-0 grid-rows-[1fr_auto] gap-2">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
         <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             {message.name ? (

@@ -8,6 +8,7 @@ import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
 import { ModelInfoLine, isModelInfo } from "../model-picker";
+import { ResponseTimeLine, isResponseTime } from "./response-time";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
@@ -207,8 +208,8 @@ export function AssistantMessage({
   }
 
   return (
-    <div className="group mr-auto flex w-full items-start gap-2">
-      <div className="flex w-full flex-col gap-2">
+    <div className="group mr-auto flex w-full min-w-0 items-start gap-2">
+      <div className="flex w-full min-w-0 flex-col gap-2">
         {isToolResult ? (
           <>
             <ToolResult message={message} />
@@ -244,13 +245,20 @@ export function AssistantMessage({
               <TaskTraceView trace={message.additional_kwargs.task_trace} />
             )}
             {(isChatModeInfo(message?.additional_kwargs?.chat_mode) ||
-              isModelInfo(message?.additional_kwargs?.model_info)) && (
-              <div className="flex flex-wrap items-center gap-3">
+              isModelInfo(message?.additional_kwargs?.model_info) ||
+              isResponseTime(message?.additional_kwargs?.response_time)) && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {isModelInfo(message?.additional_kwargs?.model_info) && (
                   <ModelInfoLine info={message.additional_kwargs.model_info} />
                 )}
                 {isChatModeInfo(message?.additional_kwargs?.chat_mode) && (
                   <ChatModeBadge info={message.additional_kwargs.chat_mode} />
+                )}
+                {/* local-agent: how long the reply took (measured on the host) */}
+                {isResponseTime(message?.additional_kwargs?.response_time) && (
+                  <ResponseTimeLine
+                    time={message.additional_kwargs.response_time}
+                  />
                 )}
               </div>
             )}
@@ -284,6 +292,8 @@ export function AssistantMessage({
               className={cn(
                 "mr-auto flex items-center gap-2 transition-opacity",
                 "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+                // local-agent: a touch screen has no hover; keep copy / regenerate reachable there.
+                "[@media(hover:none)]:opacity-100",
               )}
             >
               <BranchSwitcher
