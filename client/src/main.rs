@@ -201,6 +201,7 @@ async fn main() -> ExitCode {
     }
     if let Some(Command::Logo) = &cli.command {
         let theme = tui::Theme { mode: art::ColorMode::detect(std::io::IsTerminal::is_terminal(&std::io::stdout())) };
+        #[cfg(windows)]
         let _ = crossterm::ansi_support::supports_ansi();
         for line in tui::logo(&theme) {
             println!("{line}");

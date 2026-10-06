@@ -331,6 +331,8 @@ impl Terminal {
     pub fn new(interactive: bool) -> Terminal {
         let tty = std::io::stdout().is_terminal();
         let mode = ColorMode::detect(tty);
+        // Windows consoles need ANSI turned on; other terminals already speak it (the module is Windows-only).
+        #[cfg(windows)]
         if mode != ColorMode::Plain {
             let _ = crossterm::ansi_support::supports_ansi();
         }

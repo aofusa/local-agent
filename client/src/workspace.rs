@@ -78,7 +78,9 @@ impl Workspace {
         let given = Path::new(raw);
         let joined = if given.is_absolute() { given.to_path_buf() } else { self.root.join(given) };
         let lexical = normalize(&joined).ok_or_else(|| PathError::Outside(raw.into()))?;
-        if !starts_with_ci(&lexical, &self.canonical) {
+        // A relative path must stay under the root as written. An absolute one may name the root through a symlink
+        // (macOS: /var -> /private/var, /tmp -> /private/tmp): it is judged by its real location below.
+        if !given.is_absolute() && !starts_with_ci(&lexical, &self.canonical) {
             return Err(PathError::Outside(raw.into()));
         }
         // Follow symlinks of the deepest existing ancestor.
