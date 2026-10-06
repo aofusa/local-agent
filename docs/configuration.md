@@ -93,7 +93,7 @@
 - 別ホストのモデルはこの端末のメモリを使わないので、unload しません。検索で計画を担当したときは、そのまま批評と統合も行い、代理リーダー（Ternary-Bonsai-2-27B）を起動しません。
 - 画像タブのタグ生成は、このリストの選択によらず、この端末のルータ（`LLM_URL` / `LLM_MODEL`）です。
 - ローカルのルータのプリセットには入りません（`setup-llm` は飛ばします）。一覧の先頭は `setup-llm.sh` が既定に使うため、別ホストの項目は後ろに置いてください。
-- 同梱の `mac-bonsai-2-27b-abliterated`（`llamacpp`）と `mac-bonsai-2-27b-openai`（`openai`）は、開発時の確認機（macOS）のルータへ SSH のポート転送（`ssh -L 127.0.0.1:18090:127.0.0.1:8090 <mac>`）で届く URL です。使わない端末では「接続先に接続できません」と出るだけです（`HOST_MODELS_DISABLE` で隠せます）。
+- 同梱の `mac-bonsai-2-27b-abliterated`（`llamacpp`）と `mac-bonsai-2-27b-openai`（`openai`）は、開発時の確認機（macOS）のルータへ SSH のポート転送（`ssh -L 127.0.0.1:18090:127.0.0.1:8090 <mac>`）で届く URL です。確認の後にサーバと転送は止めたので、ふだんは「接続先に接続できません」と出るだけです（`HOST_MODELS_DISABLE` で隠せます）。
 
 ### 画像モデル
 

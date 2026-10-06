@@ -7,16 +7,16 @@
   - この端末のメモリを使わないので unload しない。検索で計画したリモートのモデルが批評と統合も行い、代理リーダーを起動しない（reader にこの端末のメモリが回る）。
   - `openai` には llama.cpp 固有の `chat_template_kwargs` を送らず、JSON スキーマは非 strict で頼む。
   - つながらなければ理由を返し、ローカルのモデルにも別の接続先にも替えない。画像のタグ生成はこの端末のルータのまま。
-  - 同梱の 2 項目は確認機（Mac）のルータの Bonsai 2 27B abliterated（`llamacpp` と `openai`）。Mac の llama-server はループバックのまま、SSH のポート転送（`127.0.0.1:18090`）で届かせた。
+  - 同梱の 2 項目は確認機（Mac）のルータの Bonsai 2 27B abliterated（`llamacpp` と `openai`）。Mac の llama-server はループバックのまま、SSH のポート転送（`127.0.0.1:18090`）で届かせた（確認の後、サーバと転送は止めたので、ふだんは使えないと表示される）。
 - 応答時間: チャットタブの回答とエラーに `additional_kwargs.response_time`（秒）を付け、UI が応答の下に「応答時間 1 分 08 秒」の形で出す。ホストで計り、承認（コード実行・次の章）で待った時間は含めない。
 - UI の表示崩れ（表示だけ。送る内容と操作は変えていない）: スマートフォンで本体の列が画面より広がり、送信ボタンとモデル名が切れていた（グリッドの `1fr` 列が中身の最小幅まで広がっていた）。入力欄の操作の行を折り返し、会話中もタブを出し（以前は `md` 未満で隠れていた）、開始画面のタブと GitHub のリンクの重なり、文字ごとに折り返すラベル、表・コード・長い URL のはみ出し、画面の外に出るモデルの一覧を直した。タッチ画面ではコピー / 再生成を常に出し、高さは `100dvh`。
+- cirka 0.4.1: Windows でコマンドの出力の日本語が文字化けしていた（Python などがパイプに ANSI コードページ = cp932 で書き、cirka が UTF-8 として読んでいた。cp932 に無い文字（絵文字）では Python が `UnicodeEncodeError` で落ちた）。コマンドに `PYTHONIOENCODING=utf-8`（利用者が設定していれば触らない）を渡し、出力は行ごとに UTF-8、だめなら ANSI コードページで読む。ロケールの無い Unix のセッションには `LC_CTYPE=UTF-8`（macOS 以外は `C.UTF-8`）。Windows と macOS の両方で、cirka から日本語と絵文字を出す Python を実行して正しく出ることを確かめた（`cargo test` は Windows 80 件・macOS 81 件、`cargo clippy` も通る）。macOS はもともと UTF-8 で出ていた。
 - テスト: `tests/test_remote_llm.py`（カタログの検証、`RemoteLLM` の要求、`/coder/turn`、`GET /models`、プリセットに入らないこと）、チャットタブのリモートのリーダーと応答時間（`tests/test_chat_graph.py`）。pytest 670 件。
 - 確認（Windows の ROG Ally X、2026-10-06〜07。リモートは Mac の llama-server のルータ、SSH のポート転送経由）:
   - リモート: `GET /models` で 2 項目が使える。チャット（`llamacpp`、速い）、`/coder/turn` の tool calling（`openai`）、Tor 検索（`llamacpp`・速い、`mode=resident` で代理リーダーなし、主張の突き合わせまで）、深い検索（`openai`・思考、4 ラウンド・参照 8 件・検証と監査まで）。どれもこの端末のルータには何も載らない。cirka（`CIRKA_INFERENCE_MODEL`）でファイルの作成と実行。鍵付きの接続（鍵なしは 401）。
   - デグレ確認: 画像（既定の yiffInHell VANTABLACK、テキストのみ）はタグが JSON（`split mode=json`）、KSampler の前にルータが unload され、ComfyUI の output と `outputs/` に保存。Tor 検索（既定の Qwen、速い）は計画 → unload → reader → 代理リーダーの統合 → 主張の突き合わせ、後始末でルータと検索用 llama-server が残らない。cirka（既定の Qwen）はファイルの作成からコマンドの実行まで完了。
   - UI: この端末のヘッドレス Edge で 1440 / 1024 / 390 / 360 px の各画面（開始画面、会話、検索、コード、モデルの一覧、履歴）を撮り、横にはみ出す要素が無いこと。別ホスト（Mac）の Chromium で iPhone 13 の大きさと 1280 px を開き、送信ボタンが画面内にあり、一覧から Mac のモデルを選んで送ると答えと応答時間が出ること。
   - 確認中、利用者のアプリ（VRChat、約 6GB）が動いていてメモリが少なく、ローカルの 27B の 1 ターンが 9 分ほどかかった（タグ生成は 17 分）。メモリ不足の時間帯の検索 1 件は reader が載らず理由つきで止まった（既存の動作。空いてから再実行して通った）。
-  - 変えていない cirka の既知の表示: Windows の Python の出力（cp932）の日本語が文字化けして見える（モデルはファイルの中身から正しく答える）。
 
 ## v0.12.0 — 推論モデル・画像モデルの選択、Krea 2（Wulver）と Anima、macOS（MLX 優先）
 
