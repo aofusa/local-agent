@@ -893,6 +893,48 @@ async def test_stopped_docker_desktop_is_started_only_for_the_approved_run(model
     assert state["code"]["last_exit"] == 0
 
 
+async def test_replies_carry_their_response_time(models_dir, monkeypatch):
+    world = World()
+    now = {"t": 1000.0}
+    monkeypatch.setattr(chat_graph.time, "time", lambda: now["t"])  # the time module is shared by every node
+
+    original = FakeLlamaRouter.chat
+
+    async def slow_chat(self, messages, **kw):
+        now["t"] += 12.34  # the model takes 12.34 s
+        return await original(self, messages, **kw)
+    monkeypatch.setattr(FakeLlamaRouter, "chat", slow_chat)
+    state, message = await _run("こんにちは", world, _settings(models_dir))
+    assert message.additional_kwargs["response_time"] == {"seconds": 12.3}
+    # The image-tab redirect is an answer too.
+    state, message = await _run("猫の獣人を描いて", world, _settings(models_dir), mode="think")
+    assert message.additional_kwargs["response_time"]["seconds"] >= 0
+
+
+async def test_progress_messages_have_no_response_time(models_dir):
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="rt1")
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    assert "response_time" not in state["messages"][-1].additional_kwargs  # waiting for approval: not an answer
+
+
+async def test_response_time_after_approval_does_not_count_the_wait(models_dir, monkeypatch):
+    import furry_agent.chat_common as cc
+    import furry_agent.code_nodes as cn
+
+    world = World()
+    graph = _hitl_graph()
+    config = _config(world, _settings(models_dir), mode="think", thread="rt2")
+    now = {"t": 1000.0}
+    for module in (chat_graph, cc, cn):
+        monkeypatch.setattr(module.time, "time", lambda: now["t"])
+    state = await graph.ainvoke({"messages": [HumanMessage(content="コードを書いて実行して")]}, config)
+    now["t"] = 5000.0  # the user approves an hour later
+    state = await graph.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
+    assert state["messages"][-1].additional_kwargs["response_time"] == {"seconds": 0.0}
+
+
 async def test_dependencies_get_network_only_for_the_setup_step(models_dir):
     world = World()
     world.code_replies = [CODE_REPLY.replace("COMMAND:", "FILE: requirements.txt\n```text\nrich\n```\nCOMMAND:")]

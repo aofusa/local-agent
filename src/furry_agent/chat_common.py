@@ -78,6 +78,9 @@ class ChatState(MessagesState):
     control: dict[str, Any]
     # The inference model of this run (kind, id, label, thinking), shown under the reply
     model_info: dict[str, Any]
+    # When this message's work began (epoch seconds): set by ingest, and again when a run resumes after the
+    # user's approval, so the response time under a reply never counts the time spent waiting for the user.
+    started_at: float
 
 
 CONTROL_RECORD = "controller_record"
@@ -140,8 +143,9 @@ def make_llm(settings: ChatSettings, timeout_s: float | None = None) -> LlamaRou
 
 def leader_label(settings: ChatSettings) -> str:
     """The router's model as the search and control traces name it."""
-    where = "リモート" if settings.llm_remote_kind else "llama.cpp"
-    return f"{settings.inference_label or 'Qwen3.8 27B abliterated'}（{where}）"
+    if settings.llm_remote_kind:  # the catalog label of a remote entry already says where it runs
+        return settings.inference_label or settings.llm_model
+    return f"{settings.inference_label or 'Qwen3.8 27B abliterated'}（llama.cpp）"
 
 
 def model_info(settings: ChatSettings) -> dict:
@@ -247,9 +251,21 @@ def _is_think(state: ChatState) -> bool:
     return state.get("mode") == THINK
 
 
-def _kwargs(state: ChatState, trace: dict | None = None, *, thinking: bool = False, task: dict | None = None) -> dict:
-    """additional_kwargs of a chat message: the search trace, the run's mode, its thinking and task steps."""
+def response_time(state) -> dict | None:
+    """additional_kwargs.response_time of a finished reply (UI: under the message): seconds since the work began."""
+    started = state.get("started_at")
+    if not started:
+        return None
+    return {"seconds": round(max(0.0, time.time() - float(started)), 1)}
+
+
+def _kwargs(state: ChatState, trace: dict | None = None, *, thinking: bool = False, task: dict | None = None,
+            done: bool = False) -> dict:
+    """additional_kwargs of a chat message: the search trace, the run's mode, its thinking and task steps, and
+    (``done``: the answer or the error that ends the work) its response time."""
     out: dict[str, Any] = {}
+    if done and response_time(state):
+        out["response_time"] = response_time(state)
     if trace:
         out["search_trace"] = trace
     if state.get("mode_info"):
@@ -294,7 +310,7 @@ def _final(state: ChatState, text: str, trace: dict | None = None, *, task: dict
     """The answer message: thinking goes to additional_kwargs.thinking (think mode only), never into content."""
     view = {**state, "thinking": [*(state.get("thinking") or []), *(thoughts or [])]}
     return AIMessage(id=message_id or state["progress_id"], content=text,
-                     additional_kwargs=_kwargs(view, trace, thinking=True, task=task))
+                     additional_kwargs=_kwargs(view, trace, thinking=True, task=task, done=True))
 
 
 def _usage(reply) -> str:
@@ -316,7 +332,7 @@ def _fail(state: ChatState, exc: Exception | str, stage: str | None = None, trac
     prefix = f"［{stage}］" if stage else ""
     message = AIMessage(id=state.get("progress_id") or f"error-{uuid.uuid4()}",
                         content=f"⚠️ 応答できませんでした{prefix}: {exc}",
-                        additional_kwargs=_kwargs(state, trace))
+                        additional_kwargs=_kwargs(state, trace, done=True))
     return {"messages": [message], "error": str(exc), "lock_token": None}
 
 

@@ -46,6 +46,7 @@ from furry_agent import (claim_nodes, claim_verify as cv, code_nodes, control_no
 from furry_agent.bonsai_select import Catalog, Selection, SelectionError, select_model
 from furry_agent.bonsai_worker import Ledger, WorkerError, run_reader
 from furry_agent.chat_common import (CONTROL_RECORD, RESET, ChatState, StageError, _ask, capped, _cleanup, _conf,
+                                     response_time,
                                      _fail, _final, _held, _history, _is_think, _last_human, _leaders, _ledgers,
                                      _llm, _lock, _progress, _prompt, _settings, _text_of, check_router_model,
                                      controlled, end_or_record, leader_label, log, model_info)
@@ -152,6 +153,7 @@ _NOTES = {
 async def ingest(state: ChatState, config: RunnableConfig) -> dict:
     conf = _conf(config)
     progress_id = f"progress-{uuid.uuid4()}"
+    started_at = time.time()
     try:
         # The run's inference model (configurable.inference_model): refreshed here in a thread, read from the cache
         # by the later nodes. An id the host does not offer ends the run; another model is never used instead.
@@ -170,7 +172,7 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
     reset = {"progress_id": progress_id, "error": None, "lock_token": None, "search": {}, "code": {},
              "hits": [RESET], "cards": [RESET], "logs": [RESET], "thinking": [RESET],
              "evidence": [RESET], "claims": [], "claim_audit": [], "verify_error": None,
-             "control": {}, "model_info": model_info(settings)}
+             "control": {}, "model_info": model_info(settings), "started_at": started_at}
     human = _last_human(state)
     if human is None:
         return {**reset, "error": "no input", "messages": [AIMessage(id=progress_id, content="メッセージがありません。")]}
@@ -194,7 +196,8 @@ async def ingest(state: ChatState, config: RunnableConfig) -> dict:
             excerpt = writing.scene_excerpt(artifact["draft"])
             content += f"\n\n画像タブに貼る描写（いまの本文の最後の場面）:\n\n> {excerpt.replace(chr(10), chr(10) + '> ')}"
         return {**reset, "route": {**vars(decision)}, "error": "image_tab",
-                "messages": [AIMessage(id=progress_id, content=content, additional_kwargs={"chat_mode": info})]}
+                "messages": [AIMessage(id=progress_id, content=content, additional_kwargs={
+                    "chat_mode": info, "response_time": response_time(reset)})]}
     if not decision.text:
         return {**reset, "error": "empty", "messages": [AIMessage(id=progress_id, content="内容を入力してください。")]}
     route_state = {**vars(decision), "kind": kind, "claim_verify": settings.claim_verify,
