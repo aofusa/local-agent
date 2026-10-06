@@ -8,8 +8,8 @@ Tor or the sandbox.
     request  {"world": {...}, "persona": {...}, "policy": {"allow_move": false, "allow_say": true, "max_actions": 2},
               "model": "<optional config/host_models.json inference id>"}
     response {"actions": [ActionCommand, ...], "belief": "..."}
-    422      the model's actions break the contract or the policy (a say over 144 characters is never cut here:
-             the model gets one chance to rewrite it, then the turn is refused)
+    422      the model's actions break the contract or the policy, also after one rewrite with the problems named
+             (a say over 144 characters is never cut here and a forbidden move is never silently dropped)
     504      no reply within PRESENCE_TIMEOUT_S (4 s)
 
 The turn does not take ``job_lock``: a 4 s budget cannot wait behind an image generation, and the presence model
@@ -46,6 +46,7 @@ KINDS = ("noop", "say", "look", "move", "stop", "emote_key")
 MOVE_KINDS = ("move", "look")
 REWRITE_JSON = "説明を付けず、JSON オブジェクトだけで書き直せ。"
 REWRITE_SHORT = "say.text が 144 文字を超えた。意味を保って 144 文字以内で書き直し、同じ形の JSON だけを返せ。"
+REWRITE_POLICY = "次の点が契約か policy に反する。直した JSON だけを返せ。"
 
 
 class TurnRefused(ValueError):
@@ -215,9 +216,11 @@ async def run_turn(body: dict, llm, timeout_s: float = TIMEOUT_S) -> dict:
     try:
         actions, belief = check_turn(obj, policy)
     except TurnRefused as exc:
-        if not any("max 144" in e for e in exc.errors):
-            raise
-        messages += [{"role": "assistant", "content": reply.content}, {"role": "user", "content": REWRITE_SHORT}]
+        # One rewrite with the problems named (a say is never cut here and a forbidden move never just dropped:
+        # the model redoes the turn); a second failure is the caller's 422.
+        ask_again = REWRITE_SHORT if any("max 144" in e for e in exc.errors) else REWRITE_POLICY
+        messages += [{"role": "assistant", "content": reply.content},
+                     {"role": "user", "content": "\n".join([ask_again, *exc.errors])}]
         reply = await ask(messages)
         obj = parse_json_object(reply.content)
         if obj is None:

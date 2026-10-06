@@ -95,9 +95,19 @@ def test_too_long_then_rewritten(client):
 
 
 def test_move_with_allow_move_false_is_422(client):
-    client.holder["llm"] = FixedLLM({"actions": [{"kind": "move", "move": {"forward": 0.4, "duration_ms": 600}}]})
+    bad = {"actions": [{"kind": "move", "move": {"forward": 0.4, "duration_ms": 600}}]}
+    client.holder["llm"] = FixedLLM(bad, bad)
     r = client.post("/presence/turn", json=BODY)
     assert r.status_code == 422 and "allow_move" in json.dumps(r.json())
+    assert "allow_move" in client.holder["llm"].calls[1][-1]["content"]  # the rewrite named the problem
+
+
+def test_policy_violation_rewritten_keeps_the_say(client):
+    client.holder["llm"] = FixedLLM({"actions": [{"kind": "say", "say": {"text": "行くね"}},
+                                                 {"kind": "look", "look": {"yaw": 0.3, "duration_ms": 400}}]},
+                                    {"actions": [{"kind": "say", "say": {"text": "行くね"}}]})
+    r = client.post("/presence/turn", json=BODY)
+    assert r.status_code == 200 and [a["kind"] for a in r.json()["actions"]] == ["say"]
 
 
 def test_move_allowed_by_policy(client):
@@ -115,7 +125,7 @@ def test_tool_call_becomes_noop(client):
 
 
 def test_three_actions_is_422(client):
-    client.holder["llm"] = FixedLLM({"actions": [{"kind": "noop"}] * 3})
+    client.holder["llm"] = FixedLLM({"actions": [{"kind": "noop"}] * 3}, {"actions": [{"kind": "noop"}] * 3})
     assert client.post("/presence/turn", json=BODY).status_code == 422
 
 
