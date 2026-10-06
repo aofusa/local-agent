@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.13.0 — 別ホストの LLM（リモートの llama.cpp、OpenAI 互換サービス）、UI の表示崩れの修正と応答時間
+
+- 別ホストの推論モデル（`docs/remote-llm-design.md`）: `config/host_models.json` の推論モデルに `endpoint`（`kind` = `llamacpp` / `openai`、`url`、`model`、任意の `api_key`）を書くと、チャットタブと `POST /coder/turn` がその接続先を呼ぶ（`llm_client.RemoteLLM`）。接続先の情報はカタログに直接書き、`.env` と `.env.example` は変えない。
+  - `GET /models` は接続先の `/models` を聞き、つながらない・認証を拒否した・モデルが無いときは理由つきで使えないと返す。使える項目には `remote`（種類、ホスト、モデル名）。鍵は返さない。
+  - この端末のメモリを使わないので unload しない。検索で計画したリモートのモデルが批評と統合も行い、代理リーダーを起動しない（reader にこの端末のメモリが回る）。
+  - `openai` には llama.cpp 固有の `chat_template_kwargs` を送らず、JSON スキーマは非 strict で頼む。
+  - つながらなければ理由を返し、ローカルのモデルにも別の接続先にも替えない。画像のタグ生成はこの端末のルータのまま。
+  - 同梱の 2 項目は確認機（Mac）のルータの Bonsai 2 27B abliterated（`llamacpp` と `openai`）。Mac の llama-server はループバックのまま、SSH のポート転送（`127.0.0.1:18090`）で届かせた。
+- 応答時間: チャットタブの回答とエラーに `additional_kwargs.response_time`（秒）を付け、UI が応答の下に「応答時間 1 分 08 秒」の形で出す。ホストで計り、承認（コード実行・次の章）で待った時間は含めない。
+- UI の表示崩れ（表示だけ。送る内容と操作は変えていない）: スマートフォンで本体の列が画面より広がり、送信ボタンとモデル名が切れていた（グリッドの `1fr` 列が中身の最小幅まで広がっていた）。入力欄の操作の行を折り返し、会話中もタブを出し（以前は `md` 未満で隠れていた）、開始画面のタブと GitHub のリンクの重なり、文字ごとに折り返すラベル、表・コード・長い URL のはみ出し、画面の外に出るモデルの一覧を直した。タッチ画面ではコピー / 再生成を常に出し、高さは `100dvh`。
+- テスト: `tests/test_remote_llm.py`（カタログの検証、`RemoteLLM` の要求、`/coder/turn`、`GET /models`、プリセットに入らないこと）、チャットタブのリモートのリーダーと応答時間（`tests/test_chat_graph.py`）。pytest 670 件。
+- 確認（Windows の ROG Ally X、2026-10-06〜07。リモートは Mac の llama-server のルータ、SSH のポート転送経由）:
+  - リモート: `GET /models` で 2 項目が使える。チャット（`llamacpp`、速い）、`/coder/turn` の tool calling（`openai`）、Tor 検索（`llamacpp`・速い、`mode=resident` で代理リーダーなし、主張の突き合わせまで）、深い検索（`openai`・思考、4 ラウンド・参照 8 件・検証と監査まで）。どれもこの端末のルータには何も載らない。cirka（`CIRKA_INFERENCE_MODEL`）でファイルの作成と実行。鍵付きの接続（鍵なしは 401）。
+  - デグレ確認: 画像（既定の yiffInHell VANTABLACK、テキストのみ）はタグが JSON（`split mode=json`）、KSampler の前にルータが unload され、ComfyUI の output と `outputs/` に保存。Tor 検索（既定の Qwen、速い）は計画 → unload → reader → 代理リーダーの統合 → 主張の突き合わせ、後始末でルータと検索用 llama-server が残らない。cirka（既定の Qwen）はファイルの作成からコマンドの実行まで完了。
+  - UI: この端末のヘッドレス Edge で 1440 / 1024 / 390 / 360 px の各画面（開始画面、会話、検索、コード、モデルの一覧、履歴）を撮り、横にはみ出す要素が無いこと。別ホスト（Mac）の Chromium で iPhone 13 の大きさと 1280 px を開き、送信ボタンが画面内にあり、一覧から Mac のモデルを選んで送ると答えと応答時間が出ること。
+  - 確認中、利用者のアプリ（VRChat、約 6GB）が動いていてメモリが少なく、ローカルの 27B の 1 ターンが 9 分ほどかかった（タグ生成は 17 分）。メモリ不足の時間帯の検索 1 件は reader が載らず理由つきで止まった（既存の動作。空いてから再実行して通った）。
+  - 変えていない cirka の既知の表示: Windows の Python の出力（cp932）の日本語が文字化けして見える（モデルはファイルの中身から正しく答える）。
+
 ## v0.12.0 — 推論モデル・画像モデルの選択、Krea 2（Wulver）と Anima、macOS（MLX 優先）
 
 - モデルの一覧 `config/host_models.json`（`docs/host-model-selection-design.md`）: 推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 8 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix XL（Noob EPS 11）、Indigo Furry Mix Anima、Chroma1-HD、Wulver）。モデルごとにパラメータを持つ（推論: context、思考の有無、llama-server のサンプリング。画像: steps、cfg、サンプラー、スケジューラ、サイズ、quality prefix、negative、LoRA）。値は各モデルの配布ページの推奨から決め、出典を `docs/configuration.md` に書いた。SDXL のモデルはすべて以前の `LORAS` の LoRA を使う。
