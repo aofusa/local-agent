@@ -150,3 +150,15 @@ def test_bad_body_is_400(client):
 def test_prompt_file_exists_and_names_the_rules():
     text = presence.system_prompt()
     assert "144" in text and "allow_move" in text and "persona.name" in text
+
+
+async def test_keep_alive_reuses_one_client():
+    from furry_agent.llm_client import RemoteLLM
+
+    llm = presence.keep_alive(RemoteLLM("http://127.0.0.1:9/v1", "m", 5, kind="llamacpp"))
+    async with llm._http(5) as a:
+        pass
+    async with llm._http(5) as b:
+        pass
+    assert a is b and not a.is_closed
+    await a.aclose()
