@@ -10,6 +10,8 @@ address=""
 command -v node >/dev/null || die "Node.js 20 以上が必要です（brew install node）"
 api="http://$address:2024"
 export NEXT_PUBLIC_API_URL="$api" NEXT_PUBLIC_ASSISTANT_ID="agent"
+# Next.js sends anonymous usage data during builds by default; this app makes no outside connection but search.
+export NEXT_TELEMETRY_DISABLED=1
 cd "$REPO_ROOT/agent-chat-ui"
 echo "agent-chat-ui -> LangGraph $api (assistant: agent)"
 [ -d node_modules ] || npx --yes pnpm@10.5.1 install --frozen-lockfile
