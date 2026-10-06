@@ -30,6 +30,7 @@ LAN 内の別の PC やスマートフォンのブラウザから日本語の指
 | [docs/setup.md](docs/setup.md) | セットアップの詳細とオプション、macOS、モデルの置き方 |
 | [docs/usage.md](docs/usage.md) | 使い方（モデルの選択、画像タブ、チャットタブ、cirka） |
 | [docs/configuration.md](docs/configuration.md) | `.env` の設定、モデルの一覧とパラメータ |
+| [docs/models.md](docs/models.md) | 採用モデルと選定の理由・評価、採らなかったもの |
 | [docs/architecture.md](docs/architecture.md) | 構成とファイルの配置 |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | トラブルシューティングと既知の制約 |
 | [AGENTS.md](AGENTS.md) | 開発者向けの規則と構成（仕様は [docs/specification.md](docs/specification.md)） |
