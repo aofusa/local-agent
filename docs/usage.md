@@ -1,6 +1,6 @@
 # 使い方
 
-README の「実行」の補足です。起動の詳細、画像タブ、チャットタブ、CUI（cirka）の使い方をまとめます。設定の一覧は [configuration.md](configuration.md)、困ったときは [troubleshooting.md](troubleshooting.md)。
+README の「実行」の補足です。起動の詳細、モデルの選択、画像タブ、チャットタブ、CUI（cirka）の使い方をまとめます。設定の一覧は [configuration.md](configuration.md)、困ったときは [troubleshooting.md](troubleshooting.md)。
 
 ## 起動の詳細
 
@@ -33,6 +33,30 @@ CUI の cirka 向けの `POST /coder/turn` は LangGraph（`:2024`）と一緒�
   キャッシュがあると同じプロセスでの 2 回目以降の生成が単色・ノイズの画像になりました（[troubleshooting.md › 調整の記録](troubleshooting.md#調整の記録参照画像)）。
 - モデルの事前ロードは不要です。各生成の最初にルータが 27B を読み込み（約 20 秒）、タグ生成後に unload します。チャットタブで使ったあとは、300 秒使われなければ sleep してメモリを返します。
 - 止めるときは各ウィンドウで Ctrl+C を押します。
+
+### macOS
+
+```bash
+scripts/start-all.sh      # Tor / LLM ルータ / ComfyUI / LangGraph / agent-chat-ui をバックグラウンドで起動（ログは logs/*.out）
+scripts/doctor.sh         # 設定と待受（ループバックのままか）を確認
+scripts/stop-all.sh       # start-all.sh で起動したものを止める
+```
+
+個別に起動するときは `scripts/start-llm.sh`、`start-comfyui.sh`、`start-langgraph.sh`、`start-ui.sh [--host <IP>]`、`start-tor.sh [--stop]`（前面で動きます）。LLM のルータは、MLX 版を入れたモデル（`setup-mlx.sh`）があれば MLX 優先のルータ（`furry_agent.mlx_router`。llama.cpp のルータと同じ API で、MLX の節は `mlx_lm`、GGUF の節は llama-server が動かす）、無ければ llama-server のルータです。macOS のファイアウォールが LangGraph（python）と UI（node）の着信を聞いてきたら許可します。
+
+## モデルの選択（v0.12.0）
+
+入力欄の送信ボタンの左に、いまのモデル名が出ます（Claude や Gemini のモデル選択と同じ形）。押すとホストの一覧（`GET http://<LAN IP>:2024/models`）が開き、選ぶと次の送信から効きます（実行中の応答は止めません）。
+
+- **チャットタブ**は推論モデル（Qwen 3.8 27B abliterated / Bonsai 2 27B abliterated）、**画像タブ**は画像モデル（yiffInHell 3 種、Rekemono、Indigo Furry Mix Anima、Chroma1-HD、Wulver）の一覧です。2 つは別々で、チャットで Bonsai を選んでも画像のモデルは変わりません。
+- 選択は会話（スレッド）ごとに覚えます（同じブラウザのタブを再読み込みしても残る）。新しいチャットはホストの既定（`（既定）` の印）で始まります。
+- 使えないモデル（ファイルが無い、`HOST_MODELS_DISABLE`）は一覧に残り、理由つきで選べなくなります。
+- 各応答の下に、その応答を作ったモデル名が出ます（途中で切り替えても、どの応答がどのモデルか分かる）。
+- Bonsai 2 27B は思考を表示しないモデルです。思考モードでも本文だけを返し、応答の下にその旨が出ます。文脈は 8192 トークンで、Qwen（4096）より長い会話が入ります。
+- 画像のタグ生成（ComfyUI のワークフロー内の LLM）は、選んだ推論モデルではなくルータの `LLM_MODEL` です。
+- 本文のモデル名（「Chroma で」「Bonsai で」）では切り替わりません。
+
+cirka は `/model` と `/image-model` で選びます（下の「CUI（cirka）」）。一覧と各モデルのパラメータ（steps、cfg、サンプラー、サイズ、LoRA、context、温度など）と出典は [configuration.md › モデルの一覧とパラメータ](configuration.md#モデルの一覧とパラメータconfighost_modelsjsonv0120) にあります。
 
 ## 画像タブ
 
@@ -79,27 +103,23 @@ CUI の cirka 向けの `POST /coder/turn` は LangGraph（`:2024`）と一緒�
 
 ### LoRA
 
-`.env` の `LORAS` に書いた LoRA を、すべての生成でチェックポイントの直後に順に適用します。空なら使いません。
+画像モデルごとに `config/host_models.json` の `loras`（`"<ファイル>:<強度>"` の配列）を、チェックポイントの直後に順に適用します。SDXL のモデル（yiffInHell 3 種、Rekemono）は `novabeast xl v1 rank64 pony.safetensors:1.0` を使います（v0.11 までの `.env` の `LORAS` の値。`LORAS` はもう読みません）。
+強度は 0 より大きく 2 以下で、CLIP 強度も同じ値です。ComfyUI の `models\loras` に無い LoRA があると、そのモデルは一覧で使えないと表示され、選んで送ると投入前にエラーを返します。トリガーワードが必要な LoRA は指示に含めてください。
 
-```
-LORAS=KemonoStyleAV1.safetensors:0.8, CiviFur-30:0.6:0.5
-```
+### 画像モデル（系統ごとの違い）
 
-`名前[:モデル強度[:CLIP 強度]]` をカンマ区切りで並べます（拡張子と大文字小文字は省略・無視できます。強度の既定は 1.0、範囲 -2〜2）。
-ComfyUI の `models\loras` に無い名前があると投入前にエラーを返します。変更後は LangGraph を再起動してください。トリガーワードが必要な LoRA は指示に含めてください。
+画像モデルは送信ボタン横のピッカーで選びます（上の「モデルの選択」）。系統ごとにワークフロー（`workflows/<系統>/`）とプロンプトが違います。どの系統でも LLM がタグか説明文を返し、LLM を unload してからモデルを読み込みます（`ckpt` の eject ゲート）。
 
-### Chroma1-HD（モデルの切り替え）
+| 系統 | モデル | LLM の出力 | ローダー | 参照画像 |
+|---|---|---|---|---|
+| `sdxl` | yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono | Danbooru / e621 タグ列（`prompts/system_furry_tags.txt`） | チェックポイント | 4 種の役割（上記） |
+| `anima` | Indigo Furry Mix Anima | Danbooru タグ列。先頭に `masterpiece, best quality, very aesthetic, score_8, furry` | 拡散モデル + Qwen3 0.6B（CLIPLoader `stable_diffusion`）+ qwen_image_vae | 元画像 1 枚の img2img だけ |
+| `flux` | Chroma1-HD | 英語の説明文（`prompts/system_chroma_prose.txt`） | 拡散モデル（fp8）+ T5-XXL fp8 + Flux VAE | 元画像 1 枚の img2img だけ |
+| `krea2` | Wulver (Krea 2) | 英語の説明文 60〜120 語、背景も書く（`prompts/system_krea2_prose.txt`） | 拡散モデル（fp8）+ Qwen3-VL-4B fp8（CLIPLoader `krea2`）+ qwen_image_vae | 元画像 1 枚の img2img だけ |
 
-既定は yiffInHell（SDXL、Danbooru タグ）です。Chroma1-HD（Flux.1-schnell 由来、8.9B、Apache-2.0）は `.env` で切り替えます。
+`anima` / `flux` / `krea2` でポーズ・画風・キャラクター・マスクの画像を添えると、生成せずに理由（モデル名つき）を返します（ControlNet / IP-Adapter はこれらのモデルで未検証のため）。Wulver は Turbo 版なので 8 ステップ・CFG 1 で、negative は効きません。速さの目安（確認済み構成 Radeon 890M）: SDXL 約 4〜5 分、Anima 約 4 分、Wulver 約 12 分（LLM のロードを含む）。
 
-```
-COMFY_MODEL_FAMILY=flux              # 空または sdxl なら従来の SDXL
-CKPT_NAME=chroma_v10HD.safetensors
-```
-
-変更後は LangGraph を再起動します（`start-langgraph.ps1`）。チャットの文面でモデルが変わることはありません。元に戻すときは `COMFY_MODEL_FAMILY=sdxl`、`CKPT_NAME=yiffInHell_yihVANTABLACK.safetensors` にします。
-
-Chroma 経路の違い:
+Chroma1-HD の詳細:
 
 | 項目 | SDXL（yiffInHell） | Chroma1-HD |
 |---|---|---|
@@ -108,13 +128,13 @@ Chroma 経路の違い:
 | サンプラー | 832×1216、steps 28、cfg 5.5、euler_ancestral / normal | 1024×1024（`縦長` 832×1216 / `横長` 1216×832、上限約 1MP）、steps 28、cfg 3.5、euler / beta、ModelSamplingAuraFlow shift 1.0 |
 | negative | 品質タグ | 短い英語（空にはしない） |
 | 参照画像 | 4 種の役割（上記） | **修正する元画像 1 枚の img2img だけ**（denoise 0.45）。ポーズ・画風・キャラクター・マスクの画像は生成せず理由を返す（Flux 用 ControlNet / IP-Adapter は Chroma で未検証のため） |
-| LoRA | `LORAS` | `CHROMA_LORAS`（SDXL の LoRA は Chroma に合わないため別） |
+| LoRA | モデルの `loras`（novabeast） | モデルの `loras`（既定はなし。SDXL の LoRA は Chroma に合わない） |
 
 モデルファイルの既定値（`workflows/maps/flux.json`）と、`.env` での差し替え:
 
 | 部品 | 既定 | 置き場所 | `.env` |
 |---|---|---|---|
-| 拡散モデル | `chroma_v10HD.safetensors`（BF16） | `models\diffusion_models` または `models\checkpoints` | `CKPT_NAME` / `CHROMA_UNET_NAME`（`CKPT_NAME` が空のとき） |
+| 拡散モデル | `chroma_v10HD.safetensors`（BF16） | `models\diffusion_models` または `models\checkpoints` | 指定しない（`config/host_models.json` の `chroma-hd` の `ckpt`） |
 | fp8 変換済み | `chroma_v10HD_fp8_e4m3fn.safetensors`（約 8.3GB） | `models\diffusion_models`（`setup-comfyui-chroma.ps1` が作る） | 指定不要。あれば `ckpt` が自動で使う |
 | 読み込み精度 | `fp8_e4m3fn` | — | `CHROMA_WEIGHT_DTYPE`（`default` で BF16 のまま。32GB 以上の RAM 向け） |
 | テキストエンコーダ | `t5xxl_fp8_e4m3fn.safetensors` | `models\text_encoders` | `CHROMA_TEXT_ENCODER` |
@@ -336,7 +356,19 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 
 確認は矢印キー（または数字）で選ぶメニューです: はい / はい、以後この種類は確認しない / いいえ（理由がモデルに伝わる）/ 依頼を止める（Esc）。`-p` の 1 回実行は対話できないので、確認が要る操作は実行しません。どのモードでも、ワークスペースの外のパス（`..`、外を指すシンボリックリンク）と秘密ファイル（`.env`、`*.pem`、`*.key`、`id_rsa`、`credentials*` など）は扱いません。ツールの結果に鍵らしい文字列があれば `[redacted]` にしてから送ります（完全ではありません）。
 
-スラッシュコマンド: `/help`、`/status`、`/host`、`/mode`、`/auto`、`/default`、`/accept-edits`、`/plan`、`/cd`、`/undo`（直前の編集を戻す）、`/compact`（会話を要約して文脈を空ける）、`/search`、`/image`、`/todos`、`/resume`、`/forget`（いまのセッションのログを消す）、`/logo`、`/clear`、`/quit`。
+モデルの選択（v0.12.0。ホストの `GET /models` の id を送るだけで、モデルの実体は知りません）:
+
+```
+/model                                 いまの推論モデルと候補（使えないものは理由つき）
+/model bonsai-2-27b-abliterated        推論モデルを切り替える（次のターンから。/coder/turn と /search に効く）
+/image-model wulver                    画像モデルを切り替える（/image と image_generate に効く）
+/model qwen3.8-27b-abliterated --save  ユーザー設定にも保存（--project で .cirka/config.toml）
+/models                                ホストの一覧をそのまま表示
+```
+
+id は一覧と完全一致で指定します（`qwen` や表示名では切り替えません）。使えない id はホストの理由を出し、選択は変えません。入力欄の下に `model:<表示名>  image:<表示名>` が出ます。起動時の値は「セッション（`--resume`）> 環境変数（`CIRKA_INFERENCE_MODEL` / `CIRKA_IMAGE_MODEL`）> 設定ファイル（`inference_model` / `image_model`）> ホストの既定」の順で決まります。文脈の大きさは選んだモデルに合わせます（Bonsai は 8192）。
+
+スラッシュコマンド: `/help`、`/status`、`/host`、`/mode`、`/model`、`/image-model`、`/models`、`/auto`、`/default`、`/accept-edits`、`/plan`、`/cd`、`/undo`（直前の編集を戻す）、`/compact`（会話を要約して文脈を空ける）、`/search`、`/image`、`/todos`、`/resume`、`/forget`（いまのセッションのログを消す）、`/logo`、`/clear`、`/quit`。
 
 画面（Claude Code に倣った形）:
 
@@ -350,7 +382,7 @@ $ cirka --resume                # このディレクトリの直前のセッシ�
 
 ### 注意
 
-- ホストの 27B は context 4096 トークン・約 2 トークン/秒です。cirka は毎ターン、規則・環境・タスク一覧・会話をこの窓に収めます（古いツール結果は 1 行の要約に、さらに溢れたら古いやり取りから省き、ホストが「入らない」と返したら詰めて 1 回だけ送り直す）。1 ターンに数分かかるので、依頼は小さく区切ってください。
+- ホストの 27B（Qwen）は context 4096 トークン・約 2 トークン/秒です（Bonsai 2 27B は 8192 トークンで速い）。cirka は毎ターン、規則・環境・タスク一覧・会話をこの窓に収めます（古いツール結果は 1 行の要約に、さらに溢れたら古いやり取りから省き、ホストが「入らない」と返したら詰めて 1 回だけ送り直す）。1 ターンに数分かかるので、依頼は小さく区切ってください。
 - ホストの処理は共有ロックで直列です。画像タブやチャットタブが動いているあいだ、cirka は「待っています」と表示して待ちます（エラーにしません）。
 - 認証はありません。読んだファイルの断片とコマンドの出力が LAN 上のホストへ送られます。信頼できるネットワークだけで使ってください。
 

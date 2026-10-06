@@ -24,9 +24,13 @@
 | 「この環境の ComfyUI に無いノードがあります」 | `setup-comfyui-refs.ps1` を実行して ComfyUI を再起動。`doctor.ps1` の reference nodes を確認 |
 | 「この環境の ComfyUI に無いノードがあります: FurryJaDiffusionLoaderAfterEject」 | Chroma 対応後に ComfyUI を再起動していない。`start-comfyui.ps1` で起動し直す |
 | 「Chroma1-HD のモデルファイルが ComfyUI に見つかりません」 | `setup-comfyui-chroma.ps1` を実行。拡散モデルは手動で `models\diffusion_models` か `models\checkpoints` に置く |
-| 「… は Chroma1-HD のモデルです」 | `CKPT_NAME` だけを Chroma にした。`COMFY_MODEL_FAMILY=flux` も設定して LangGraph を再起動する |
-| Chroma で「ポーズ ControlNet 未対応」などと返る | Chroma 経路は元画像 1 枚の img2img だけ対応。ポーズ・画風の参照は `COMFY_MODEL_FAMILY=sdxl` で使う |
-| 「LoRA が ComfyUI に見つかりません」 | `.env` の `LORAS` の名前を `tools\comfyui\models\loras` のファイル名に合わせる。ファイルを置いたら `setup-comfyui.ps1` を再実行しなくても読める |
+| モデルの一覧で「使えません: ComfyUI にファイルがありません」 | そのモデルのファイル（`config/host_models.json` の `ckpt`、テキストエンコーダ、VAE、LoRA）を `tools\comfyui\models` に置くか、`setup-image-models.ps1` / `.sh` を実行して ComfyUI を再起動する |
+| 「［モデル選択］… はホストのモデル一覧にありません」 | 古い id（v0.11 以前の名前）や表示名を送っている。画面で選び直すか、cirka は `/model` で候補を見て id を指定する |
+| 推論モデルが「LLM ルータのプリセットにありません」 | GGUF が無いか、プリセットが古い。`setup-search-models`（Bonsai）や `setup-llm` を再実行してルータを再起動する |
+| Chroma / Anima / Krea 2 で「ポーズ ControlNet 未対応」などと返る | これらの系統は元画像 1 枚の img2img だけ対応。ポーズ・画風・キャラクターの参照は SDXL のモデルを選ぶ |
+| 「LoRA が ComfyUI に見つかりません」 | 画像モデルの `loras` の名前を `tools\comfyui\models\loras` のファイル名に合わせる（拡張子と大文字小文字は無視する） |
+| （macOS）`setup-*.sh` で「hf download に失敗しました」 | `hf` を入れる（`brew install huggingface-cli`）。ゲート付きのモデルは `hf auth login`。空きディスクも確認する（`df -h`） |
+| （macOS）他ホストのブラウザから開けない | システム設定 → ネットワーク → ファイアウォールで python（LangGraph）と node（UI）の着信を許可する。`scripts/start-ui.sh --host <この Mac の LAN IP>` |
 | `setup-comfyui.ps1` で「… がありません」（チェックポイント・LoRA） | `tools\comfyui\models\<checkpoints / loras>` に置く。以前の ComfyUI のフォルダ（Comfy Desktop、`Documents\ComfyUI\models`）以外にあるなら `-ModelsDir <そのフォルダ>` で取り込む |
 | 「hf download で取得できませんでした」 | ネットワークか Hugging Face の認証。ゲート付きのモデルは `hf auth login` か環境変数 `HF_TOKEN`。取得できないときは直接ダウンロードに切り替わる |
 | 参照画像を使った 2 回目以降の画像が単色やノイズになる | ComfyUI が `--cache-none` なしで起動している。`doctor.ps1` で確認し、`start-comfyui.ps1` で起動し直す |
@@ -59,7 +63,9 @@
 
 - **動画入力は対象外**: ComfyUI-VideoHelperSuite（VHS）を前提にした経路は未実装です。動画を送るとチャットにその旨を返します（在庫の agent-chat-ui も動画の添付を受け付けません）。
 - InstantID / PuLID（人の顔向けの同一性）は使いません。キャラクター参照は IP-Adapter Plus と Vision タグで行います。
-- 登録済みの系統は `sdxl` と `flux`（Chroma1-HD）だけです（Flux Dev 本家、SD3 などは未登録）。
+- 登録済みの系統は `sdxl`、`flux`（Chroma1-HD）、`krea2`（Krea 2）、`anima`（Anima）です（Flux Dev 本家、SD3 などは未登録）。
+- 画像のタグ生成の LLM は、選んだ推論モデルではなくルータの `LLM_MODEL` です（ワークフローの `llm_backend`。タグ生成まで選択に合わせるのは対象外）。
+- macOS: Krea 2（Wulver）の fp8 の重みは PyTorch の MPS では計算できない型のため、Mac では確認していません（Windows で確認）。MLX はテキスト専用（mlx-lm）なので、MLX で動かす推論モデルは参照画像の Vision（mmproj）に使えません。参照画像を使うときは GGUF + mmproj のモデルをタグ生成に使います。
 - Chroma1-HD 経路は、ポーズ・画風・キャラクター参照とマスクに未対応です（Flux 用 ControlNet Union Pro / Redux / IP-Adapter の Chroma での動作を確認していないため。作業指示書 §2.4）。GGUF 量子化の読み込みにも未対応です。
 - 役割推定は LLM ではなくルール（日本語のキーワードと序数）です。画像タブの LangGraph は LLM を呼ばない（AGENTS.md）ためです。
 - 認証なし。LAN 内の開発用途のみ。チャットタブの検索も LAN から誰でも使えます（画像タブと同じリスク）。

@@ -4,7 +4,7 @@
 
 ## 現状
 
-フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）、cirka の auto モード（既定）・Claude Code に倣った画面・`docs/logo` のロゴ（v0.8.0。ソースはクライアント側 CUI として `client/`）、LM Studio をやめて llama.cpp のルータで 27B を動かすことと、llama.cpp と ComfyUI をセットアップが `tools/` に自前で導入すること（`docs/llamacpp-router-design.md`、v0.11.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。導入と起動の最小手順は `README.md`、詳細は `docs/setup.md` / `docs/usage.md` / `docs/configuration.md` / `docs/architecture.md` / `docs/troubleshooting.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
+フェーズ 1（テキスト、参照画像 0〜2 枚）と、役割付き複数参照画像（0〜4 枚。キャラクター / ポーズ / 画風 / 元画像 / マスク）、LoRA、Chroma1-HD 系統（`docs/chroma-hd-support-work-instruction.md`）、画像 / チャットのタブとチャットタブの Tor 経由検索（`docs/chat-search-tor-bonsai-work-instruction.md`）、チャットタブの深い検索・文章・コードと Docker サンドボックス・速い / 思考 / 自動（`docs/chat-deep-search-creative-sandbox.md`、v0.5.0）、検索の回答の主張単位の検証（`docs/claim-verification-design.md`、v0.6.0。同じ版のローカル文書 `/docs` は v0.8.0 で削除した）、チャットタブの自律モード（制御ループ、`docs/autonomous-controller-design.md`）と CUI `cirka` および `POST /coder/turn`（`docs/locus-cui-design.md`、v0.7.0）、cirka の auto モード（既定）・Claude Code に倣った画面・`docs/logo` のロゴ（v0.8.0。ソースはクライアント側 CUI として `client/`）、LM Studio をやめて llama.cpp のルータで 27B を動かすことと、llama.cpp と ComfyUI をセットアップが `tools/` に自前で導入すること（`docs/llamacpp-router-design.md`、v0.11.0）、ホストのモデル一覧（`config/host_models.json`）から Web と cirka が推論モデル・画像モデルを選ぶことと、モデルごとのパラメータ、Krea 2（Wulver）と Anima（Indigo Furry Mix Anima）の画像系統、macOS（Apple silicon、MLX 優先、`scripts/*.sh`）への対応（`docs/host-model-selection-design.md`、v0.12.0）は実装済みで、他ホストのブラウザからの動作も確認済みである。導入と起動の最小手順は `README.md`、詳細は `docs/setup.md` / `docs/usage.md` / `docs/configuration.md` / `docs/architecture.md` / `docs/troubleshooting.md` にある。動画入力（VHS）は未実装で、対象外としている。変更を加えるときも、このファイルと設計書の制約に従う。
 
 ## 目的
 
@@ -31,6 +31,7 @@
 | `docs/claim-verification-design.md` | 検索の回答を主張単位で出典と照らす段（抽出・判定・統合・監査・削除）。末尾に実装記録 |
 | `docs/autonomous-controller-design.md` | チャットタブの自律モード（思考モードの複合依頼で、27B が検索・文章・コード・画像案内を選び直す制御ループ）。末尾に実装記録 |
 | `docs/locus-cui-design.md` | CUI `cirka`（設計書の作業名は locus）と、そのモデルゲート `POST /coder/turn`。末尾に実装記録 |
+| `docs/host-model-selection-design.md` | ホストのモデル一覧（`config/host_models.json`、`GET /models`）からの推論モデル・画像モデルの選択、Web のピッカーと cirka の `/model`・`/image-model`、macOS 対応。末尾に実装記録 |
 | `docs/setup.md` / `usage.md` / `configuration.md` / `architecture.md` / `troubleshooting.md` / `third-party-licenses.md` | 利用者向けの詳細（v0.11.0 で README から分けた）。セットアップとモデルの探し方、使い方、`.env`、構成と UI の変更点とログ、トラブルと既知の制約、取得物のライセンス。README は概要・動作環境・インストール・実行・ライセンスだけにする |
 
 ComfyUI と LLM サーバの呼び出し順、ノード ID、プロンプト契約、メモリ上の制約がこのファイルと設計書で食い違う場合は、設計書を優先する。入口、待受、UI、他ホストから画像が見えることに食い違う場合は、このファイルを優先する。どちらにも書かれていない食い違いを見つけたら、実装を進めず利用者に確認する。曖昧な箇所を埋めるために、別の連携方式へ乗り換えない。
@@ -83,11 +84,11 @@ LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成�
 
 ## 待受と到達範囲
 
-この端末は Windows である。設計書の対象機は ROG Ally X 級（共有メモリ 24GB 級）である。v0.11.0 から、llama.cpp（PrismML fork の Vulkan 版）と ComfyUI はセットアップスクリプトが `tools/` に導入し（`setup-llamacpp.ps1`、`setup-llm.ps1`、`setup-comfyui.ps1`）、`start-llm.ps1` / `start-comfyui.ps1`（`start-all.ps1`）が起動する。LM Studio と既存の ComfyUI のインストールは使わない。
+この端末は Windows である。設計書の対象機は ROG Ally X 級（共有メモリ 24GB 級）である。v0.12.0 から macOS（Apple silicon、確認は M4・24GB）でも同じ構成で動く: スクリプトは `scripts/*.sh`（`lib/common.sh`）、llama.cpp は PrismML fork の macOS arm64（Metal）版、ComfyUI は PyTorch の MPS。LLM は MLX 版があるモデルを MLX で動かし（`setup-mlx.sh`、ルータは `furry_agent.mlx_router`）、無いモデルは llama-server で動かす。待受と到達範囲は下の表のとおりで OS によらない。v0.11.0 から、llama.cpp（PrismML fork の Vulkan 版）と ComfyUI はセットアップスクリプトが `tools/` に導入し（`setup-llamacpp.ps1`、`setup-llm.ps1`、`setup-comfyui.ps1`）、`start-llm.ps1` / `start-comfyui.ps1`（`start-all.ps1`）が起動する。LM Studio と既存の ComfyUI のインストールは使わない。
 
 | プロセス | 待受 | 誰がアクセスするか |
 |---|---|---|
-| llama.cpp ルータ（llama-server --models-preset） | `127.0.0.1:8080`（`LLM_PORT`） | この端末の ComfyUI、LangGraph（チャットタブと `/coder/turn`）だけ。モデルは要求時に子プロセスで載せ、unload で止める |
+| llama.cpp ルータ（llama-server --models-preset。macOS で MLX を使うときは `furry_agent.mlx_router`、同じ API） | `127.0.0.1:8080`（`LLM_PORT`） | この端末の ComfyUI、LangGraph（チャットタブと `/coder/turn`、`/models`）だけ。モデルは要求時に子プロセスで載せ（一度に 1 つ）、unload で止める |
 | ComfyUI | `127.0.0.1:8188` | この端末の LangGraph だけ |
 | LangGraph | 他ホストから到達できるアドレス。開発時の既定ポートは `2024` | agent-chat-ui、および他ホスト |
 | agent-chat-ui | 他ホストから到達できるアドレス。開発時の既定ポートは `3000` | 利用者のブラウザ |
@@ -109,7 +110,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 詳細、システムプロンプトの要件、失敗時の切り分け、フェーズ順は設計書に従う。実装時にずらしやすい点だけここに置く。
 
 - LLM は llama.cpp のルータ（llama-server のルータモード、プリセット `tools/llm/models.ini`）上の Qwen3.8 27B abliterated。画像入力にはテキスト GGUF に加え `mmproj` をロードする。API は `http://127.0.0.1:8080/v1`（`LLM_URL`）、モデル名はプリセットの節 `qwen3.8-27b-abliterated`（`LLM_MODEL`）。thinking は既定で無効（プリセットの `reasoning = off`。チャットタブの思考モードだけ `chat_template_kwargs` で有効にする）。
-- 画像生成は ComfyUI 上の furry 系チェックポイント。既定ファイル名は `yiffInHell_yihVANTABLACK.safetensors`。環境変数 `CKPT_NAME` で差し替える。
+- 画像生成は ComfyUI 上の furry 系モデル。使えるモデルは `config/host_models.json` の `image` に並べ（ファイル名、系統、LoRA、サンプラーのパラメータ）、実行ごとに `configurable.image_model` の id で選ぶ（無指定は `DEFAULT_IMAGE_MODEL`、既定は `yiffinhell-vantablack` = `yiffInHell_yihVANTABLACK.safetensors`）。`CKPT_NAME`・`COMFY_MODEL_FAMILY`・`LORAS` は読まない。本文のモデル名（「Chroma で」）では切り替えない。
 - 24GB 級の共有メモリでは Q4 の 27B がページングで実用にならないため、既定ではセットアップが同じモデルを IQ3_M に再量子化して使う（`scripts/setup-llm.ps1`、`docs/setup.md`「メモリと LLM の量子化」）。元の GGUF と SHA-256 は `config/llm_model.json`。プリセットは `load-mode = mmap`（共有メモリの iGPU では無いと読み込みが `ErrorOutOfDeviceMemory` になる）。
 - 27B とチェックポイントは同時常駐しない。順序は、LLM がタグを返す、ルータから unload する（`eject` = `FurryJaEjectLLM`、`POST /models/unload` と `GET /models` での確認）、その後に CheckpointLoader と KSampler、で固定する。eject の前に KSampler へ進めたら失敗である。
 - ComfyUI プロセス内に GGUF を載せない。ローカル LLM の実行は llama.cpp の llama-server（別プロセス）だけが行う。
@@ -120,13 +121,13 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 ```
 
 - 分割に失敗してもリトライしない。生文字列を positive にし、negative は固定の画質タグにして生成まで進む。
-- テキストだけのときは Empty Latent、denoise 1.0。参照画像がある img2img の初期 denoise は 0.45。解像度の初期値は 832×1216。KSampler の初期値は steps 28、cfg 5.5、euler ancestral、normal。batch は 1。
+- テキストだけのときは Empty Latent、denoise 1.0。参照画像がある img2img の初期 denoise は 0.45。解像度の初期値は 832×1216。KSampler の初期値は steps 28、cfg 5.5、euler ancestral、normal。batch は 1。既定の yiffInHell VANTABLACK はこの値のまま（テンプレートの値と同じ）で、ほかのモデルは `config/host_models.json` の `params`（steps、cfg、sampler_name、scheduler、width、height、quality_prefix、negative）を使う。
 - 参照画像は 0〜4 枚で、役割（`character` / `pose` / `style` / `base` / `mask`）を持つ。役割の組み合わせから `planner.select_workflow` が `workflows/sdxl/` のテンプレート ID を一意に決める。役割推定は LangGraph 内のルール（日本語キーワードと序数）で行い、LM Studio は呼ばない。決められないときは LangGraph の interrupt で利用者に確認する。
 - `base` は同一性を残す経路（VAE Encode）。`character` / `style` は IP-Adapter Plus、`pose` は DWPose 等の前処理と ControlNet Union。どの役割も役割専用の Vision プロンプトでタグ化し、LLM の入力へ節として渡す。Vision の長辺は 768。画像が 0 枚の実行では Vision を走らせず、Load Image の欠損で落とさない。
 - IP-Adapter、ControlNet、前処理、LoRA のローダーは、すべて `ckpt`（eject の後）に依存させる。依存の無い前処理は `FurryJaImageAfter` で `ckpt` の後に止める。
 - 動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。動画生成モデルはロードしない。VHS が無い間は動画を対象外にし、その旨を `docs/troubleshooting.md` に書く。
 - IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
-- ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/sdxl.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補）に限る。構造の変更は、マップにある前処理候補の差し替えと、`LORAS` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
+- ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/<family>.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補、モデルファイル、サンプラーと `split` の quality_prefix / default_negative）に限る。構造の変更は、マップにある前処理候補の差し替えと、画像モデルの `loras` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
 - API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。待ちは「その prompt の進捗イベントが `AGENT_IDLE_TIMEOUT_S`（既定 20 分）届かないとき」だけ打ち切る（利用者の指定で設計書の 10 分の固定値から変えた。下の「タイムアウト」）。この呼び出しを行うのは LangGraph である。
 
 ## チャットタブ（会話と Tor 経由検索）
@@ -135,7 +136,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 
 - タブはグラフの選択である。画像タブは graph `agent`（`image` は別名）、チャットタブは graph `chat`。チャットタブは画像を受け取らず、画像タブへ誘導する。
 - 検索の通信を開くのは LangGraph（オーケストレータ）だけである。llama-server にはプロキシを渡さない。モデルが出すツール呼び出しは、オーケストレータが URL の許可判定をしてから実行する。
-- 検索用のモデル（Bonsai 系と Qwen heretic 系）は、PrismML の llama.cpp fork（`BONSAI_LLAMA_SERVER`。27B のルータと同じ build）の個別の llama-server だけで動かす。27B のルータのプリセットにも ComfyUI にも入れない。常駐させず、使い終わったら PID を kill する。llama-server には起動ごとにランダムな `--api-key` を付ける。
+- 検索用のモデル（Bonsai 系と Qwen heretic 系）は、PrismML の llama.cpp fork（`BONSAI_LLAMA_SERVER`。27B のルータと同じ build）の個別の llama-server だけで動かす。27B のルータのプリセットにも ComfyUI にも入れない。常駐させず、使い終わったら PID を kill する。llama-server には起動ごとにランダムな `--api-key` を付ける。例外は、利用者が推論モデルとして選べる Ternary-Bonsai-2-27B abliterated（`config/host_models.json` の `bonsai-2-27b-abliterated`）で、これはルータのプリセットの節として載る（同じ GGUF を参照し、二重に置かない）。検索の代理リーダーとしては従来どおり個別の llama-server で動く。
 - 画像タブとチャットタブは `job_lock` で直列化する。チャットタブがロックを放すのは、検索用の llama-server がすべて消え、ルータの 27B を unload した後である。
 - ルータの 27B と reader が同時に載らないときは、計画のあとに 27B を unload する。批評と統合は Ternary-Bonsai-2-27B abliterated（PTQ1_0）が代理で行う。
 - モデルと役割の対応は `config/search_models.json`、実機の検証結果は `tools/bonsai/rank.json`（`scripts/probe-bonsai.ps1`、git 管理外）にある。
@@ -166,6 +167,7 @@ Qwen3-0.6B-heretic は旧形式のルータの検証に落ちたため、フィ�
 - 検索と画像は既存のグラフ（`chat` の `configurable.task=search`、`agent`）を `/runs/stream` で呼ぶ。cirka は LLM サーバ・ComfyUI・Tor へ直接つながない。返った画像はワークスペースの `cirka-outputs/` に保存し、モデルにはパスだけを渡す。
 - 許可モードの既定は `auto`（利用者の指定、v0.8.0）: 編集とコマンドを確認なしで実行し、`policy::guarded` の一覧（push、reset --hard、再帰的な削除、ダウンロードの直接実行、sudo、公開、ディスク・電源・レジストリ）に当たるコマンドだけ確認する。`default` は編集とコマンドの前に確認、`accept-edits` は編集だけ自動、`plan` は実行しない、`bypass` はすべて確認なしで明示したときだけ。Shift+Tab は auto / default / accept-edits / plan を巡回し、bypass には入らない。ワークスペースの外と秘密ファイル（`.env`、鍵、`credentials*` など）はどのモードでも扱わない。
 - 認証は足さない（ヘッダの差し込み口 `auth_header` だけ）。
+- モデルの選択（v0.12.0）: `/model <id>` は `POST /coder/turn` の `inference_model` と検索の `configurable.inference_model` に、`/image-model <id>` は画像の `configurable.image_model` に載る。id はホストの `GET /models` の一覧と完全一致（部分一致は取らない）、使えないものは理由を出して選択を変えない。保存は `--save`（ユーザー設定、`--project` で `.cirka/config.toml`）とセッション（`/resume` で戻る）。
 
 ## 画像の保存と UI への返却
 
@@ -190,6 +192,8 @@ docs/llm-comfyui-workflow-design.md
 docs/llamacpp-router-design.md                  LLM サーバ（llama.cpp のルータ）と ComfyUI / llama.cpp の自前導入、Docker の起動方針
 docs/multi-image-reference-work-instruction.md   複数参照画像の要件、設計、調査結果、受け入れ結果
 docs/chroma-hd-support-work-instruction.md       Chroma1-HD 系統の要件、設計、実装記録
+docs/host-model-selection-design.md             モデルの選択（ホストの一覧、Web のピッカー、cirka）と macOS 対応、実装記録
+config/host_models.json           利用者が選べる推論モデル・画像モデル（id、表示名、ファイル、系統、LoRA、モデルごとのパラメータ）
 README.md                         概要、動作環境、インストール、実行、ライセンス（最小限。詳細は docs/）
 docs/setup.md / usage.md / configuration.md / architecture.md / troubleshooting.md / third-party-licenses.md
                                   セットアップの詳細、使い方、.env、構成、トラブルと制約、取得物のライセンス
@@ -199,7 +203,9 @@ src/                              LangGraph のグラフ、役割推定（planne
                                   チャットタブは chat_graph（ルーティングと検索）、write_nodes / code_nodes、chat_common、
                                   modes（速い / 思考 / 自動）、sandbox（Docker）、chat_models（llama-server の起動と停止）、
                                   claim_verify / claim_nodes（主張の検証）、
-                                  control_nodes（自律モード）、coder_gate / coder_app（cirka 向けの /coder/turn）
+                                  control_nodes（自律モード）、coder_gate / coder_app（cirka 向けの /coder/turn）、
+                                  model_catalog（host_models.json の読み込みと検証）、models_api（GET /models）、
+                                  mlx_router（macOS の MLX 優先のルータ。llama.cpp ルータと同じ API）
 docs/autonomous-controller-design.md            チャットタブの自律モード（制御ループ）の設計と実装記録
 docs/locus-cui-design.md                        CUI cirka とモデルゲートの設計と実装記録
 client/                           クライアント側の CUI（Rust、単一バイナリ、実行ファイル名 cirka）。client/target/ は git に
@@ -218,11 +224,14 @@ workflows/sdxl/*.api.json         役割別テンプレート 24 本。LangGraph
 workflows/maps/sdxl.json          テンプレートのスロット、ポーズ前処理の候補、IP-Adapter の weight 係数
 workflows/flux/*.api.json         Chroma1-HD のテンプレート（t2i_basic / i2i_basic）
 workflows/maps/flux.json          Chroma のスロット、モデルファイル、サンプラー既定値、対応する役割
+workflows/krea2/ / anima/         Krea 2（Wulver）と Anima（Indigo Furry Mix Anima）のテンプレート（t2i_basic / i2i_basic）
+workflows/maps/krea2.json / anima.json   それぞれのスロット、テキストエンコーダと VAE、サンプラー既定値
 workflows/reference/              公式 Chroma1-HD ワークフロー（写し元）
 prompts/system_furry_tags.txt
 prompts/system_furry_tags_roles.txt
 prompts/system_vision_*.txt       caption / style / pose / character
 prompts/system_chroma_prose.txt   Chroma 用（英語の説明文）
+prompts/system_krea2_prose.txt    Krea 2 用（英語の説明文）。Anima は system_furry_tags.txt
 prompts/system_chat.txt           チャットタブの会話
 prompts/system_search*.txt        検索の計画 / ルータ / フィルタ / 批評 / 統合
 prompts/system_bonsai_worker.txt  検索の reader（open_page と事実カード）
@@ -233,6 +242,8 @@ prompts/chat/controller.txt       自律モードの判断（道具の選択と�
 config/search_models.json         検索用モデル 8 つのファイル・メモリの目安・タスクごとの順位
 config/llm_model.json             27B の元ファイル（Hugging Face、SHA-256）、量子化、ルータのモデル名と既定値
 tools/tor/torrc                   Tor の設定（tools/ の中で git 管理するのはこれと tools/bonsai/.gitkeep だけ）
+scripts/*.sh, scripts/lib/common.sh   macOS のセットアップ・起動・確認（bash）。setup.sh が順に呼ぶ。setup-mlx.sh が MLX、
+                                  setup-image-models.sh / .ps1 が画像モデルのファイル、host_models.py がその一覧とルータのプリセット
 scripts/                          セットアップ、起動、確認（PowerShell、UTF-8 BOM 付き）。LLM は setup-llm / start-llm（gguf_info.py が層数を読む）、ComfyUI は setup-comfyui / start-comfyui。参照画像用は setup-comfyui-refs.ps1、検索用は setup-tor / start-tor / setup-llamacpp / setup-search-models / probe-bonsai、コード実行用は setup-sandbox
 tests/                            pytest（cirka のテストは client/ の cargo test）
 agent-chat-ui/                    公式 UI。設定で接続する
@@ -242,7 +253,7 @@ logs/ tools/                      実行ログ、ダウンロードしたツー�
 artifacts/                        下記。git に含めない
 ```
 
-`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を `docs/architecture.md`（UI の変更点）と README に残す。
+`agent-chat-ui/` は公式アプリをこのリポジトリへ置き、環境変数でこの端末の LangGraph へ接続する。在庫の UI に加えた変更は、返却画像と検索痕跡の表示（`ai.tsx`、`messages/search-trace.tsx`）、添付画像ごとの役割・強度の指定（`ContentBlocksPreview.tsx`、`MultimodalPreview.tsx`、`use-file-upload.tsx`、`lib/image-roles.ts`）、画像 / チャットのタブとチャットタブの応答モード「自動 / 速い / 思考」（`mode-tabs.tsx`、`thread/index.tsx` での配置）、思考・執筆・コードの手順の表示（`search-trace.tsx`、`ai.tsx`）、主張の突き合わせの表の表示（`search-trace.tsx` の `ClaimTraceView`、`ai.tsx`）、自律モードの手順の表示（`search-trace.tsx` の `TaskTraceView` に `kind: "control"` を足しただけ）、送信ボタン横のモデルのピッカーと応答のモデル名（`model-picker.tsx`、`thread/index.tsx` の送信設定、`ai.tsx`）だけである。これ以上の変更は、在庫の UI では要件を満たせないと確認できたときに限る。グラフ id、待受、公式の導入手順が版で変わった場合は、実装時点の公式クイックスタートに合わせ、結果を `docs/architecture.md`（UI の変更点）と README に残す。
 
 設計書 §9 の `frontend/` は作らない。
 
@@ -317,14 +328,17 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 実装時に決めたもの:
 
 - ComfyUI と llama.cpp は `tools/` に自前で導入する（v0.11.0、利用者の指定）。モデルの置き場は指定なしで決まる: 既にある場所（LM Studio・以前の ComfyUI のモデルフォルダ、Hugging Face のキャッシュ）から `tools/` へハードリンクし、Hugging Face のファイルは `hf download`（無ければ uv 経由の huggingface_hub）でキャッシュに取得してからリンクする（同じモデルを二重に取得しない。`scripts/lib/common.ps1` の `Import-ComfyModel` / `Get-HfFile`）。再量子化した IQ3_M の SHA-256 は `config/llm_model.json` に固定し、この端末では変更前の LM Studio のファイルと一致した。ComfyUI は Comfy-Org/ComfyUI の検証済みコミット（v0.38.0-32、`e9027f2b`）、PyTorch は Radeon なら AMD の ROCm 7.2 Windows 版（`repo.radeon.com`）、NVIDIA なら CUDA 12.8、ほかは CPU。パスは `.env` に保存する。
-- チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（`CKPT_NAME`）。
+- チェックポイントの既定は `yiffInHell_yihVANTABLACK.safetensors`（v0.12.0 から `config/host_models.json` の `yiffinhell-vantablack`、`DEFAULT_IMAGE_MODEL`）。
+- モデルの選択（v0.12.0、利用者の指定。`docs/host-model-selection-design.md` 末尾の実装記録）: `config/host_models.json` に推論 2 つ（Qwen3.8 27B abliterated、Bonsai 2 27B abliterated）と画像 7 つ（yiffInHell VANTABLACK / METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix Anima、Chroma1-HD、Wulver）を置く。推論モデルはルータのプリセットの節（`scripts/host_models.py preset` が導入済みの GGUF ごとに書く）で、選ぶとルータへ送る `model` と文脈・思考の有無が変わる。Bonsai は `thinking: off`。SDXL のモデルはすべて以前の `LORAS` の LoRA（novabeast xl v1 rank64 pony、強度 1.0）を使う。パラメータの出典は `docs/configuration.md`「モデルの一覧とパラメータ」。画像のタグ生成の LLM は選択によらずルータの `LLM_MODEL`（ワークフローの `llm_backend`）のまま。`GET /models` は使えないモデルも理由つきで返し、Web はピッカーで無効にし、cirka は拒否する。
+- 画像系統の追加（v0.12.0）: `krea2`（Wulver、Krea 2 の turbo 系。Qwen3-VL-4B fp8、qwen_image_vae、8 steps、cfg 1、euler / simple、英語の説明文）と `anima`（Indigo Furry Mix Anima。Qwen3 0.6B、qwen_image_vae、er_sde / simple、cfg 4、タグ + score タグ）。どちらも Chroma と同じく `ckpt` が `FurryJaDiffusionLoaderAfterEject`（eject の後に拡散モデル・テキストエンコーダ・VAE を読む）で、ノード ID は SDXL と同じ。参照画像は `base` だけ。テキストエンコーダと VAE は `setup-image-models`（`config/host_models.json` の `downloads`、SHA-256 照合）が入れる。
+- macOS（v0.12.0）: LLM は MLX を優先する（`setup-mlx.sh` が MLX 版を入れたモデルは `engine = mlx` の節になり、`furry_agent.mlx_router` が `mlx_lm.server` で動かす）。MLX 版が無いモデル（Bonsai の 1-bit / ternary、量子化済みの GGUF だけのもの）と検索用のモデルは PrismML fork の llama-server（Metal）で動かす。確認機（空き 20GB）では Qwen3.8 27B（GGUF 12.7GB / MLX 4bit 14GB）が入らないため、推論とタグ生成は Bonsai 2 27B abliterated（`LLM_MODEL` もこれ）、画像は yiffInHell VANTABLACK だけを入れた。入れていないモデルは一覧で使えないと表示される。
 - agent-chat-ui に返す画像は `{"type": "image", "mimeType": "image/png", "data": <base64>}`。在庫の UI は AI メッセージの画像を描画しないため、`ai.tsx` に最小限の変更を加えた。
 - 参照画像の役割と強度は、画像ブロックの `metadata.role` / `metadata.strength` で送る。UI には添付ごとの役割セレクトと強度欄を加えた。役割の確認は在庫の HITL 表示（承認 / 編集 / 却下）を使う。
-- LoRA は `.env` の `LORAS`（`名前[:モデル強度[:CLIP 強度]]` のカンマ区切り）。空なら使わない。
+- LoRA は画像モデルごとに `config/host_models.json` の `loras`（`"<ファイル>:<強度>"` の配列、CLIP 強度は同じ値、0 より大きく 2 以下）。v0.11 までの `.env` の `LORAS` / `CHROMA_LORAS` は読まない。
 - 参照画像用のノードとモデルは `scripts/setup-comfyui-refs.ps1` が入れる（ComfyUI_IPAdapter_plus、comfyui_controlnet_aux、ControlNet Union promax、IP-Adapter Plus SDXL、CLIP-ViT-H、DWPose ONNX、Depth Anything V2 Small）。実行時の自動ダウンロードはしない。
 - タイムアウト（v0.9.0、利用者の指定）: 何も返ってこない時間が `AGENT_IDLE_TIMEOUT_S`（`.env`、既定 1200 秒、最小 30 秒）続いたときだけ打ち切り、何かが返ってきている限り全体の時間では打ち切らない。モデル呼び出し（ルータの 27B、検索用の llama-server）はすべてストリームで受け取り、トークンと思考トークンで計る（`llm_client.idle_timeout`）。ComfyUI の待ちはその prompt の進捗イベントで計り、LM Connect ノードの `read_timeout_seconds` にも同じ値を入れる（`templates.build_run_prompt`。入力値の差し替えだけで、ノード ID と構造は変えない）。llama-server の起動は `/health` の応答（読み込み中の 503 を含む）で計る。ほかのタブや ComfyUI のキューは、相手が動いているあいだ待つ（ロックの期限 15 分が止まった相手を外す）。全体の予算（`SEARCH_WALL_CLOCK_S`、`CLAIM_TIMEOUT_S`、`CONTROLLER_WALL_CLOCK_S`、`SEARCH_TOTAL_TIMEOUT_S`、`JOB_LOCK_TIMEOUT_S`、`SANDBOX_WAIT_S`）は既定で無しで、設定したときだけ掛かる。1 件を諦めて先へ進むための短い上限（Tor 経由の HTTP リクエスト 30 秒、Tor の起動 90 秒、状態確認の HTTP）とコンテナ実行の 60 秒は残す。時間で `max_tokens` を削らない（context だけで決める）。`COMFYUI_TIMEOUT_S`、`CHAT_TIMEOUT_S`、`BONSAI_WORKER_TIMEOUT_S`、`LMSTUDIO_TOKENS_PER_S` は廃止。cirka は設定 `idle_timeout_s`（既定 1200 秒）で同じ考え方（`bash` は出力が途切れた時間で止める）。
 - ComfyUI は `--cache-none` で起動する（`start-comfyui.ps1`）。ComfyUI 0.38 では IP-Adapter のキャッシュ済み出力が 2 回目以降の生成を壊した。
-- モデル系統は `.env` の `COMFY_MODEL_FAMILY` だけで決める（空 / `sdxl` は yiffInHell とタグ、`flux` は Chroma1-HD と英語の説明文）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
+- モデル系統は選んだ画像モデルの `family` で決まる（v0.11 までは `.env` の `COMFY_MODEL_FAMILY`。`sdxl` はタグ、`flux` は Chroma1-HD と英語の説明文、`krea2` / `anima` は上記）。チャットの文面では切り替えない。Chroma でも LLM の呼び出しと eject は ComfyUI グラフ内で行い、`ckpt`（`FurryJaDiffusionLoaderAfterEject`）が eject の後に拡散モデル・T5・VAE を読む。ノード ID は SDXL と同じ。Chroma の参照画像は `base` だけで、他の役割は生成せず理由を返す。
 - 検索: Tor は Tor Expert Bundle（`scripts/setup-tor.ps1`、`tools/tor`）。llama.cpp は PrismML fork の Vulkan リリース（`scripts/setup-llamacpp.ps1`、`-FromSource` でビルドも可。27B のルータと `llama-quantize` も同じ build）。モデルは `scripts/setup-search-models.ps1` が `tools/models` に取得する。取得物（Tor、fork の zip、モデル）は SHA-256 を照合する（値は `config/search_models.json` と Tor の配布元）。`BONSAI_RESERVE_MB` の既定は 3072（実測の空き 14GB で代理 27B が入る値）。
 - 量と長さの上限（v0.10.0、利用者の指定）: 以前はコードの定数だった上限（検索意図の数、ページの字数、各段の `max_tokens`、監査する文の数、履歴の字数、推敲の件数、出力の末尾、ロックの期限、添付画像の大きさなど）は `.env` で変えられる（`config.env_int` / `env_float`、モジュールの読み込み時に読む。一覧は `docs/configuration.md`「量と長さの上限」と `.env.example` の末尾）。既定値は変えていない。`SEARCH_MAX_ROUNDS`・`SEARCH_MAX_PAGES`・`CLAIM_MAX`・`CLAIM_QUOTE_CHARS`・`CONTROLLER_MAX_STEPS` などの範囲の上限も広げた（既定は設計書の値のまま）。reader の数と検索意図は 7 まで（ポート `BONSAI_BASE_PORT + 0..6`）。固定のまま残すもの: コンテナ実行の上限（60 秒、2g、2 CPU、256 pids、`--network none`、実行 2 回）、主張の検証の門（20 字の一致）、参照画像 4 枚、ノード ID と生成の既定値。
 - コード実行の Docker イメージは `scripts/setup-sandbox.ps1` が取得し、実行時は `--pull never`。生成したコードは `artifacts/code/<run_id>/`。
@@ -342,7 +356,7 @@ Python と Node の依存ディレクトリ、キャッシュ、チェックポ�
 - 利用者の指示の範囲を超えて、周辺の機能や別アーキテクチャを足さない。
 - 設計書に無い連携方式を、調査メモの結論として採用しない。
 - 一時ファイル、試行スクリプト、ログは `artifacts/` に置き、成果物のディレクトリへ混ぜない。
-- コマンドは PowerShell で動く形にする。
+- コマンドは PowerShell で動く形にする（macOS 向けは `scripts/*.sh` の bash。macOS 付属の bash 3.2 で動く書き方にする）。
 - モデルウェイト、API キー、`.env` の秘密をコミットしない。
 - 起動していない外部プロセスを、ドキュメントに書いたコマンドの範囲を超えて修復しない。
 - UI を変更した場合は、この端末で表示と送信を確認し、可能なら他ホストから同じ操作を確認する。他ホストから確認できなかった場合は、その旨を結果に書く。

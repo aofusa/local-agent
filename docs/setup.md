@@ -7,7 +7,7 @@ LLM（llama.cpp）と ComfyUI は、どちらもセットアップがこのリ�
 
 | 項目 | 要件 |
 |---|---|
-| OS | Windows 10 / 11（スクリプトは Windows PowerShell 5.1 と PowerShell 7 の両方で動作確認） |
+| OS | Windows 10 / 11（スクリプトは Windows PowerShell 5.1 と PowerShell 7 の両方で動作確認）、macOS 15 以降の Apple silicon（下の「macOS」） |
 | メモリ | 24GB 級以上。27B の LLM と SDXL は同時に載らないため、ワークフローが順番に載せ替えます |
 | GPU | Vulkan が使える GPU（llama.cpp）と、PyTorch が使える GPU（ComfyUI。AMD Radeon は ROCm、NVIDIA は CUDA。無ければ CPU） |
 | ディスク | 空き 70GB 以上（LLM 16.5GB + 再量子化版 13GB + ComfyUI と PyTorch 約 10GB + チェックポイント 7GB + 参照画像用モデル約 6GB + 検索モデル約 20GB） |
@@ -47,10 +47,10 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
   - セットアップ後に `tools\comfyui\models\checkpoints` に置く
   - 以前の ComfyUI（Comfy Desktop、`Documents\ComfyUI\models`）のモデルフォルダにあれば、セットアップが自動で取り込む（ハードリンク）。ほかの場所なら `-ModelsDir <models フォルダ>`
   - `-CheckpointUrl <URL>` でダウンロードする
-  別のファイル名やモデルを使う場合は、`.env` の `CKPT_NAME` を変更します。
+  ほかの画像モデル（yiffInHell METALLIC TETRA / XXX-TENDED V2.0、Rekemono、Indigo Furry Mix Anima、Wulver）も同じように置きます。一覧とファイル名は `config/host_models.json`。置いたモデルは画面の一覧で選べるようになり、置いていないモデルは「使えない」と表示されます。Krea 2 / Anima のテキストエンコーダと VAE は `.\scripts\setup-image-models.ps1` が Hugging Face から取得します。
 - （任意）**Chroma1-HD** を使う場合は、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD) の拡散モデル
   （BF16 約 17.8GB。Civitai 配布名 `chroma_v10HD.safetensors`）を `models\diffusion_models` か `models\checkpoints` に置き、
-  セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 と VAE を取得し、拡散モデルを fp8 に変換。[usage.md › Chroma1-HD](usage.md#chroma1-hdモデルの切り替え)）。
+  セットアップ後に `.\scripts\setup-comfyui-chroma.ps1` を実行する（T5 と VAE を取得し、拡散モデルを fp8 に変換。[usage.md › 画像モデル](usage.md#画像モデル系統ごとの違い)）。
 
 ### ネットワーク
 
@@ -131,9 +131,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | Python | `tools\comfyui\.venv`（uv で Python 3.12）。PyTorch は `-Torch` に従う（Radeon は AMD の ROCm 7.2 Windows 版 `repo.radeon.com`、NVIDIA は CUDA 12.8、ほかは CPU）。続けて ComfyUI の `requirements.txt` |
 | LM_Connect | [eedali/LM_Connect](https://github.com/eedali/LM_Connect) を `custom_nodes` に clone（検証済みコミットに固定）。依存は requests / Pillow / numpy のみ。**llama-cpp-python は入れません**（ComfyUI 内で GGUF を動かさない）。プロンプトと Vision のノードを、ルータの OpenAI 互換クライアントとして使う |
 | furry_ja | `custom_nodes\furry_ja` → このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション（eject、ckpt、split など） |
-| モデルの置き場 | `tools\comfyui\models` だけ（外部フォルダの参照はしない）。使うモデル（`CKPT_NAME`、`LORAS` / `CHROMA_LORAS`、参照画像用、Chroma 用）を以前の ComfyUI のモデルフォルダと `-ModelsDir` から取り込む（下の「モデルの探し方」） |
+| モデルの置き場 | `tools\comfyui\models` だけ（外部フォルダの参照はしない）。使うモデル（`config/host_models.json` の画像モデルとその LoRA・テキストエンコーダ・VAE、参照画像用、Chroma 用）を以前の ComfyUI のモデルフォルダと `-ModelsDir` から取り込む（下の「モデルの探し方」） |
 | `.env` | `COMFYUI_MAIN_DIR`、`COMFYUI_PYTHON`、`COMFYUI_CUSTOM_NODES_DIR`、`COMFYUI_MODELS_DIR`（以前の版が書いた `COMFYUI_EXTRA_MODEL_PATHS` と `extra_model_paths.yaml` は空にして削除する） |
-| チェックポイント | `CKPT_NAME` のファイルがあるか確認（`-CheckpointUrl` なら取得） |
+| チェックポイント | 画像モデルのファイルがあるか確認し、無いものを一覧で知らせる（`-CheckpointUrl` なら既定のモデルを取得） |
 
 **参照画像用のノードとモデル**（`scripts\setup-comfyui-refs.ps1`。`setup.ps1 -SkipReferenceModels` で省略可）
 
@@ -158,7 +158,32 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `setup-search-models.ps1` | 検索モデル 8 つ（約 20GB）を Hugging Face のキャッシュ経由で取得し（`hf download` で取得済みなら取得しない）、カタログの SHA-256 と照合する（中断しても再開できる）。`BONSAI_MODELS_DIR` を保存する | `tools\models` |
 | `probe-bonsai.ps1` | 各モデルを 1 回ずつ起動し、タスクごとに短いテストで検証する。起動時間・メモリ・生成速度・合否を記録する | `tools\bonsai\rank.json` |
 
-検索モデルは llama.cpp（`setup-llamacpp.ps1` と同じ build）で、検索のあいだだけ起動します。27B のルータには入れません。
+検索モデルは llama.cpp（`setup-llamacpp.ps1` と同じ build）で、検索のあいだだけ起動します。27B のルータには入れません（推論モデルとして選べる Bonsai 2 27B abliterated だけは、同じファイルをルータのプリセットの節にもします）。
+
+## macOS（Apple silicon、v0.12.0）
+
+Windows の `scripts\*.ps1` と同じ手順を `scripts/*.sh`（bash、`scripts/lib/common.sh`）で行います。何度実行しても安全です。確認済み構成: Apple M4・24GB・macOS 15.5。
+
+```bash
+brew install git uv node huggingface-cli       # Homebrew（https://brew.sh）。cirka をビルドするなら Rust も
+scripts/setup.sh                                # すべて
+scripts/setup.sh --image-ids yiffinhell-vantablack \
+  --search-models qwen3-1.7b-heretic,bonsai-4b,bonsai-2-27b-abliterated --skip-refs   # ディスクが少ない Mac
+```
+
+| スクリプト | 内容 |
+|---|---|
+| `setup-llamacpp.sh` | PrismML fork の macOS arm64（Metal）版を取得し、GitHub のリリースの SHA-256 と照合する（`--source` で Metal ビルド）。`LLM_SERVER` / `BONSAI_LLAMA_SERVER` |
+| `setup-tor.sh` | Homebrew の tor。`TOR_EXE`。設定は Windows と同じ `tools/tor/torrc` |
+| `setup-search-models.sh` | 検索モデル（`--models` で絞る）を Hugging Face のキャッシュ経由で取得してリンクし、SHA-256 を照合 |
+| `setup-mlx.sh` | `tools/mlx/.venv` に mlx-lm。`--models <id>` で、`config/host_models.json` の `mlx` に書いた MLX 版を取得する（Qwen3.8 27B abliterated の 4bit 版は 14GB） |
+| `setup-llm.sh` | ルータのプリセット。MLX 版があるモデルは `engine = mlx`（MLX 優先）、無ければ GGUF を llama-server（GPU にすべての層）。Qwen の GGUF は `--source-model` / LM Studio のフォルダ / `--download`（取得して再量子化）。`.env` の `LLM_*`（`LLM_MODEL` は入っているモデルのうち一覧の先頭。画像のタグ生成のモデル）と `LLM_ENGINE` を書き、必要ならワークフローを再生成する |
+| `setup-comfyui.sh` | ComfyUI（Windows と同じコミット）、Python 3.12 の venv、PyPI の PyTorch（MPS）、LM_Connect、`custom_nodes/furry_ja`（シンボリックリンク）。続けて `setup-image-models.sh` |
+| `setup-image-models.sh` | 画像モデルのファイル（`--ids` で絞る）。以前の ComfyUI のモデルフォルダ（`~/Documents/ComfyUI/models` など）と `--models-dir` からリンクし、Krea 2 / Anima のテキストエンコーダと VAE を取得する |
+| `setup-comfyui-refs.sh` | 参照画像用のノードとモデル（約 5GB） |
+| `setup-sandbox.sh` | docker CLI（Docker Desktop、Rancher Desktop の `~/.rd/bin/docker` など）が Linux のエンジンに届けば `python:3.12-slim` を取得 |
+
+置いていないモデル（チェックポイントは Civitai から手で入手）は、画面の一覧で使えないと表示されます。24GB の Mac では Qwen3.8 27B（IQ3_M 12.7GB）と SDXL は同時に載らないので、Windows と同じく順番に載せ替えます（ComfyUI の eject）。空きディスクが 20GB 程度の確認機では、推論とタグ生成に Bonsai 2 27B abliterated（5.9GB）、画像に yiffInHell VANTABLACK だけを入れました。
 
 ## モデルの探し方（指定は不要）
 
