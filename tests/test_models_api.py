@@ -43,13 +43,15 @@ async def _get(comfy, router):
         return router
     app = coder_gate.app
     app.state.comfy_client = comfy
-    original = models_api._router_models
-    models_api._router_models = fake_router
+    async def not_asked(model):  # the remote entries' servers are not contacted here (tests/test_remote_llm.py)
+        return None
+    original, original_remote = models_api._router_models, models_api._remote_models
+    models_api._router_models, models_api._remote_models = fake_router, not_asked
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://host") as client:
             response = await client.get("/models")
     finally:
-        models_api._router_models = original
+        models_api._router_models, models_api._remote_models = original, original_remote
         del app.state.comfy_client
     return response.status_code, response.json()
 
@@ -87,4 +89,4 @@ async def test_disabled_ids_are_listed_but_unavailable(monkeypatch):
     status, body = await _get(Comfy(INFO), ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"])
     wulver = next(m for m in body["image"] if m["id"] == "wulver")
     assert wulver["available"] is False and "HOST_MODELS_DISABLE" in wulver["reason"]
-    assert all(m["available"] for m in body["inference"] if "remote" not in m)
+    assert all(m["available"] for m in body["inference"])

@@ -36,8 +36,7 @@ LORA_WEIGHT = (0.0, 2.0)  # exclusive low, inclusive high (design doc §4)
 FAMILY_STYLES = {"sdxl": "danbooru", "anima": "danbooru", "flux": "prose", "krea2": "prose"}
 # A model on another host (docs/remote-llm-design.md): a llama.cpp server or an OpenAI-compatible service.
 ENDPOINT_KINDS = ("llamacpp", "openai")
-ENDPOINT_KEYS = {"kind", "url", "url_env", "model", "model_env", "api_key_env"}
-ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+ENDPOINT_KEYS = {"kind", "url", "model", "api_key"}
 
 
 class CatalogError(ValueError):
@@ -55,34 +54,21 @@ class ModelChoiceError(ValueError):
 @dataclass(frozen=True)
 class Endpoint:
     """A model served by another host: a llama.cpp server (``llamacpp``) or any OpenAI-compatible service
-    (``openai``). The URL and the model name are written in the catalog or read from the .env keys it names; the API
-    key is only ever read from .env (``api_key_env``), never written in the catalog."""
+    (``openai``). Its base URL, model name and optional API key are written in the catalog entry itself."""
 
     kind: str
-    url: str = ""
-    url_env: str = ""
-    model: str = ""
-    model_env: str = ""
-    api_key_env: str = ""
+    url: str
+    model: str
+    api_key: str = ""
 
     def resolved(self) -> tuple[str, str, str]:
-        """(base URL ending in /v1 or the service's own path, model name, API key); "" for what is not set."""
-        url = (os.environ.get(self.url_env, "").strip() if self.url_env else "") or self.url
-        model = (os.environ.get(self.model_env, "").strip() if self.model_env else "") or self.model
-        key = os.environ.get(self.api_key_env, "").strip() if self.api_key_env else ""
-        return url.rstrip("/"), model, key
+        """(base URL, model name, API key)."""
+        return self.url.rstrip("/"), self.model, self.api_key
 
     def missing(self) -> str:
-        """Why the endpoint cannot be called yet ("" when its URL and model are set)."""
-        url, model, _ = self.resolved()
-        if not url:
-            return f"接続先の URL がありません（.env の {self.url_env} に設定してください）" if self.url_env else \
-                "接続先の URL がありません"
-        if not url.startswith(("http://", "https://")):
-            return f"接続先の URL は http:// か https:// で書いてください（{url}）"
-        if not model:
-            return f"モデル名がありません（.env の {self.model_env} に設定してください）" if self.model_env else \
-                "モデル名がありません"
+        """Why the endpoint cannot be called ("" when its URL and model are usable)."""
+        if not self.url.startswith(("http://", "https://")):
+            return f"接続先の URL は http:// か https:// で書いてください（{self.url}）"
         return ""
 
 
@@ -177,23 +163,17 @@ def _endpoint(raw: Any, where: str) -> Endpoint:
     if not isinstance(raw, dict):
         raise CatalogError(f"{where}: endpoint はオブジェクトです")
     unknown = set(raw) - ENDPOINT_KEYS
-    if unknown & {"api_key", "key", "token", "password"}:
-        raise CatalogError(f"{where}: API キーは一覧に書かず、.env のキー名を api_key_env で指定してください")
     if unknown:
         raise CatalogError(f"{where}: endpoint の {', '.join(sorted(unknown))} は使えません（{', '.join(sorted(ENDPOINT_KEYS))}）")
     kind = raw.get("kind")
     if kind not in ENDPOINT_KINDS:
         raise CatalogError(f"{where}: endpoint の kind は {' / '.join(ENDPOINT_KINDS)} です")
-    for key in ("url_env", "model_env", "api_key_env"):
-        if raw.get(key) and not ENV_RE.match(str(raw[key])):
-            raise CatalogError(f"{where}: endpoint の {key} は .env のキー名（英大文字・数字・_）です（{raw[key]!r}）")
-    if not raw.get("url") and not raw.get("url_env"):
-        raise CatalogError(f"{where}: endpoint には url か url_env が要ります")
-    if not raw.get("model") and not raw.get("model_env"):
-        raise CatalogError(f"{where}: endpoint には model か model_env が要ります")
-    return Endpoint(kind, str(raw.get("url") or "").strip(), str(raw.get("url_env") or ""),
-                    str(raw.get("model") or "").strip(), str(raw.get("model_env") or ""),
-                    str(raw.get("api_key_env") or ""))
+    url, model = str(raw.get("url") or "").strip(), str(raw.get("model") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise CatalogError(f"{where}: endpoint の url は http:// か https:// で始まる URL です（{url!r}）")
+    if not model:
+        raise CatalogError(f"{where}: endpoint には model（接続先のモデル名）が要ります")
+    return Endpoint(kind, url.rstrip("/"), model, str(raw.get("api_key") or "").strip())
 
 
 def parse_catalog(raw: dict) -> HostCatalog:

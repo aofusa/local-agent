@@ -14,21 +14,14 @@ from furry_agent.llm_client import LlamaRouter, RemoteLLM, remote_error
 
 from test_model_catalog import RAW
 
-ENV = ("REMOTE_LLAMACPP_URL", "REMOTE_LLAMACPP_MODEL", "REMOTE_LLAMACPP_API_KEY", "OPENAI_COMPAT_URL",
-       "OPENAI_COMPAT_MODEL", "OPENAI_COMPAT_API_KEY", "DEFAULT_INFERENCE_MODEL", "HOST_MODELS_DISABLE")
-URL = "http://192.168.11.53:8090/v1"
+URL = "http://127.0.0.1:18090/v1"
+LLAMACPP, OPENAI = "mac-bonsai-2-27b-abliterated", "mac-bonsai-2-27b-openai"
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for name in ENV:
+    for name in ("DEFAULT_INFERENCE_MODEL", "HOST_MODELS_DISABLE", "HOST_MODELS_PATH"):
         monkeypatch.delenv(name, raising=False)
-
-
-def _remote_env(monkeypatch, key="sk-test"):
-    monkeypatch.setenv("REMOTE_LLAMACPP_URL", URL + "/")
-    monkeypatch.setenv("REMOTE_LLAMACPP_MODEL", "bonsai-2-27b-abliterated")
-    monkeypatch.setenv("REMOTE_LLAMACPP_API_KEY", key)
 
 
 def _with_endpoint(endpoint, **extra):
@@ -37,28 +30,31 @@ def _with_endpoint(endpoint, **extra):
     return raw
 
 
+def _keyed_catalog():
+    return mc.parse_catalog(_with_endpoint({"kind": "openai", "url": "https://llm.example/v1/", "model": "gpt-x",
+                                            "api_key": "sk-test"}))
+
+
 # --- catalog ------------------------------------------------------------------------------------------------------
 
 
-def test_shipped_remote_entries_read_their_url_model_and_key_from_env(monkeypatch):
+def test_shipped_remote_entries_are_written_in_the_catalog():
     catalog = mc.load_catalog()
-    remote = catalog.inference["remote-llamacpp"]
+    remote = catalog.inference[LLAMACPP]
     assert remote.remote and remote.endpoint.kind == "llamacpp" and remote.gguf == {}
-    assert catalog.inference["openai-compatible"].endpoint.kind == "openai"
+    assert remote.endpoint.resolved() == (URL, "bonsai-2-27b-abliterated", "")
+    assert catalog.inference[OPENAI].endpoint.kind == "openai"
     assert not catalog.inference["qwen3.8-27b-abliterated"].remote
-    assert remote.endpoint.resolved() == ("", "", "")
-    _remote_env(monkeypatch)
-    assert remote.endpoint.resolved() == (URL, "bonsai-2-27b-abliterated", "sk-test")
-    assert remote.endpoint.missing() == ""
+    assert _keyed_catalog().inference["x-remote"].endpoint.resolved() == ("https://llm.example/v1", "gpt-x", "sk-test")
 
 
 @pytest.mark.parametrize("endpoint, message", [
-    ({"kind": "llamacpp", "url": URL, "model": "m", "api_key": "secret"}, "api_key_env"),
     ({"kind": "anthropic", "url": URL, "model": "m"}, "kind"),
     ({"kind": "openai", "model": "m"}, "url"),
+    ({"kind": "openai", "url": "192.168.11.53:8090", "model": "m"}, "url"),
     ({"kind": "openai", "url": URL}, "model"),
-    ({"kind": "openai", "url_env": "lower_case", "model": "m"}, "url_env"),
     ({"kind": "openai", "url": URL, "model": "m", "headers": {}}, "headers"),
+    ({"kind": "openai", "url_env": "X", "model": "m"}, "url_env"),
     ("http://host/v1", "オブジェクト"),
 ])
 def test_bad_endpoints_are_refused_at_load(endpoint, message):
@@ -72,26 +68,18 @@ def test_an_endpoint_entry_cannot_also_name_a_local_gguf():
                                         gguf={"catalog": "llm_model"}))
 
 
-def test_literal_url_and_model_need_no_env():
-    catalog = mc.parse_catalog(_with_endpoint({"kind": "openai", "url": URL, "model": "gpt-x"}))
-    assert catalog.inference["x-remote"].endpoint.resolved() == (URL, "gpt-x", "")
-
-
-def test_remote_availability_follows_the_env_and_the_servers_list(monkeypatch):
+def test_remote_availability_follows_the_servers_list(monkeypatch):
     catalog = mc.load_catalog()
     local = ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"]
-    out = mc.inference_unavailable(catalog, local)
-    assert "REMOTE_LLAMACPP_URL" in out["remote-llamacpp"] and "OPENAI_COMPAT_URL" in out["openai-compatible"]
-    _remote_env(monkeypatch)
-    assert "remote-llamacpp" not in mc.inference_unavailable(catalog, local, {"remote-llamacpp": ["a", "bonsai-2-27b-abliterated"]})
-    out = mc.inference_unavailable(catalog, local, {"remote-llamacpp": ["qwen"]})
-    assert "bonsai-2-27b-abliterated" in out["remote-llamacpp"]
-    out = mc.inference_unavailable(catalog, local, {"remote-llamacpp": "接続先に接続できません"})
-    assert out["remote-llamacpp"] == "接続先に接続できません"
-    monkeypatch.setenv("REMOTE_LLAMACPP_URL", "192.168.11.53:8090")
-    assert "http://" in mc.inference_unavailable(catalog, local, {})["remote-llamacpp"]
-    monkeypatch.setenv("HOST_MODELS_DISABLE", "remote-llamacpp")
-    assert "HOST_MODELS_DISABLE" in mc.inference_unavailable(catalog, local, {})["remote-llamacpp"]
+    # Not asked (None): usable as far as the catalog goes.
+    assert LLAMACPP not in mc.inference_unavailable(catalog, local)
+    assert LLAMACPP not in mc.inference_unavailable(catalog, local, {LLAMACPP: ["a", "bonsai-2-27b-abliterated"]})
+    out = mc.inference_unavailable(catalog, local, {LLAMACPP: ["qwen"]})
+    assert "bonsai-2-27b-abliterated" in out[LLAMACPP]
+    out = mc.inference_unavailable(catalog, local, {LLAMACPP: "接続先に接続できません"})
+    assert out[LLAMACPP] == "接続先に接続できません"
+    monkeypatch.setenv("HOST_MODELS_DISABLE", LLAMACPP)
+    assert "HOST_MODELS_DISABLE" in mc.inference_unavailable(catalog, local, {})[LLAMACPP]
 
 
 def test_preset_writer_skips_remote_entries(tmp_path, monkeypatch):
@@ -106,22 +94,21 @@ def test_preset_writer_skips_remote_entries(tmp_path, monkeypatch):
                           "sleep_idle": None, "out": str(tmp_path / "models.ini")})()
     out = host_models.preset(args)
     ids = {s.get("id") or s["skipped"]["id"] for s in out}
-    assert "remote-llamacpp" not in ids and "openai-compatible" not in ids
-    assert "remote" not in (tmp_path / "models.ini").read_text(encoding="utf-8")
+    assert LLAMACPP not in ids and OPENAI not in ids
+    assert "mac-" not in (tmp_path / "models.ini").read_text(encoding="utf-8")
 
 
 # --- settings of a run ----------------------------------------------------------------------------------------------
 
 
-def test_with_inference_points_the_run_at_the_other_host(monkeypatch):
-    _remote_env(monkeypatch)
-    model = mc.load_catalog().inference["remote-llamacpp"]
+def test_with_inference_points_the_run_at_the_other_host():
+    model = _keyed_catalog().inference["x-remote"]
     settings = with_inference(ChatSettings(), model)
-    assert (settings.llm_url, settings.llm_model, settings.llm_api_key) == (URL, "bonsai-2-27b-abliterated", "sk-test")
-    assert settings.llm_remote_kind == "llamacpp" and settings.inference_model == "remote-llamacpp"
-    assert settings.llm_ctx == 8192 and settings.llm_thinking is False
+    assert (settings.llm_url, settings.llm_model, settings.llm_api_key) == ("https://llm.example/v1", "gpt-x", "sk-test")
+    assert settings.llm_remote_kind == "openai" and settings.inference_model == "x-remote"
+    assert settings.llm_ctx == 4096 and settings.llm_thinking is False
     client = make_llm(settings)
-    assert isinstance(client, RemoteLLM) and client.api_key == "sk-test" and client.template_kwargs
+    assert isinstance(client, RemoteLLM) and client.api_key == "sk-test" and not client.template_kwargs
     assert model_info(settings)["remote"] is True and "sk-test" not in json.dumps(model_info(settings))
     # Back on a local model: the router again, without the remote key.
     local = with_inference(settings, mc.load_catalog().inference["qwen3.8-27b-abliterated"])
@@ -129,16 +116,8 @@ def test_with_inference_points_the_run_at_the_other_host(monkeypatch):
     assert type(make_llm(local)) is LlamaRouter
 
 
-def test_a_remote_entry_without_url_is_refused_not_replaced():
-    model = mc.load_catalog().inference["openai-compatible"]
-    with pytest.raises(mc.ModelChoiceError) as info:
-        with_inference(ChatSettings(), model)
-    assert info.value.code == "model_unavailable" and "OPENAI_COMPAT_URL" in str(info.value)
-
-
 async def test_check_router_model_asks_the_remote_list(monkeypatch):
-    _remote_env(monkeypatch)
-    settings = with_inference(ChatSettings(), mc.load_catalog().inference["remote-llamacpp"])
+    settings = with_inference(ChatSettings(), mc.load_catalog().inference[LLAMACPP])
 
     async def listed(self, timeout_s=5.0):
         return ["other"]
@@ -207,31 +186,32 @@ def test_remote_error_reasons():
 
 # --- /coder/turn --------------------------------------------------------------------------------------------------
 
+NO_COMFY = {"configurable": {"comfy_client": None}}
 
-async def test_coder_turn_streams_from_the_remote_model(monkeypatch):
-    _remote_env(monkeypatch)
+
+async def test_coder_turn_streams_from_the_remote_model():
     recorder = Recorder()
-    settings = with_inference(ChatSettings(), mc.load_catalog().inference["remote-llamacpp"])
-    turn = coder_gate.Turn([{"role": "user", "content": "hi"}], [], "fast", 256, 0.2, "remote-llamacpp")
+    settings = with_inference(ChatSettings(), mc.load_catalog().inference[LLAMACPP])
+    turn = coder_gate.Turn([{"role": "user", "content": "hi"}], [], "fast", 256, 0.2, LLAMACPP)
     chunks = [c async for c in coder_gate.run_turn(turn, settings, transport=httpx.MockTransport(recorder),
-                                                   comfy_config={"configurable": {"comfy_client": None}})]
+                                                   comfy_config=NO_COMFY)]
     text = b"".join(chunks).decode("utf-8")
     assert "event: token" in text and "こんにちは" in text and "event: done" in text
     request = recorder.requests[0]
     assert str(request.url) == URL + "/chat/completions"
-    assert request.headers["Authorization"] == "Bearer sk-test"
-    assert json.loads(request.content)["model"] == "bonsai-2-27b-abliterated"
+    body = json.loads(request.content)
+    assert body["model"] == "bonsai-2-27b-abliterated" and "chat_template_kwargs" in body
 
 
-async def test_coder_turn_to_an_openai_service_leaves_out_template_kwargs(monkeypatch):
-    monkeypatch.setenv("OPENAI_COMPAT_URL", URL)
-    monkeypatch.setenv("OPENAI_COMPAT_MODEL", "gpt-x")
+async def test_coder_turn_to_an_openai_service_sends_its_key_and_no_template_kwargs():
     recorder = Recorder()
-    settings = with_inference(ChatSettings(), mc.load_catalog().inference["openai-compatible"])
-    turn = coder_gate.Turn([{"role": "user", "content": "hi"}], [], "think", 256, 0.2, "openai-compatible")
+    settings = with_inference(ChatSettings(), _keyed_catalog().inference["x-remote"])
+    turn = coder_gate.Turn([{"role": "user", "content": "hi"}], [], "think", 256, 0.2, "x-remote")
     _ = [c async for c in coder_gate.run_turn(turn, settings, transport=httpx.MockTransport(recorder),
-                                              comfy_config={"configurable": {"comfy_client": None}})]
-    body = json.loads(recorder.requests[0].content)
+                                              comfy_config=NO_COMFY)]
+    request = recorder.requests[0]
+    assert request.headers["Authorization"] == "Bearer sk-test"
+    body = json.loads(request.content)
     assert "chat_template_kwargs" not in body and body["model"] == "gpt-x"
 
 
@@ -264,29 +244,28 @@ async def _models(monkeypatch, remote_answer):
 
 
 async def test_models_lists_a_reachable_remote_as_available(monkeypatch):
-    _remote_env(monkeypatch)
     inference = await _models(monkeypatch, ["bonsai-2-27b-abliterated"])
-    remote = inference["remote-llamacpp"]
+    remote = inference[LLAMACPP]
     assert remote["available"] is True
-    assert remote["remote"] == {"kind": "llamacpp", "host": "192.168.11.53:8090", "model": "bonsai-2-27b-abliterated"}
+    assert remote["remote"] == {"kind": "llamacpp", "host": "127.0.0.1:18090", "model": "bonsai-2-27b-abliterated"}
+    assert inference[OPENAI]["remote"]["kind"] == "openai"
     assert "remote" not in inference["qwen3.8-27b-abliterated"]
-    assert inference["openai-compatible"]["available"] is False
-    assert "OPENAI_COMPAT_URL" in inference["openai-compatible"]["reason"]
-    assert "sk-test" not in json.dumps(inference)
+
+
+async def test_models_never_shows_an_api_key(monkeypatch, tmp_path):
+    path = tmp_path / "host_models.json"
+    path.write_text(json.dumps(_with_endpoint({"kind": "openai", "url": "https://llm.example/v1", "model": "gpt-x",
+                                               "api_key": "sk-secret"})), encoding="utf-8")
+    monkeypatch.setenv("HOST_MODELS_PATH", str(path))
+    inference = await _models(monkeypatch, ["gpt-x", "bonsai-2-27b-abliterated"])
+    assert inference["x-remote"]["available"] is True and "sk-secret" not in json.dumps(inference)
 
 
 async def test_models_gives_the_reason_a_remote_cannot_be_used(monkeypatch):
-    _remote_env(monkeypatch)
     request = httpx.Request("GET", URL)
     inference = await _models(monkeypatch, httpx.HTTPStatusError("x", request=request, response=httpx.Response(401)))
-    assert inference["remote-llamacpp"]["available"] is False and "API キー" in inference["remote-llamacpp"]["reason"]
+    assert inference[LLAMACPP]["available"] is False and "API キー" in inference[LLAMACPP]["reason"]
+    inference = await _models(monkeypatch, httpx.ConnectError("x"))
+    assert inference[LLAMACPP]["reason"] == "接続先に接続できません"
     inference = await _models(monkeypatch, ["other-model"])
-    assert "bonsai-2-27b-abliterated" in inference["remote-llamacpp"]["reason"]
-
-
-async def test_coder_turn_refuses_a_remote_without_url():
-    app = coder_gate.app
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://host") as client:
-        response = await client.post("/coder/turn", json={"messages": [{"role": "user", "content": "hi"}],
-                                                          "inference_model": "openai-compatible"})
-    assert response.status_code == 400 and response.json()["code"] == "model_unavailable"
+    assert "bonsai-2-27b-abliterated" in inference[LLAMACPP]["reason"]
