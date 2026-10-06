@@ -105,6 +105,9 @@ Claude Code に倣った画面です。
 | `/status` | 接続先、モデル、モード、許可、タスク |
 | `/host [URL] [--save]` | 接続先を表示 / 変更（`--save` でユーザー設定に保存） |
 | `/mode fast\|think\|auto` | ホストの思考の使い方 |
+| `/model [id] [--save] [--project]` | 推論モデルを表示 / 切り替え（ホストの `GET /models` の id と完全一致。次のターンから `POST /coder/turn` と `web_search` に効く） |
+| `/image-model [id] [--save] [--project]` | 画像モデルを表示 / 切り替え（`/image` と `image_generate` に効く） |
+| `/models` | ホストのモデル一覧（使えないものは理由つき） |
 | `/auto` `/default` `/accept-edits` `/plan` | 許可モード |
 | `/cd <path>` | ワークスペースを変える（確認あり） |
 | `/undo` | 直前のエージェントの編集を戻す（新規作成なら削除） |
@@ -122,7 +125,7 @@ Claude Code に倣った画面です。
 1. 既定値
 2. ユーザー設定: Windows は `%APPDATA%\cirka\config.toml`、macOS / Linux は `$XDG_CONFIG_HOME/cirka/config.toml`（なければ `~/.config/cirka/config.toml`）
 3. プロジェクト設定: `<作業ディレクトリ>/.cirka/config.toml`
-4. 環境変数: `CIRKA_HOST`、`CIRKA_MODE`、`CIRKA_PERMISSION`、`CIRKA_AUTH_HEADER`、`CIRKA_IDLE_TIMEOUT_S`
+4. 環境変数: `CIRKA_HOST`、`CIRKA_MODE`、`CIRKA_PERMISSION`、`CIRKA_AUTH_HEADER`、`CIRKA_IDLE_TIMEOUT_S`、`CIRKA_INFERENCE_MODEL`、`CIRKA_IMAGE_MODEL`
 5. コマンドライン: `--host`、`--mode`、`--permission`、`--max-turns`
 
 | キー | 既定 | 内容 |
@@ -135,6 +138,7 @@ Claude Code に倣った画面です。
 | `locale` | `ja` | 応答の言語（利用者が別の言語で書けばそれに合わせる） |
 | `auth_header` | 空 | `Name: value`。設定すると全リクエストに付ける（ホストに認証はまだ無く、差し込み口だけ） |
 | `idle_timeout_s` | `1200` | **何も返ってこない時間の上限（秒）**。下の「タイムアウト」 |
+| `inference_model` / `image_model` | 空（ホストの既定） | ホストのモデル一覧の id（`/model … --save` が書く）。`/resume` したセッションの選択はこれより優先 |
 
 例（`%APPDATA%\cirka\config.toml`）:
 

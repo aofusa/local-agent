@@ -32,7 +32,7 @@ fetch_repo() {
   avail="$(df -g "$REPO_ROOT" | awk 'NR==2 {print $4}')"
   echo "    hf download $1（空き ${avail} GB）"
   local snap
-  snap="$(hf download "$1" 2>/dev/null | tail -n 1)"
+  snap="$(hf_path download "$1")"
   [ -f "$snap/config.json" ] || die "hf download $1 に失敗しました"
   mkdir -p "$(dirname "$dest")"
   rm -rf "$dest"

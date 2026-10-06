@@ -19,7 +19,7 @@ require_macos() {
 init_env() {
   # .env from .env.example on the first run (machine-specific, never committed).
   if [ ! -f "$ENV_FILE" ]; then
-    cp "$REPO_ROOT/.env.example" "$ENV_FILE"
+    tr -d '\r' <"$REPO_ROOT/.env.example" >"$ENV_FILE"   # the example is checked out with CRLF on Windows
     echo "$ENV_FILE を作成しました"
   fi
 }
@@ -28,7 +28,7 @@ env_get() {
   # env_get KEY [default]: the value in .env (the last line wins), else the default.
   local value=""
   if [ -f "$ENV_FILE" ]; then
-    value="$(grep -E "^$1=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"
+    value="$(grep -E "^$1=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '\r' || true)"
   fi
   if [ -n "$value" ]; then printf '%s' "$value"; else printf '%s' "${2:-}"; fi
 }
@@ -97,7 +97,7 @@ hf_file() {
   command -v hf >/dev/null || die "hf（huggingface_hub の CLI）がありません: brew install huggingface-cli か uv tool install huggingface_hub"
   echo "    hf download $repo $file"
   local cached
-  cached="$(hf download "$repo" "$file" 2>/dev/null | tail -n 1)"
+  cached="$(hf_path download "$repo" "$file")"
   [ -s "$cached" ] || die "hf download に失敗しました（$repo $file）"
   # The cache keeps a symbolic link to the blob: link the blob itself.
   cached="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$cached")"
@@ -105,6 +105,12 @@ hf_file() {
   if [ -n "$size" ] && [ "$(file_size "$dest")" != "$size" ]; then die "サイズが一致しません: $dest（期待 $size）"; fi
   check_sha "$dest" "$sha"
   ok "$dest（Hugging Face のキャッシュ）"
+}
+
+hf_path() {
+  # hf_path ARGS...: run `hf ARGS --quiet` and print the local path it reports (older CLIs print the bare path,
+  # 1.x prints "path: ..." with colors).
+  hf "$@" --quiet 2>/dev/null | tr -d '\033' | sed 's/\[[0-9;]*m//g' | grep -o '/.*' | tail -n 1
 }
 
 known_model_dirs() {

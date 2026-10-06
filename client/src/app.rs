@@ -488,8 +488,8 @@ impl App {
 
     pub async fn repl(&mut self) {
         loop {
-            let status = format!("{}  {}", tui::mode_line(&self.ui.theme, self.agent.policy.mode, self.agent.mode, None),
-                                 self.ui.theme.dim(&self.models_line()));
+            let cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(100);
+            let status = tui::status_line(&self.ui.theme, self.agent.policy.mode, self.agent.mode, &self.models_line(), cols);
             match self.ui.read_input(&status, "依頼を書いてください（/help でコマンド一覧）") {
                 Input::Eof => break,
                 Input::CycleMode => {
