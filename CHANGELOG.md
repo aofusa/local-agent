@@ -1,5 +1,10 @@
 # Changelog
 
+## 未リリース — vrc-pilot の presence ターン
+
+- `POST /presence/turn` と `GET /presence/health`（`src/furry_agent/presence.py`、`docs/presence-design.md`）。vrc-pilot が世界状態の要約を送り、ActionCommand を最大 2 つ受け取る。ツールは無く、144 文字超は切らずに 422、方針違反の移動は 422、4 秒で 504。`/coder/turn` と同じ http.app に登録した。画像グラフ・チャットグラフ・`langgraph.json` のグラフ ID は変えていない。
+- `config/host_models.json` に `presence-qwen3.5-4b`（ゲーミングノートの llama.cpp）と `presence-gemma4-e4b`（Mac の mlx-vlm、チャットのみの予備）。
+
 ## v0.14.0 — 動画タブ（画像 1 枚からケモノの短い動画、Wan 2.2 I2V A14B）
 
 - 動画タブ（`docs/image-to-video-design.md`、作業は `docs/image-to-video-work-instruction.md`）: 画像 1 枚と日本語の指示（空なら控えめな自然な動き）から、Wan 2.2 I2V A14B の GGUF（High / Low の 2 エキスパート、ComfyUI-GGUF）と lightx2v の 4 ステップ LoRA で短い動画（16fps、2 / 3 / 5 秒、h264 の mp4）を作る。ケモノに特化させる利用者の指定で、Furry Enhancer の Wan 2.2 V3（I2V）を既定の LoRA にし、動きの説明のプロンプト（`prompts/system_video_i2v.txt`、`prompts/system_vision_video.txt`）も耳・尾・毛並みの動きを優先し、ケモノの特徴を最後まで保つよう書く。

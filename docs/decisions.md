@@ -8,6 +8,7 @@
 
 ## 実装時に決めたもの
 
+- vrc-pilot の presence ターン（未リリース、`docs/presence-design.md`）: job_lock を取らない（4 秒の予算で画像生成を待てない）。モデルは `PRESENCE_MODEL` の推論 id（既定は `presence-qwen3.5-4b`、別ホストの llama.cpp を ssh のポート転送で届ける）。行動の契約は vrc-pilot の `action_command.schema.json` と同じ規則を `presence.action_errors` に書き、スキーマのライブラリは足していない。
 - 動画タブ（v0.14.0、利用者の指定。`docs/image-to-video-design.md`、作業は `docs/image-to-video-work-instruction.md`）: 画像 1 枚と日本語の指示から、Wan 2.2 I2V A14B（QuantStack の GGUF、High / Low の 2 エキスパート）と lightx2v の 4 ステップ LoRA（`…_4step_1022`）で短い動画を作る。ケモノに特化させる利用者の指定で、Furry Enhancer の Wan 2.2 V3（I2V、Civitai から利用者が入手）を既定の LoRA にし、動きの説明のプロンプトも耳・尾・毛並みを優先する。仕様の禁止（動画生成、ComfyUI 内の GGUF）は、動画タブの画像→動画と動画モデルの重みを ComfyUI-GGUF で読むことに限って緩めた（D1、D2）。
   - 1 モデルずつ: LLM（ComfyUI の中で動きの説明を作る）→ eject → umT5 → `release_te` → VAE → High → `release_high` → Low → `release_low` → タイルデコード。ローダはすべて `after` で前の段に依存させる。ComfyUI は `--cache-none` だとノードの出力を使い終えた時点で手放し、モデル管理は弱参照なので、release ノードは GC で解放する（CPU への退避コピーをしない。共有メモリでは退避もメモリを使うため）。
   - 既定は Q3_K_M（フェーズ 0 の計測、設計書 §11）: PyTorch から見えるこの端末の GPU メモリは 9.17GB だが、他のアプリと ROCm のランタイムに削られて空きは 0.2〜6.9GB になり、Q3_K_M（1 エキスパート 7.2GB）も Q4_K_M（9.65GB）も丸ごとは載らない。それでも出力は壊れず、1 ステップの時間は同じくらい（計算で決まる）。RAM を約 2.4GB 少なく使い、ケモノ向け LoRA を当てた組み合わせを確かめた Q3_K_M を既定（カタログの先頭）にし、Q4_K_M はピッカーの「画質優先」として残した。大きさと長さは 448×656 相当・3 秒（3 秒で 25〜33 分、LLM を含む。上限 5 秒）。
