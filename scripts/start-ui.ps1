@@ -15,6 +15,8 @@ if (-not $HostAddress) { throw "LAN の IPv4 アドレスを特定できませ�
 $apiUrl = "http://${HostAddress}:${LangGraphPort}"
 $env:NEXT_PUBLIC_API_URL = $apiUrl
 $env:NEXT_PUBLIC_ASSISTANT_ID = "agent"
+# Next.js sends anonymous usage data during builds by default; this app makes no outside connection but search.
+$env:NEXT_TELEMETRY_DISABLED = "1"
 Write-Host "agent-chat-ui -> LangGraph $apiUrl (assistant: agent)"
 
 $pnpm = @("--yes", "pnpm@10.5.1")
