@@ -35,7 +35,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from furry_agent import modes
-from furry_agent.chat_common import _image_tab_busy, check_router_model, prompt_tokens, with_inference
+from furry_agent.chat_common import _image_tab_busy, check_router_model, make_llm, prompt_tokens, with_inference
 from furry_agent.config import ChatSettings, env_int
 from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LlamaRouter, idle_timeout
@@ -200,14 +200,17 @@ async def stream_llm(client: LlamaRouter, turn: Turn, max_tokens: int, timeout_s
     """The parsed chunks of one streamed Chat Completions call. A refused start (HTTP error) is retried once."""
     think = turn.mode == modes.THINK
     body: dict[str, Any] = {"messages": turn.messages, "max_tokens": max_tokens, "temperature": turn.temperature,
-                            "stream": True, "stream_options": {"include_usage": True},
-                            "chat_template_kwargs": {"enable_thinking": think}}
+                            "stream": True, "stream_options": {"include_usage": True}}
+    if getattr(client, "template_kwargs", True):  # llama.cpp; a generic OpenAI-compatible service may refuse it
+        body["chat_template_kwargs"] = {"enable_thinking": think}
     if client.model:
         body["model"] = client.model
     if turn.tools:
         body["tools"] = turn.tools
         body["tool_choice"] = "auto"
-    kwargs: dict[str, Any] = {"timeout": idle_timeout(timeout_s), "trust_env": False}
+    kwargs: dict[str, Any] = {"timeout": idle_timeout(timeout_s), "trust_env": False,
+                              "headers": {"Authorization": f"Bearer {getattr(client, 'api_key', '') or 'local'}"}}
+    where = "接続先の LLM サーバ" if getattr(client, "remote", False) else "LLM サーバ（llama.cpp）"
     if transport is not None:
         kwargs["transport"] = transport
     for attempt in (1, 2):
@@ -219,7 +222,7 @@ async def stream_llm(client: LlamaRouter, turn: Turn, max_tokens: int, timeout_s
                         if attempt == 1:
                             log.info("coder turn: the LLM router refused (HTTP %s); once more", response.status_code)
                             continue
-                        raise GateError(f"LLM サーバ（llama.cpp）が拒否しました（HTTP {response.status_code}: {detail}）", "llm")
+                        raise GateError(f"{where}が拒否しました（HTTP {response.status_code}: {detail}）", "llm")
                     async for line in response.aiter_lines():
                         line = line.strip()
                         if not line.startswith("data:"):
@@ -233,9 +236,9 @@ async def stream_llm(client: LlamaRouter, turn: Turn, max_tokens: int, timeout_s
                             continue
                     return
             except httpx.TimeoutException as exc:
-                raise GateError(f"LLM サーバ（llama.cpp）が {timeout_s:.0f} 秒間応答しませんでした", "llm") from exc
+                raise GateError(f"{where}が {timeout_s:.0f} 秒間応答しませんでした", "llm") from exc
             except httpx.HTTPError as exc:
-                raise GateError(f"LLM サーバ（llama.cpp）に接続できません: {exc!r}", "llm") from exc
+                raise GateError(f"{where}に接続できません: {exc!r}", "llm") from exc
 
 
 async def _acquire(settings: ChatSettings, comfy_config: dict | None) -> AsyncIterator[str | dict]:
@@ -268,10 +271,12 @@ async def run_turn(turn: Turn, settings: ChatSettings, *, client: LlamaRouter | 
                    transport: httpx.AsyncBaseTransport | None = None,
                    comfy_config: dict | None = None) -> AsyncIterator[bytes]:
     """The SSE body of one turn. Tool calls are sent only after the stream ended (a broken stream sends none)."""
-    client = client or LlamaRouter(settings.llm_url, settings.llm_model, settings.idle_timeout_s)
+    client = client or make_llm(settings)
     if settings.inference_model and client.model != settings.llm_model:
-        # The picked model is another section of the same router (it unloads the previous model itself).
-        client = LlamaRouter(client.base_url, settings.llm_model, settings.idle_timeout_s)
+        # The picked model is another section of the same router (it unloads the previous model itself), or a
+        # model on another host (its own server).
+        client = (make_llm(settings) if settings.llm_remote_kind else
+                  LlamaRouter(client.base_url, settings.llm_model, settings.idle_timeout_s))
     token = None
     started = time.monotonic()
     try:
@@ -350,14 +355,19 @@ async def _turn_settings(request: Request, settings: ChatSettings, turn: Turn) -
 
 async def health_endpoint(request: Request):
     settings = _settings(request)
-    client = getattr(request.app.state, "llm", None) or LlamaRouter(settings.llm_url, settings.llm_model, 5)
-    reachable = await client.reachable()
     try:
         catalog = getattr(request.app.state, "host_catalog", None) or await asyncio.to_thread(load_catalog)
         defaults = default_ids(catalog)
         default_model = catalog.inference.get(os.environ.get("DEFAULT_INFERENCE_MODEL", "").strip() or "")
     except CatalogError:
         defaults, default_model = {"inference": "", "image": ""}, None
+    client = getattr(request.app.state, "llm", None)
+    if client is None:
+        # The default model on another host is asked there; everything else is this host's router.
+        remote = default_model is not None and default_model.remote and not default_model.endpoint.missing()
+        client = (make_llm(with_inference(settings, default_model), 5) if remote else
+                  LlamaRouter(settings.llm_url, settings.llm_model, 5))
+    reachable = await client.reachable()
     model = default_model.id if default_model else (settings.llm_model or defaults["inference"])
     context = default_model.context if default_model else settings.llm_ctx
     # "lmstudio" is the same flag under its name before v0.11.0 (cirka 0.3 and older read it).

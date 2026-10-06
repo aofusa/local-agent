@@ -87,4 +87,4 @@ async def test_disabled_ids_are_listed_but_unavailable(monkeypatch):
     status, body = await _get(Comfy(INFO), ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"])
     wulver = next(m for m in body["image"] if m["id"] == "wulver")
     assert wulver["available"] is False and "HOST_MODELS_DISABLE" in wulver["reason"]
-    assert all(m["available"] for m in body["inference"])
+    assert all(m["available"] for m in body["inference"] if "remote" not in m)

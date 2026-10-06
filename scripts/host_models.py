@@ -94,6 +94,8 @@ def preset(args) -> list[dict]:
         os.environ["BONSAI_MODELS_DIR"] = args.models_dir
     sections, skipped = [], []
     for model in catalog.inference.values():
+        if model.remote:  # served by another host (catalog "endpoint"): not a section of this router
+            continue
         settings: dict = {}
         mlx_dir = ROOT / "tools" / "models" / "mlx" / model.mlx["repo"].replace("/", "--") if model.mlx else None
         if args.engine == "mlx" and mlx_dir is not None and (mlx_dir / "config.json").exists():

@@ -26,7 +26,7 @@ from furry_agent.bonsai_select import Selection
 from furry_agent.comfy_client import ComfyClient
 from furry_agent.config import ChatSettings, env_float, env_int
 from furry_agent.job_lock import JobLockBusy, job_lock
-from furry_agent.llm_client import LlamaRouter
+from furry_agent.llm_client import LlamaRouter, RemoteLLM
 from furry_agent.model_catalog import InferenceModel, ModelChoiceError, load_catalog, requested_id, resolve_inference
 from furry_agent.modes import THINK
 
@@ -113,30 +113,62 @@ def inference_choice(config: RunnableConfig | None) -> InferenceModel | None:
 
 
 def with_inference(settings: ChatSettings, model: InferenceModel | None) -> ChatSettings:
-    """Settings for one run on ``model``: its router section, context window and thinking."""
+    """Settings for one run on ``model``: its router section (or its server on another host), context window and
+    thinking. A remote entry whose URL or model is not set is refused, never replaced by the local router."""
     if model is None:
         return settings
+    if model.endpoint is not None:
+        missing = model.endpoint.missing()
+        if missing:
+            raise ModelChoiceError(f"推論モデル {model.label}（{model.id}）は使えません: {missing}", "model_unavailable")
+        url, name, key = model.endpoint.resolved()
+        return replace(settings, llm_url=url, llm_model=name, llm_ctx=model.context, llm_thinking=model.thinks,
+                       inference_model=model.id, inference_label=model.label,
+                       llm_remote_kind=model.endpoint.kind, llm_api_key=key)
     return replace(settings, llm_model=model.id, llm_ctx=model.context, llm_thinking=model.thinks,
-                   inference_model=model.id, inference_label=model.label)
+                   inference_model=model.id, inference_label=model.label, llm_remote_kind="", llm_api_key="")
+
+
+def make_llm(settings: ChatSettings, timeout_s: float | None = None) -> LlamaRouter:
+    """The client of the run's inference model: this host's router, or the server on another host."""
+    timeout = settings.idle_timeout_s if timeout_s is None else timeout_s
+    if settings.llm_remote_kind:
+        return RemoteLLM(settings.llm_url, settings.llm_model, timeout, kind=settings.llm_remote_kind,
+                         api_key=settings.llm_api_key)
+    return LlamaRouter(settings.llm_url, settings.llm_model, timeout)
 
 
 def leader_label(settings: ChatSettings) -> str:
     """The router's model as the search and control traces name it."""
-    return f"{settings.inference_label or 'Qwen3.8 27B abliterated'}（llama.cpp）"
+    where = "リモート" if settings.llm_remote_kind else "llama.cpp"
+    return f"{settings.inference_label or 'Qwen3.8 27B abliterated'}（{where}）"
 
 
 def model_info(settings: ChatSettings) -> dict:
     """additional_kwargs.model_info of a reply: the inference model that wrote it (UI: under the message)."""
     if not settings.inference_model:
         return {}
-    return {"kind": "inference", "id": settings.inference_model, "label": settings.inference_label,
+    info = {"kind": "inference", "id": settings.inference_model, "label": settings.inference_label,
             "thinking": settings.llm_thinking}
+    if settings.llm_remote_kind:
+        info["remote"] = True
+    return info
 
 
 async def check_router_model(config: RunnableConfig | None, settings: ChatSettings) -> None:
-    """The picked model must be a section of the router's preset (scripts/setup-llm writes one per installed GGUF).
-    A router that does not answer is not an error here: the first model call reports it."""
+    """The picked model must be a section of the router's preset (scripts/setup-llm writes one per installed GGUF),
+    or, for a model on another host, in that server's model list. A server that does not answer is not an error
+    here: the first model call reports it."""
     if not settings.inference_model or _conf(config).get("llm") is not None:
+        return
+    if settings.llm_remote_kind:
+        try:
+            offered = await make_llm(settings, 5).model_ids()
+        except Exception:
+            return
+        if settings.llm_model not in offered:
+            raise ModelChoiceError(f"推論モデル {settings.inference_label}（{settings.inference_model}）: 接続先に"
+                                   f"モデル {settings.llm_model} がありません", "model_unavailable")
         return
     try:
         offered = await LlamaRouter(settings.llm_url, "", 5).model_ids()
@@ -153,8 +185,7 @@ def _settings(config: RunnableConfig | None) -> ChatSettings:
 
 
 def _llm(config: RunnableConfig | None, settings: ChatSettings) -> LlamaRouter:
-    return _conf(config).get("llm") or LlamaRouter(settings.llm_url, settings.llm_model,
-                                                     settings.idle_timeout_s)
+    return _conf(config).get("llm") or make_llm(settings)
 
 
 def _comfy(config: RunnableConfig | None, settings: ChatSettings) -> ComfyClient | None:

@@ -81,6 +81,11 @@ ROUTER_KINDS = {"SEARCH": SEARCH, "WRITE": WRITE, "CODE": CODE, "CHAT": CHAT}  #
 # --- trace -----------------------------------------------------------------------------------------------------------
 
 
+def _leader_here(search: dict) -> bool:
+    """The leader takes this host's memory (the router's 27B stayed loaded; a remote leader does not count)."""
+    return search.get("mode") == "resident" and not search.get("leader_remote")
+
+
 def _pages_read(logs: list[dict]) -> int:
     return len({u for entry in logs if entry.get("kind") == "read" for u in entry.get("opened") or []})
 
@@ -363,9 +368,13 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
 
         # ... and is unloaded when the readers do not fit next to it (measured: 0.4 GB free with the IQ3_M 27B).
         stage = "worker"
-        resident = use_llm and bool(await llm.loaded())
+        # A model on another host takes no memory here: it stays the leader and the readers get this host.
+        remote = use_llm and getattr(llm, "remote", False)
+        resident = use_llm and (remote or bool(await llm.loaded()))
         mode = "resident"
-        if resident:
+        if remote:
+            pass
+        elif resident:
             try:
                 fit = select_model("worker", catalog, rank, available, _free_mb(config), leader_resident=True,
                                    reserve_mb=settings.reserve_mb, max_width=len(intents),
@@ -379,6 +388,7 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         else:
             mode = "proxy"
         search.update({"intents": intents, "pending": [i["id"] for i in intents], "mode": mode,
+                       "leader_remote": bool(remote and mode == "resident"),
                        "roles": {**search["roles"], "planner": planner,
                                  "leader": leader_label(settings) if mode == "resident" else
                                  PROXY_LABEL}})
@@ -395,7 +405,8 @@ async def plan(state: ChatState, config: RunnableConfig) -> dict:
         await _cleanup(token, llm, unload=True)
         return _fail(state, exc, getattr(exc, "stage", stage))
     lines = "\n".join(f"- {i['tool']}: `{i['q']}`（{i.get('why') or '―'}）" for i in intents)
-    leader_note = ("27B は載せたまま統合します" if mode == "resident" else
+    leader_note = (f"{leader_label(settings)} が統合します（このホストのメモリは使いません）" if remote and mode == "resident"
+                   else "27B は載せたまま統合します" if mode == "resident" else
                    "27B は unload し、批評と統合は Ternary-Bonsai-2-27B abliterated が代理で行います")
     if think:
         subs = "\n".join(f"- {s['id']}: {s['question']}" for s in search["subquestions"])
@@ -479,7 +490,7 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
 
             try:
                 relevance, selection = await _run_model(config, settings, "filter", PORT_FILTER, judge,
-                                                        leader_resident=search["mode"] == "resident")
+                                                        leader_resident=_leader_here(search))
                 before = hits
                 hits = sa.apply_filter(hits, relevance)
                 kept = {h["url"] for h in hits}
@@ -497,7 +508,7 @@ async def filter_hits(state: ChatState, config: RunnableConfig) -> dict:
         slots: list[list[dict]] = []
         if jobs:
             catalog, rank, available = await asyncio.to_thread(_catalog, settings)
-            leader_up = search["mode"] == "resident" or (token in _leaders)
+            leader_up = _leader_here(search) or (token in _leaders)
             selection = select_model("worker", catalog, rank, available, _free_mb(config), leader_resident=leader_up,
                                      reserve_mb=settings.reserve_mb, max_width=min(len(jobs), settings.fanout_width),
                                      override=settings.model_override)

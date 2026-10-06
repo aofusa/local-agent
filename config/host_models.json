@@ -30,6 +30,24 @@
         "presence-penalty": 1.5,
         "repeat-penalty": 1.0
       }
+    },
+    {
+      "id": "remote-llamacpp",
+      "label": "リモートの llama.cpp",
+      "endpoint": {"kind": "llamacpp", "url_env": "REMOTE_LLAMACPP_URL", "model_env": "REMOTE_LLAMACPP_MODEL",
+                   "api_key_env": "REMOTE_LLAMACPP_API_KEY"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": false
+    },
+    {
+      "id": "openai-compatible",
+      "label": "OpenAI 互換サービス",
+      "endpoint": {"kind": "openai", "url_env": "OPENAI_COMPAT_URL", "model_env": "OPENAI_COMPAT_MODEL",
+                   "api_key_env": "OPENAI_COMPAT_API_KEY"},
+      "context": 8192,
+      "thinking": "off",
+      "vision": false
     }
   ],
   "image": [

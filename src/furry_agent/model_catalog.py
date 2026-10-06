@@ -6,7 +6,9 @@ Requests without an id use DEFAULT_INFERENCE_MODEL / DEFAULT_IMAGE_MODEL.
 
 Inference models are sections of the llama.cpp router preset (scripts/setup-llm writes one per entry whose GGUF
 exists), so picking one only changes the ``model`` the chat tab and /coder/turn send to the router; ``context``
-and ``thinking`` follow the entry. Image models give the image graph its family, file, LoRAs and sampler
+and ``thinking`` follow the entry. An inference entry with an ``endpoint`` runs on another host instead (a llama.cpp
+server or an OpenAI-compatible service, docs/remote-llm-design.md): the chat tab and /coder/turn call that server,
+and it is usable when the server lists its model. Image models give the image graph its family, file, LoRAs and sampler
 parameters; the ComfyUI workflow still calls the LLM and ejects it before the model is loaded.
 """
 
@@ -32,6 +34,10 @@ IMAGE_PARAMS = {"steps": int, "cfg": float, "sampler_name": str, "scheduler": st
 LORA_WEIGHT = (0.0, 2.0)  # exclusive low, inclusive high (design doc §4)
 # Family -> the prompt style its workflows are built for (workflows/maps/<family>.json "prompt_style").
 FAMILY_STYLES = {"sdxl": "danbooru", "anima": "danbooru", "flux": "prose", "krea2": "prose"}
+# A model on another host (docs/remote-llm-design.md): a llama.cpp server or an OpenAI-compatible service.
+ENDPOINT_KINDS = ("llamacpp", "openai")
+ENDPOINT_KEYS = {"kind", "url", "url_env", "model", "model_env", "api_key_env"}
+ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 class CatalogError(ValueError):
@@ -47,6 +53,40 @@ class ModelChoiceError(ValueError):
 
 
 @dataclass(frozen=True)
+class Endpoint:
+    """A model served by another host: a llama.cpp server (``llamacpp``) or any OpenAI-compatible service
+    (``openai``). The URL and the model name are written in the catalog or read from the .env keys it names; the API
+    key is only ever read from .env (``api_key_env``), never written in the catalog."""
+
+    kind: str
+    url: str = ""
+    url_env: str = ""
+    model: str = ""
+    model_env: str = ""
+    api_key_env: str = ""
+
+    def resolved(self) -> tuple[str, str, str]:
+        """(base URL ending in /v1 or the service's own path, model name, API key); "" for what is not set."""
+        url = (os.environ.get(self.url_env, "").strip() if self.url_env else "") or self.url
+        model = (os.environ.get(self.model_env, "").strip() if self.model_env else "") or self.model
+        key = os.environ.get(self.api_key_env, "").strip() if self.api_key_env else ""
+        return url.rstrip("/"), model, key
+
+    def missing(self) -> str:
+        """Why the endpoint cannot be called yet ("" when its URL and model are set)."""
+        url, model, _ = self.resolved()
+        if not url:
+            return f"接続先の URL がありません（.env の {self.url_env} に設定してください）" if self.url_env else \
+                "接続先の URL がありません"
+        if not url.startswith(("http://", "https://")):
+            return f"接続先の URL は http:// か https:// で書いてください（{url}）"
+        if not model:
+            return f"モデル名がありません（.env の {self.model_env} に設定してください）" if self.model_env else \
+                "モデル名がありません"
+        return ""
+
+
+@dataclass(frozen=True)
 class InferenceModel:
     id: str
     label: str
@@ -57,10 +97,16 @@ class InferenceModel:
     params: dict = field(default_factory=dict)
     mlx: dict = field(default_factory=dict)
     gpu_offload: float | None = None
+    # Set for a model on another host (no GGUF here, never a section of this host's router preset).
+    endpoint: Endpoint | None = None
 
     @property
     def thinks(self) -> bool:
         return self.thinking != "off"
+
+    @property
+    def remote(self) -> bool:
+        return self.endpoint is not None
 
 
 @dataclass(frozen=True)
@@ -127,6 +173,29 @@ def _image_params(raw: Any, where: str) -> dict:
     return params
 
 
+def _endpoint(raw: Any, where: str) -> Endpoint:
+    if not isinstance(raw, dict):
+        raise CatalogError(f"{where}: endpoint はオブジェクトです")
+    unknown = set(raw) - ENDPOINT_KEYS
+    if unknown & {"api_key", "key", "token", "password"}:
+        raise CatalogError(f"{where}: API キーは一覧に書かず、.env のキー名を api_key_env で指定してください")
+    if unknown:
+        raise CatalogError(f"{where}: endpoint の {', '.join(sorted(unknown))} は使えません（{', '.join(sorted(ENDPOINT_KEYS))}）")
+    kind = raw.get("kind")
+    if kind not in ENDPOINT_KINDS:
+        raise CatalogError(f"{where}: endpoint の kind は {' / '.join(ENDPOINT_KINDS)} です")
+    for key in ("url_env", "model_env", "api_key_env"):
+        if raw.get(key) and not ENV_RE.match(str(raw[key])):
+            raise CatalogError(f"{where}: endpoint の {key} は .env のキー名（英大文字・数字・_）です（{raw[key]!r}）")
+    if not raw.get("url") and not raw.get("url_env"):
+        raise CatalogError(f"{where}: endpoint には url か url_env が要ります")
+    if not raw.get("model") and not raw.get("model_env"):
+        raise CatalogError(f"{where}: endpoint には model か model_env が要ります")
+    return Endpoint(kind, str(raw.get("url") or "").strip(), str(raw.get("url_env") or ""),
+                    str(raw.get("model") or "").strip(), str(raw.get("model_env") or ""),
+                    str(raw.get("api_key_env") or ""))
+
+
 def parse_catalog(raw: dict) -> HostCatalog:
     inference: dict[str, InferenceModel] = {}
     for item in raw.get("inference") or []:
@@ -134,18 +203,22 @@ def parse_catalog(raw: dict) -> HostCatalog:
         where = f"inference {model_id}"
         if model_id in inference:
             raise CatalogError(f"{where}: id が重複しています")
+        endpoint = _endpoint(item["endpoint"], where) if item.get("endpoint") is not None else None
         gguf = item.get("gguf") or {}
-        if gguf.get("catalog") not in ("llm_model", "search_models") or (
+        if endpoint is not None:
+            if gguf or item.get("mlx"):
+                raise CatalogError(f"{where}: endpoint のモデルに gguf / mlx は書けません（このホストでは動かしません）")
+        elif gguf.get("catalog") not in ("llm_model", "search_models") or (
                 gguf.get("catalog") == "search_models" and not gguf.get("id")):
             raise CatalogError(f"{where}: gguf は {{\"catalog\": \"llm_model\"}} か "
-                               "{\"catalog\": \"search_models\", \"id\": ...} です")
+                               "{\"catalog\": \"search_models\", \"id\": ...} です（別ホストのモデルは endpoint）")
         thinking = item.get("thinking", "off")
         if thinking not in THINKING:
             raise CatalogError(f"{where}: thinking は {' / '.join(THINKING)} です")
         inference[model_id] = InferenceModel(
             model_id, str(item.get("label") or model_id), dict(gguf), int(item.get("context") or 4096), thinking,
             bool(item.get("vision", False)), dict(item.get("params") or {}), dict(item.get("mlx") or {}),
-            float(item["gpu_offload"]) if item.get("gpu_offload") is not None else None)
+            float(item["gpu_offload"]) if item.get("gpu_offload") is not None else None, endpoint)
     image: dict[str, ImageModel] = {}
     for item in raw.get("image") or []:
         model_id = _check_id(item.get("id"), "image")
@@ -263,13 +336,34 @@ def gguf_path(model: InferenceModel, root: Path = REPO_ROOT) -> Path | None:
         return None
 
 
-def inference_unavailable(catalog: HostCatalog, router_models: list[str] | None) -> dict[str, str]:
+def remote_unavailable(model: InferenceModel, offered: list[str] | str | None) -> str:
+    """Why a model on another host cannot be used ("" = usable). ``offered`` is the model list its server returned,
+    or the reason it could not be asked (a string), or None when it was not asked."""
+    assert model.endpoint is not None
+    missing = model.endpoint.missing()
+    if missing:
+        return missing
+    if isinstance(offered, str):
+        return offered
+    _, name, _ = model.endpoint.resolved()
+    if offered is not None and name not in offered:
+        return f"接続先にモデル {name} がありません（{', '.join(offered[:5]) or 'なし'}）"
+    return ""
+
+
+def inference_unavailable(catalog: HostCatalog, router_models: list[str] | None,
+                          remote: dict[str, list[str] | str | None] | None = None) -> dict[str, str]:
     """id -> reason for the inference entries that cannot be used. ``router_models`` is the router's model list
-    (None when the router is not reachable: the GGUF files decide)."""
+    (None when the router is not reachable: the GGUF files decide). ``remote`` is id -> what the other host's
+    server answered for the entries with an endpoint (see remote_unavailable)."""
     out = {}
     for model in catalog.inference.values():
         if model.id in disabled_ids():
             out[model.id] = "このホストで無効（HOST_MODELS_DISABLE）"
+        elif model.remote:
+            reason = remote_unavailable(model, (remote or {}).get(model.id))
+            if reason:
+                out[model.id] = reason
         elif router_models is not None:
             if model.id not in router_models:
                 out[model.id] = "LLM ルータのプリセットにありません（scripts/setup-llm でモデルを導入してください）"

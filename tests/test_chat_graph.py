@@ -497,6 +497,35 @@ async def test_search_resident_mode_keeps_27b_and_never_starts_large_bonsai(mode
     assert message.additional_kwargs["thinking"] == [{"stage": "統合", "text": "統合の思考"}]
 
 
+class FakeRemoteLLM(FakeLlamaRouter):
+    """A model on another host: it answers, but holds none of this host's memory and is never unloaded here."""
+
+    remote = True
+
+    async def chat(self, messages, **kw):
+        self.world.events.append("remote:chat")
+        return await FakeLLM.chat(self, messages, **kw)
+
+    async def loaded(self):
+        raise AssertionError("a remote model is not asked what it has loaded")
+
+    async def unload_all(self):
+        return []
+
+
+async def test_search_with_a_remote_model_keeps_it_as_leader_and_unloads_nothing(models_dir):
+    world = World(free_mb=14000)  # a local 27B would be unloaded here (see the proxy test)
+    llm = FakeRemoteLLM(world)
+    state, message = await _run("/search ROG Ally X", world, _settings(models_dir), mode="think", llm=llm)
+    assert "llm:unload" not in world.events
+    assert "bonsai-2-27b-abliterated" not in world.started  # no proxy leader: the remote model critiques and writes
+    assert world.synth == ["llm"] and world.critiques == 1
+    assert world.started.count("ternary-8b") == 2 and world.live == set() and job_lock.holder is None
+    trace = message.additional_kwargs["search_trace"]
+    assert trace["mode"] == "resident"
+    assert message.content.startswith("まとめた回答です [1]")
+
+
 async def test_zero_results_do_not_call_a_leader(models_dir):
     world = World()
     world.no_hits = True

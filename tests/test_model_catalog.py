@@ -28,7 +28,9 @@ def _raw(**changes):
 
 def test_shipped_catalog_lists_the_requested_models():
     catalog = mc.load_catalog()
-    assert list(catalog.inference) == ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"]
+    assert list(catalog.inference) == ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated",
+                                       "remote-llamacpp", "openai-compatible"]
+    assert [m.id for m in catalog.inference.values() if not m.remote] == list(catalog.inference)[:2]
     files = {m.ckpt for m in catalog.image.values()}
     assert files == {
         "yiffInHell_yihVANTABLACK.safetensors", "yiffInHell_yihMETLLICTETR.safetensors",
@@ -143,7 +145,8 @@ def test_inference_availability_falls_back_to_files(tmp_path, monkeypatch):
     assert "bonsai-2-27b-abliterated" in out
     (tmp_path / "Ternary-Bonsai-2-27B-PTQ1_0-abliterated.gguf").write_bytes(b"x")
     assert "bonsai-2-27b-abliterated" not in mc.inference_unavailable(catalog, None)
-    assert mc.inference_unavailable(catalog, ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"]) == {}
+    out = mc.inference_unavailable(catalog, ["qwen3.8-27b-abliterated", "bonsai-2-27b-abliterated"])
+    assert set(out) == {"remote-llamacpp", "openai-compatible"}  # their URL is not in .env
 
 
 def test_every_image_family_has_its_map():
