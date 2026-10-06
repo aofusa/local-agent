@@ -28,3 +28,6 @@ dist-ssr
 .env
 .next/
 next-env.d.ts
+
+# TypeScript incremental build info (written by tsc --noEmit)
+*.tsbuildinfo
