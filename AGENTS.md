@@ -17,6 +17,7 @@ LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から
 |---|---|
 | [docs/specification.md](docs/specification.md) | 変えてはいけない仕様の詳細（プロセスの分担、待受、ComfyUI と LLM の契約、チャットタブ、cirka、画像の返却、UI の変更範囲、受け入れ条件） |
 | [docs/decisions.md](docs/decisions.md) | 実装時に決めたことと理由、版ごとの経緯 |
+| [docs/models.md](docs/models.md) | 採用モデルの選定理由と評価、採らなかったもの。モデルを足す・設定値を変えるときに先に読み、結果をここに追記する |
 | 設計書（`docs/*-design.md`、`docs/*-work-instruction.md`） | 機能ごとの設計と実装記録。ComfyUI と LLM の連携は [llm-comfyui-workflow-design.md](docs/llm-comfyui-workflow-design.md)、LLM サーバは [llamacpp-router-design.md](docs/llamacpp-router-design.md)、モデルの選択と macOS は [host-model-selection-design.md](docs/host-model-selection-design.md) |
 | [docs/architecture.md](docs/architecture.md) | ファイルの配置、ワークフローのノード、UI の変更点、ログ |
 | [docs/setup.md](docs/setup.md) / [usage.md](docs/usage.md) / [configuration.md](docs/configuration.md) / [troubleshooting.md](docs/troubleshooting.md) / [third-party-licenses.md](docs/third-party-licenses.md) | 利用者向けの詳細 |

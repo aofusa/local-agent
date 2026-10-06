@@ -68,7 +68,7 @@
 
 ### 画像モデル
 
-`params` は `steps`、`cfg`、`sampler_name`、`scheduler`、`width`、`height`、`quality_prefix`、`negative`（`split` の既定の negative）だけで、系統のマップ（`workflows/maps/<family>.json` の `defaults`）の上に重ねます。`loras` は `"<ファイル>:<強度>"` の配列（0 より大きく 2 以下、CLIP も同じ強度）で、`ckpt` の直後に順に挿入します。
+選定の理由と評価は [models.md](models.md)。`params` は `steps`、`cfg`、`sampler_name`、`scheduler`、`width`、`height`、`quality_prefix`、`negative`（`split` の既定の negative）だけで、系統のマップ（`workflows/maps/<family>.json` の `defaults`）の上に重ねます。`loras` は `"<ファイル>:<強度>"` の配列（0 より大きく 2 以下、CLIP も同じ強度）で、`ckpt` の直後に順に挿入します。
 
 | id | 表示名 | 系統 | ファイル | steps / cfg / サンプラー / サイズ | LoRA | 出典 |
 |---|---|---|---|---|---|---|
