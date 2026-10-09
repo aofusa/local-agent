@@ -12,6 +12,14 @@ Tor or the sandbox.
              (a say over 144 characters is never cut here and a forbidden move is never silently dropped)
     504      no reply within PRESENCE_TIMEOUT_S (4 s)
 
+``POST /presence/ask`` is one JSON answer from the same presence model for vrc-pilot's other roles (the situation
+assessor, the instruction interpreter, memory consolidation; vrc-pilot docs/10, 12, 17). vrc-pilot owns those
+prompts and sends them:
+
+    request  {"system": "...", "user": "...", "max_tokens": 400, "timeout_s": 4, "model": "<optional id>"}
+    response {"json": {...} | null, "text": "<raw reply>", "model": "...", "ms": 812}
+    504      no reply within timeout_s (at most PRESENCE_ASK_MAX_TIMEOUT_S, 60 s)
+
 The turn does not take ``job_lock``: a 4 s budget cannot wait behind an image generation, and the presence model
 is a separate (usually remote) inference model. Pick it with ``PRESENCE_MODEL`` (an inference id; the host's
 default model otherwise). The system prompt is prompts/presence_system.txt, a copy of vrc-pilot's
@@ -266,6 +274,63 @@ async def run_turn(body: dict, llm, timeout_s: float = TIMEOUT_S) -> dict:
 # -- HTTP ----------------------------------------------------------------------------------------------------------
 
 LLM_FACTORY: Callable[[str | None, float], tuple[Any, str]] = make_presence_llm
+ASK_MAX_TIMEOUT_S = env_float("PRESENCE_ASK_MAX_TIMEOUT_S", 60.0, 1.0)
+
+
+async def run_ask(body: dict, llm, timeout_s: float) -> dict:
+    """One JSON object for ``system`` + ``user`` (one rewrite when the reply is not JSON). No tools."""
+    system, user = body.get("system"), body.get("user")
+    if not isinstance(system, str) or not isinstance(user, str) or not system or not user:
+        raise ValueError("system and user must be non-empty strings")
+    max_tokens = int(body.get("max_tokens") or 400)
+    deadline = time.monotonic() + timeout_s
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+    async def ask(msgs: list[dict]):
+        left = deadline - time.monotonic()
+        if left <= 0.05:
+            raise asyncio.TimeoutError
+        return await asyncio.wait_for(llm.chat(msgs, max_tokens=max_tokens, temperature=0.2, json_mode=True,
+                                               timeout_s=left, thinking=False), left)
+
+    reply = await ask(messages)
+    if reply.tool_calls:
+        return {"json": None, "text": "", "dropped": "tool_calls"}
+    obj = parse_json_object(reply.content)
+    if obj is None:
+        messages += [{"role": "assistant", "content": reply.content}, {"role": "user", "content": REWRITE_JSON}]
+        reply = await ask(messages)
+        obj = parse_json_object(reply.content)
+    return {"json": obj, "text": reply.content}
+
+
+async def ask_endpoint(request: Request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse({"error": "body must be JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "body must be an object"}, status_code=400)
+    try:
+        timeout_s = min(float(body.get("timeout_s") or TIMEOUT_S), ASK_MAX_TIMEOUT_S)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "timeout_s must be a number"}, status_code=400)
+    try:
+        llm, model_id = LLM_FACTORY(body.get("model"), timeout_s)
+    except (ModelChoiceError, CatalogError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    started = time.monotonic()
+    try:
+        out = await run_ask(body, llm, timeout_s)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except asyncio.TimeoutError:
+        return JSONResponse({"error": "timeout", "json": None}, status_code=504)
+    except LLMError as exc:
+        return JSONResponse({"error": f"model: {exc}"}, status_code=502)
+    out["model"] = model_id
+    out["ms"] = round((time.monotonic() - started) * 1000)
+    return JSONResponse(out)
 
 
 async def turn_endpoint(request: Request):
@@ -306,4 +371,5 @@ async def health_endpoint(request: Request):
 
 
 routes = [Route("/presence/turn", turn_endpoint, methods=["POST"]),
+          Route("/presence/ask", ask_endpoint, methods=["POST"]),
           Route("/presence/health", health_endpoint, methods=["GET"])]

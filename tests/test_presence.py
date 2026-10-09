@@ -162,3 +162,29 @@ async def test_keep_alive_reuses_one_client():
         pass
     assert a is b and not a.is_closed
     await a.aclose()
+
+
+# -- POST /presence/ask (vrc-pilot docs/10, 12, 17) -----------------------------------------------------------
+
+ASK = {"system": "状況を JSON で返せ", "user": "{\"people\": []}", "timeout_s": 2}
+
+
+def test_ask_returns_json(client):
+    client.holder["llm"] = FixedLLM({"setting": {"summary": "誰もいない"}})
+    r = client.post("/presence/ask", json=ASK)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["json"] == {"setting": {"summary": "誰もいない"}} and out["model"] == "fixed"
+    assert client.holder["llm"].calls[0][0] == {"role": "system", "content": "状況を JSON で返せ"}
+
+
+def test_ask_rewrites_once_then_gives_null(client):
+    client.holder["llm"] = FixedLLM("はい", "やっぱり文章")
+    out = client.post("/presence/ask", json=ASK).json()
+    assert out["json"] is None and out["text"] == "やっぱり文章"
+
+
+def test_ask_timeout_and_bad_body(client):
+    client.holder["llm"] = FixedLLM({"a": 1}, delay_s=1.0)
+    assert client.post("/presence/ask", json={**ASK, "timeout_s": 0.2}).status_code == 504
+    assert client.post("/presence/ask", json={"system": "", "user": "x"}).status_code == 400
