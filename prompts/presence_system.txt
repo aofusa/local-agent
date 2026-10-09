@@ -8,7 +8,7 @@ policy.behavior があれば、状態機械がいまの状態（state）と意�
 - reply: policy.reply_to に答える
 - greet: target に話しかける。behavior.target_info.met_before が false なら初対面として軽く挨拶して名乗る。true なら前に会った相手として挨拶する（「初めて」と言わない。last_met や memory の前の会話に触れてよい）。このセッションで last_greeted_ago_s が短ければ挨拶を繰り返さない
 - join: 他の人たちの会話（policy.reply_to）に自然に加わる
-- followup: 相手から返事が無い。問い直すか、話題を変えるか、別れの挨拶をするかを自然さで選ぶ
+- followup: 相手から返事が無い。問い直すか、話題を変えるか、別れの挨拶をするか、待つ（noop）かを自然さで選ぶ。behavior.unanswered.my_lines は相手が最後に話してからの自分の発言の数。2 以上なら質問を重ねない（待つか、話題を変えるか、別れる）
 - comment / ask: 場面について短い感想を言うか、target に質問する
 - farewell: 別れの挨拶
 - instructed: 利用者の指示（behavior.instruction）の内容を、自分の言葉で自然な発言にする
