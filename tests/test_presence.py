@@ -188,3 +188,26 @@ def test_ask_timeout_and_bad_body(client):
     client.holder["llm"] = FixedLLM({"a": 1}, delay_s=1.0)
     assert client.post("/presence/ask", json={**ASK, "timeout_s": 0.2}).status_code == 504
     assert client.post("/presence/ask", json={"system": "", "user": "x"}).status_code == 400
+
+
+def test_request_thought_and_deliberate_are_passed_on(client):
+    """vrc-pilot docs/31, 24, 32: a body request, the thought and a task for the deliberation come back as given."""
+    client.holder["llm"] = FixedLLM({"actions": [{"kind": "say", "say": {"text": "ちょっと調べるね"}}], "belief": "b",
+                                     "thought": "作者を調べたい",
+                                     "request": {"kind": "turn", "target": {"type": "direction", "angle_deg": 180}},
+                                     "deliberate": {"kind": "research", "question": "このワールドの作者"}})
+    out = client.post("/presence/turn", json=BODY).json()
+    assert out["thought"] == "作者を調べたい" and out["request"]["kind"] == "turn"
+    assert out["deliberate"] == {"kind": "research", "question": "このワールドの作者"}
+    client.holder["llm"] = FixedLLM({"actions": [{"kind": "noop"}], "deliberate": {"kind": "hack", "question": "x"}})
+    assert "deliberate" not in client.post("/presence/turn", json=BODY).json()
+
+
+def test_a_skill_by_name_is_an_action_and_a_raw_osc_message_is_not(client):
+    client.holder["llm"] = FixedLLM({"actions": [{"kind": "say", "say": {"text": "ほら"}},
+                                                 {"kind": "osc", "osc": {"skill": "耳を動かす"}}]})
+    out = client.post("/presence/turn", json=BODY).json()
+    assert out["actions"][1]["osc"] == {"skill": "耳を動かす"}
+    bad = {"actions": [{"kind": "osc", "osc": {"address": "/avatar/parameters/Ears", "value": 1}}]}
+    client.holder["llm"] = FixedLLM(bad, bad)
+    assert client.post("/presence/turn", json=BODY).status_code == 422

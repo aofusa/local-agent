@@ -7,7 +7,10 @@ Tor or the sandbox.
 
     request  {"world": {...}, "persona": {...}, "policy": {"allow_move": false, "allow_say": true, "max_actions": 2},
               "model": "<optional config/host_models.json inference id>"}
-    response {"actions": [ActionCommand, ...], "belief": "..."}
+    response {"actions": [ActionCommand, ...], "belief": "...", "request"?: {...}, "thought"?: "...",
+              "deliberate"?: {"kind": "...", "question": "..."}}
+             (request: a body request, vrc-pilot docs/31; thought: one line of why, docs/24; deliberate: a task for
+             the slow model in the background, docs/32. vrc-pilot checks all three itself.)
     422      the model's actions break the contract or the policy, also after one rewrite with the problems named
              (a say over 144 characters is never cut here and a forbidden move is never silently dropped)
     504      no reply within PRESENCE_TIMEOUT_S (4 s)
@@ -51,7 +54,8 @@ log = logging.getLogger("furry_agent.presence")
 PROMPT_PATH = REPO_ROOT / "prompts" / "presence_system.txt"
 TIMEOUT_S = env_float("PRESENCE_TIMEOUT_S", 4.0, 0.5)
 MAX_TOKENS = 300
-KINDS = ("noop", "say", "look", "move", "stop", "emote_key")
+KINDS = ("noop", "say", "look", "move", "stop", "emote_key", "osc")
+DELIBERATE_KINDS = ("research", "plan", "capability", "recall_deep", "reflect")
 MOVE_KINDS = ("move", "look")
 REWRITE_JSON = "説明を付けず、JSON オブジェクトだけで書き直せ。"
 REWRITE_SHORT = "say.text が 144 文字を超えた。意味を保って 144 文字以内で書き直し、同じ形の JSON だけを返せ。"
@@ -86,7 +90,7 @@ def action_errors(a: Any) -> list[str]:
     if not isinstance(a, dict):
         return ["action is not an object"]
     out = []
-    allowed = {"action_id", "ts", "kind", "say", "look", "move", "reason", "addressed_to"}
+    allowed = {"action_id", "ts", "kind", "say", "look", "move", "osc", "reason", "addressed_to"}
     out += [f"unknown key {k}" for k in a if k not in allowed]
     for k in ("action_id", "ts"):
         if not isinstance(a.get(k), str):
@@ -129,6 +133,13 @@ def action_errors(a: Any) -> list[str]:
                 out.append("move.duration_ms must be an integer 0..1500")
             if "run" in move and not isinstance(move["run"], bool):
                 out.append("move.run must be a boolean")
+    osc = a.get("osc")
+    if kind == "osc" or osc is not None:
+        # a learned skill by its name (vrc-pilot docs/32 DLB-05); the pilot fills in the OSC message itself
+        if not isinstance(osc, dict) or not isinstance(osc.get("skill"), str) or not 0 < len(osc["skill"]) <= 40:
+            out.append("osc must be an object with a skill name (at most 40 characters)")
+        elif set(osc) - {"skill"}:
+            out.append("osc carries only a skill name")
     if "reason" in a and (not isinstance(a["reason"], str) or len(a["reason"]) > 240):
         out.append("reason must be a string of at most 240 characters")
     if "addressed_to" in a and a["addressed_to"] is not None and not isinstance(a["addressed_to"], str):
@@ -154,6 +165,19 @@ def complete_action(raw: Any) -> Any:
     return a
 
 
+def extras(obj: dict) -> dict:
+    """The optional parts of a turn passed on as they are (shapes checked loosely; vrc-pilot checks them again)."""
+    out: dict = {}
+    if isinstance(obj.get("request"), dict) and isinstance(obj["request"].get("kind"), str):
+        out["request"] = obj["request"]
+    if isinstance(obj.get("thought"), str) and obj["thought"].strip():
+        out["thought"] = obj["thought"].strip()[:300]
+    d = obj.get("deliberate")
+    if isinstance(d, dict) and d.get("kind") in DELIBERATE_KINDS:
+        out["deliberate"] = {"kind": d["kind"], "question": str(d.get("question") or "")[:400]}
+    return out
+
+
 def check_turn(obj: dict, policy: dict) -> tuple[list[dict], str]:
     """(actions, belief) or :class:`TurnRefused` with every problem found."""
     raw = obj.get("actions")
@@ -173,7 +197,9 @@ def check_turn(obj: dict, policy: dict) -> tuple[list[dict], str]:
             problems.append(f"actions[{i}]: {kind} while policy.allow_move is false")
         if kind == "say" and not policy.get("allow_say", True):
             problems.append(f"actions[{i}]: say while policy.allow_say is false")
-    if sum(1 for a in actions if isinstance(a, dict) and a.get("kind") == "say") > 1:
+    if sum(1 for a in actions if isinstance(a, dict) and a.get("kind") == "say") > (3 if policy.get("behavior", {})
+                                                                                    .get("intent") == "deliver"
+                                                                                    else 1):
         problems.append("more than one say in a turn")
     if problems:
         raise TurnRefused(problems)
@@ -268,7 +294,7 @@ async def run_turn(body: dict, llm, timeout_s: float = TIMEOUT_S) -> dict:
         if obj is None:
             raise
         actions, belief = check_turn(obj, policy)
-    return {"actions": actions, "belief": belief}
+    return {"actions": actions, "belief": belief, **extras(obj)}
 
 
 # -- HTTP ----------------------------------------------------------------------------------------------------------
