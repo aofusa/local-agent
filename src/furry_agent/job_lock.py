@@ -19,7 +19,7 @@ from furry_agent.config import env_float
 # works renews it every JOB_LOCK_RENEW_S.
 LEASE_S = env_float("JOB_LOCK_LEASE_S", 900.0, 30.0)
 
-TAB_LABELS = {"image": "画像タブ", "chat": "チャットタブ", "coder": "CUI（cirka）"}
+TAB_LABELS = {"image": "画像タブ", "chat": "チャットタブ", "coder": "CUI（cirka）", "video": "動画タブ"}
 
 
 class JobLockBusy(RuntimeError):
