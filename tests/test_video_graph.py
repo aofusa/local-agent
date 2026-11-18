@@ -143,8 +143,8 @@ async def test_image_to_video(settings):
     assert video["mimeType"] == "video/mp4"
     assert video["metadata"]["width"] == 448 and video["metadata"]["height"] == 656
     assert video["metadata"]["frames"] == 49 and video["metadata"]["name"].startswith("video_")
-    assert message.additional_kwargs["model_info"] == {"kind": "video", "id": "wan22-i2v-a14b-q4",
-                                                       "label": "Wan 2.2 I2V A14B（Q4_K_M・画質優先）"}
+    assert message.additional_kwargs["model_info"] == {"kind": "video", "id": "wan22-i2v-a14b-q3",
+                                                       "label": "Wan 2.2 I2V A14B（Q3_K_M・省メモリ）"}
     saved = settings.outputs_dir / "video" / video["url"].rsplit("/", 1)[1]
     assert saved.read_bytes() == fake.video
     meta = json.loads(saved.with_suffix(".json").read_text(encoding="utf-8"))
@@ -163,7 +163,7 @@ async def test_template_is_filled_for_the_run(settings):
     assert (prompt["i2v"]["inputs"]["width"], prompt["i2v"]["inputs"]["height"], prompt["i2v"]["inputs"]["length"]) \
         == (448, 656, 49)
     assert prompt["sampler_high"]["inputs"]["noise_seed"] == prompt["sampler_low"]["inputs"]["noise_seed"]
-    assert prompt["unet_high"]["inputs"]["unet_name"] == "Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf"
+    assert prompt["unet_high"]["inputs"]["unet_name"] == "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf"
     # The distill LoRA, then the kemono LoRA, after each expert.
     assert [prompt[f"lora_high_{i}"]["inputs"]["lora_name"] for i in (1, 2)] == [DISTILL_HIGH, FURRY_HIGH]
     assert [prompt[f"lora_low_{i}"]["inputs"]["lora_name"] for i in (1, 2)] == [DISTILL_LOW, FURRY_LOW]
@@ -174,9 +174,9 @@ async def test_template_is_filled_for_the_run(settings):
 
 async def test_model_and_length_from_the_request(settings):
     fake = FakeComfy()
-    await _run([_block(_png((1216, 832)))], fake, settings, video_model="wan22-i2v-a14b-q3", video_seconds=5)
+    await _run([_block(_png((1216, 832)))], fake, settings, video_model="wan22-i2v-a14b-q4", video_seconds=5)
     prompt = fake.submitted[0]
-    assert prompt["unet_low"]["inputs"]["unet_name"] == "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf"
+    assert prompt["unet_low"]["inputs"]["unet_name"] == "Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"
     assert prompt["i2v"]["inputs"]["length"] == 81
     assert (prompt["i2v"]["inputs"]["width"], prompt["i2v"]["inputs"]["height"]) == (656, 448)
 
@@ -217,9 +217,9 @@ async def test_missing_comfyui_gguf(settings):
 
 
 async def test_missing_expert_file(settings):
-    fake = FakeComfy(experts=EXPERT_FILES[2:])
+    fake = FakeComfy(experts=EXPERT_FILES[:2])  # only the Q4_K_M files: the default Q3_K_M is missing
     state = await _run([_block(_png())], fake, settings)
-    assert "Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf" in _text(_last(state))
+    assert "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf" in _text(_last(state))
 
 
 async def test_missing_kemono_lora(settings):

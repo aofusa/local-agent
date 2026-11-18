@@ -49,7 +49,7 @@ def test_shipped_catalog_lists_the_requested_models():
 def test_defaults_are_the_first_entries_or_the_env(monkeypatch):
     catalog = mc.load_catalog()
     assert mc.default_ids(catalog) == {"inference": "qwen3.8-27b-abliterated", "image": "yiffinhell-vantablack",
-                                       "video": "wan22-i2v-a14b-q4"}
+                                       "video": "wan22-i2v-a14b-q3"}
     monkeypatch.setenv("DEFAULT_IMAGE_MODEL", "wulver")
     assert mc.resolve_image(None, catalog).id == "wulver"
     assert mc.resolve_image("", catalog).id == "wulver"

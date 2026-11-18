@@ -27,7 +27,7 @@ def env(monkeypatch):
 
 
 def _entry(**changes):
-    entry = copy.deepcopy(RAW["video"][1])
+    entry = copy.deepcopy(next(v for v in RAW["video"] if v["id"] == "wan22-i2v-a14b-q3"))
     entry.update(changes)
     return entry
 
@@ -38,7 +38,7 @@ def _parse(*entries):
 
 def test_bundled_video_entries():
     catalog = mc.load_catalog()
-    assert list(catalog.video) == ["wan22-i2v-a14b-q4", "wan22-i2v-a14b-q3"]
+    assert list(catalog.video) == ["wan22-i2v-a14b-q3", "wan22-i2v-a14b-q4"]  # Q3_K_M first: the default here
     for model in catalog.video.values():
         assert model.family == "wan22"
         assert model.experts["high"].endswith(".gguf") and model.experts["low"].endswith(".gguf")
@@ -96,10 +96,10 @@ def test_duplicate_id_is_refused():
 
 def test_default_and_resolve(monkeypatch):
     catalog = mc.load_catalog()
-    assert mc.default_ids(catalog)["video"] == "wan22-i2v-a14b-q4"
-    monkeypatch.setenv("DEFAULT_VIDEO_MODEL", "wan22-i2v-a14b-q3")
-    assert mc.resolve_video(None, catalog).id == "wan22-i2v-a14b-q3"
-    assert mc.resolve_video("wan22-i2v-a14b-q4", catalog).id == "wan22-i2v-a14b-q4"
+    assert mc.default_ids(catalog)["video"] == "wan22-i2v-a14b-q3"
+    monkeypatch.setenv("DEFAULT_VIDEO_MODEL", "wan22-i2v-a14b-q4")
+    assert mc.resolve_video(None, catalog).id == "wan22-i2v-a14b-q4"
+    assert mc.resolve_video("wan22-i2v-a14b-q3", catalog).id == "wan22-i2v-a14b-q3"
     with pytest.raises(mc.ModelChoiceError, match="動画モデル"):
         mc.resolve_video("wan22", catalog)
     with pytest.raises(mc.ModelChoiceError, match="使えません"):

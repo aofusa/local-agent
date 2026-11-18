@@ -60,7 +60,7 @@ async def test_lists_every_model_with_availability():
     status, body = await _get(Comfy(INFO), ["qwen3.8-27b-abliterated"])
     assert status == 200
     assert body["defaults"] == {"inference": "qwen3.8-27b-abliterated", "image": "yiffinhell-vantablack",
-                                "video": "wan22-i2v-a14b-q4"}
+                                "video": "wan22-i2v-a14b-q3"}
     inference = {m["id"]: m for m in body["inference"]}
     assert inference["qwen3.8-27b-abliterated"]["available"] is True
     assert inference["bonsai-2-27b-abliterated"]["available"] is False
