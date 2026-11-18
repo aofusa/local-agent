@@ -1,0 +1,93 @@
+{
+  "family": "wan22",
+  "kind": "video",
+  "label": "Wan 2.2 I2V",
+  "prompt_style": "prose",
+  "models": {
+    "high_name": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf",
+    "low_name": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf",
+    "weight_dtype": "default",
+    "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "clip_type": "wan",
+    "vae_name": "wan_2.1_vae.safetensors"
+  },
+  "defaults": {
+    "steps": 4,
+    "split_step": 2,
+    "cfg": 1.0,
+    "shift": 5.0,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "fps": 16,
+    "width": 832,
+    "height": 480,
+    "frames": 81,
+    "max_pixels": 399360,
+    "size_multiple": 16
+  },
+  "supported_roles": [
+    "base"
+  ],
+  "node_setup_hint": "scripts の setup-video-models を実行し（ComfyUI-GGUF）、ComfyUI を再起動して furry_ja の動画ノードを読み込んでください",
+  "model_setup_hint": "scripts の setup-video-models を実行して、Wan 2.2 のモデルと LoRA を入れてください",
+  "templates": {
+    "i2v": {
+      "file": "wan22/i2v.api.json",
+      "roles": [
+        "base"
+      ],
+      "slots": {
+        "prompt": "user_prompt.inputs.value",
+        "start_image": "ref_image.inputs.image",
+        "seed": [
+          "sampler_high.inputs.noise_seed",
+          "sampler_low.inputs.noise_seed"
+        ],
+        "high_name": "unet_high.inputs.unet_name",
+        "low_name": "unet_low.inputs.unet_name",
+        "weight_dtype": [
+          "unet_high.inputs.weight_dtype",
+          "unet_low.inputs.weight_dtype"
+        ],
+        "clip_name": "te.inputs.clip_name",
+        "te_device": "te.inputs.device",
+        "vae_name": "vae.inputs.vae_name",
+        "width": "i2v.inputs.width",
+        "height": "i2v.inputs.height",
+        "length": "i2v.inputs.length",
+        "steps": [
+          "sampler_high.inputs.steps",
+          "sampler_low.inputs.steps"
+        ],
+        "cfg": [
+          "sampler_high.inputs.cfg",
+          "sampler_low.inputs.cfg"
+        ],
+        "sampler_name": [
+          "sampler_high.inputs.sampler_name",
+          "sampler_low.inputs.sampler_name"
+        ],
+        "scheduler": [
+          "sampler_high.inputs.scheduler",
+          "sampler_low.inputs.scheduler"
+        ],
+        "split_step": [
+          "sampler_high.inputs.end_at_step",
+          "sampler_low.inputs.start_at_step"
+        ],
+        "shift": [
+          "shift_high.inputs.shift",
+          "shift_low.inputs.shift"
+        ],
+        "prompt_prefix": "split.inputs.quality_prefix",
+        "negative": "split.inputs.default_negative",
+        "vae_tile": "decode.inputs.tile_size",
+        "vae_overlap": "decode.inputs.overlap",
+        "vae_temporal": "decode.inputs.temporal_size",
+        "vae_temporal_overlap": "decode.inputs.temporal_overlap",
+        "fps": "video.inputs.fps",
+        "crf": "save.inputs.format.codec.encoding.crf"
+      }
+    }
+  }
+}

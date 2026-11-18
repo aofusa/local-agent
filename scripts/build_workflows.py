@@ -659,6 +659,159 @@ def chroma_map() -> tuple[dict, dict[str, dict]]:
     return dit_map(CHROMA_FAMILY)
 
 
+# --- Video families: Wan 2.2 I2V A14B (docs/image-to-video-design.md §5) ----------------------------------------
+#
+# The LLM part matches the image i2i templates (vision of the start image -> prompt_node -> eject -> split, prose).
+# Then the large models load one at a time, each behind an `after` link: umT5 (te) -> release_te -> vae -> i2v ->
+# high-noise expert -> sampler_high (steps 0..split, leftover noise) -> release_high -> low-noise expert ->
+# sampler_low (split..end) -> release_low -> tiled VAE decode -> CreateVideo -> SaveVideo (mp4 / h264). The catalog
+# entry (config/host_models.json "video") names the expert files, the LoRAs (inserted per expert at run time) and its
+# sampler values; .env (VIDEO_*) sets the size, length, tiling and quality for the machine.
+
+# Wan's standard negative prompt (ComfyUI's Wan templates). At CFG 1 (the 4-step distill) it has no effect.
+WAN_NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，"
+                "丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，"
+                "静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
+START_JOIN_DELIMITER = "\n\n[Start image]\n"
+VIDEO_VISION_USER_PROMPT = "Describe the start image."
+
+VIDEO_FAMILIES = {
+    "wan22": {
+        "label": "Wan 2.2 I2V",
+        "system": "system_video_i2v.txt", "system_vision": "system_vision_video.txt",
+        "temperature": 0.4, "max_tokens": 320,
+        "models": {"high_name": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf",
+                   "low_name": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf", "weight_dtype": "default",
+                   "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "clip_type": "wan",
+                   "vae_name": "wan_2.1_vae.safetensors"},
+        # lightx2v 4-step distill: 2 steps on each expert, CFG 1, shift 5, euler / simple; 16 fps, 480p, 81 frames.
+        "defaults": {"steps": 4, "split_step": 2, "cfg": 1.0, "shift": 5.0, "sampler_name": "euler",
+                     "scheduler": "simple", "fps": 16, "width": 832, "height": 480, "frames": 81,
+                     "max_pixels": 832 * 480, "size_multiple": 16},
+        "prompt_prefix": "", "negative": WAN_NEGATIVE, "crf": 20.0,
+        "decode": {"tile_size": 256, "overlap": 64, "temporal_size": 16, "temporal_overlap": 4},
+        "save_prefix": "furry_ja/video/wan22",
+        "node_setup_hint": "scripts の setup-video-models を実行し（ComfyUI-GGUF）、ComfyUI を再起動して furry_ja の動画ノードを読み込んでください",
+        "model_setup_hint": "scripts の setup-video-models を実行して、Wan 2.2 のモデルと LoRA を入れてください",
+    },
+}
+
+
+def video_template(family: str, template_id: str) -> tuple[dict, dict]:
+    """Return (API prompt, slot map) of a video family's template. Slots may name several inputs (both samplers)."""
+    if template_id != "i2v":
+        raise ValueError(f"{family} has no template {template_id}")
+    spec = VIDEO_FAMILIES[family]
+    system = (PROMPTS / spec["system"]).read_text(encoding="utf-8").strip()
+    system_vision = (PROMPTS / spec["system_vision"]).read_text(encoding="utf-8").strip()
+    m, d, decode = spec["models"], spec["defaults"], spec["decode"]
+    sampler = {"steps": d["steps"], "cfg": d["cfg"], "sampler_name": d["sampler_name"], "scheduler": d["scheduler"]}
+    nodes = {
+        "llm_backend": ("LMConnectLMStudioBackend", "LLM Backend (llama.cpp router)", _backend()),
+        "llm_backend_vision": ("LMConnectLMStudioBackend", "LLM Backend (vision)", _backend()),
+        "user_prompt": ("PrimitiveStringMultiline", "user_prompt (日本語指示)", {"value": "しっぽを振りながら、こちらを見て笑う"}),
+        "ref_image": ("LoadImage", "ref_image (開始画像)", {"image": REF_PLACEHOLDER}),
+        "vision": ("LMConnectVision", "vision", {
+            "system_prompt": system_vision, "prompt": VIDEO_VISION_USER_PROMPT, "image_1": ["ref_image", 0],
+            "max_image_dimension": 768, "backend": ["llm_backend_vision", 0], "base_url": LLM_URL,
+            "model": "", "temperature": 0.2, "max_tokens": 200,
+        }),
+        "prompt_join": ("StringConcatenate", "prompt_join (指示 + 開始画像)", {
+            "string_a": ["user_prompt", 0], "string_b": ["vision", 0], "delimiter": START_JOIN_DELIMITER,
+        }),
+        "prompt_node": ("LMConnectPromptWithSystem", "prompt_node", {
+            "system_prompt": system, "prompt": ["prompt_join", 0], "backend": ["llm_backend", 0],
+            "base_url": LLM_URL, "model": "", "temperature": spec["temperature"], "max_tokens": spec["max_tokens"],
+        }),
+        "eject": ("FurryJaEjectLLM", "eject", {
+            "passthrough": ["prompt_node", 0], "base_url": LLM_URL, "model": "", "debug_logging": True,
+        }),
+        "split": ("FurryJaSplitTags", "split", {
+            "text": ["eject", 0], "quality_prefix": spec["prompt_prefix"], "default_negative": spec["negative"],
+            "prompt_style": "prose",
+        }),
+        "te": ("FurryJaTextEncoderAfter", "te (umT5, after eject)", {
+            "clip_name": m["clip_name"], "clip_type": m["clip_type"], "device": "default", "after": ["eject", 0],
+            "llm_base_url": LLM_URL,
+        }),
+        "positive": ("CLIPTextEncode", "positive", {"text": ["split", 0], "clip": ["te", 0]}),
+        "negative": ("CLIPTextEncode", "negative", {"text": ["split", 1], "clip": ["te", 0]}),
+        # Both conditionings exist: drop umT5 before anything else loads.
+        "release_te": ("FurryJaReleaseAfter", "release_te", {"a": ["positive", 0], "b": ["negative", 0], "stage": "te"}),
+        "vae": ("FurryJaVAELoaderAfter", "vae", {"vae_name": m["vae_name"], "after": ["release_te", 0]}),
+        "i2v": ("WanImageToVideo", "i2v", {
+            "positive": ["release_te", 0], "negative": ["release_te", 1], "vae": ["vae", 0],
+            "width": d["width"], "height": d["height"], "length": d["frames"], "batch_size": 1,
+            "start_image": ["ref_image", 0],
+        }),
+        "unet_high": ("FurryJaVideoModelAfter", "unet_high", {
+            "unet_name": m["high_name"], "weight_dtype": m["weight_dtype"], "after": ["i2v", 2], "llm_base_url": LLM_URL,
+        }),
+        "shift_high": ("ModelSamplingSD3", "shift_high", {"model": ["unet_high", 0], "shift": d["shift"]}),
+        "sampler_high": ("KSamplerAdvanced", "sampler_high", {
+            "model": ["shift_high", 0], "add_noise": "enable", "noise_seed": 0, **sampler,
+            "positive": ["i2v", 0], "negative": ["i2v", 1], "latent_image": ["i2v", 2],
+            "start_at_step": 0, "end_at_step": d["split_step"], "return_with_leftover_noise": "enable",
+        }),
+        "release_high": ("FurryJaReleaseAfter", "release_high", {"a": ["sampler_high", 0], "stage": "high"}),
+        "unet_low": ("FurryJaVideoModelAfter", "unet_low", {
+            "unet_name": m["low_name"], "weight_dtype": m["weight_dtype"], "after": ["release_high", 0],
+            "llm_base_url": LLM_URL,
+        }),
+        "shift_low": ("ModelSamplingSD3", "shift_low", {"model": ["unet_low", 0], "shift": d["shift"]}),
+        "sampler_low": ("KSamplerAdvanced", "sampler_low", {
+            "model": ["shift_low", 0], "add_noise": "disable", "noise_seed": 0, **sampler,
+            "positive": ["i2v", 0], "negative": ["i2v", 1], "latent_image": ["release_high", 0],
+            "start_at_step": d["split_step"], "end_at_step": 10000, "return_with_leftover_noise": "disable",
+        }),
+        "release_low": ("FurryJaReleaseAfter", "release_low", {"a": ["sampler_low", 0], "stage": "low"}),
+        "decode": ("VAEDecodeTiled", "decode", {"samples": ["release_low", 0], "vae": ["vae", 0], **decode}),
+        "video": ("CreateVideo", "video", {"images": ["decode", 0], "fps": float(d["fps"])}),
+        # SaveVideo's codec options are nested inputs; the API prompt names them with dots.
+        "save": ("SaveVideo", "save", {
+            "video": ["video", 0], "filename_prefix": spec["save_prefix"], "format": "mp4",
+            "format.codec": "h264", "format.codec.encoding": "re-encode", "format.codec.encoding.crf": spec["crf"],
+        }),
+    }
+    prompt = {node_id: _node(cls, title, inputs) for node_id, (cls, title, inputs) in nodes.items()}
+    both = lambda field: [f"sampler_high.inputs.{field}", f"sampler_low.inputs.{field}"]  # noqa: E731
+    slots = {
+        "prompt": "user_prompt.inputs.value", "start_image": "ref_image.inputs.image", "seed": both("noise_seed"),
+        "high_name": "unet_high.inputs.unet_name", "low_name": "unet_low.inputs.unet_name",
+        "weight_dtype": ["unet_high.inputs.weight_dtype", "unet_low.inputs.weight_dtype"],
+        "clip_name": "te.inputs.clip_name", "te_device": "te.inputs.device", "vae_name": "vae.inputs.vae_name",
+        "width": "i2v.inputs.width", "height": "i2v.inputs.height", "length": "i2v.inputs.length",
+        "steps": both("steps"), "cfg": both("cfg"), "sampler_name": both("sampler_name"),
+        "scheduler": both("scheduler"),
+        "split_step": ["sampler_high.inputs.end_at_step", "sampler_low.inputs.start_at_step"],
+        "shift": ["shift_high.inputs.shift", "shift_low.inputs.shift"],
+        "prompt_prefix": "split.inputs.quality_prefix", "negative": "split.inputs.default_negative",
+        "vae_tile": "decode.inputs.tile_size", "vae_overlap": "decode.inputs.overlap",
+        "vae_temporal": "decode.inputs.temporal_size", "vae_temporal_overlap": "decode.inputs.temporal_overlap",
+        "fps": "video.inputs.fps", "crf": "save.inputs.format.codec.encoding.crf",
+    }
+    return prompt, slots
+
+
+def video_map(family: str) -> tuple[dict, dict[str, dict]]:
+    spec = VIDEO_FAMILIES[family]
+    prompt, slots = video_template(family, "i2v")
+    mapping = {
+        "family": family,
+        "kind": "video",
+        "label": spec["label"],
+        "prompt_style": "prose",
+        # The model files and sampler values are only defaults here: each run injects its catalog entry's.
+        "models": spec["models"],
+        "defaults": spec["defaults"],
+        "supported_roles": ["base"],
+        "node_setup_hint": spec["node_setup_hint"],
+        "model_setup_hint": spec["model_setup_hint"],
+        "templates": {"i2v": {"file": f"{family}/i2v.api.json", "roles": ["base"], "slots": slots}},
+    }
+    return mapping, {"i2v": prompt}
+
+
 def _write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -679,6 +832,12 @@ def main() -> None:
             _write_json(WORKFLOWS / mapping["templates"][template_id]["file"], prompt)
         _write_json(WORKFLOWS / "maps" / f"{family}.json", mapping)
         print("wrote", len(prompts), f"templates and maps/{family}.json")
+    for family in VIDEO_FAMILIES:
+        mapping, prompts = video_map(family)
+        for template_id, prompt in prompts.items():
+            _write_json(WORKFLOWS / mapping["templates"][template_id]["file"], prompt)
+        _write_json(WORKFLOWS / "maps" / f"{family}.json", mapping)
+        print("wrote", len(prompts), f"video template(s) and maps/{family}.json")
 
 
 if __name__ == "__main__":

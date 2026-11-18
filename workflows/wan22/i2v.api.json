@@ -1,0 +1,451 @@
+{
+  "llm_backend": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "qwen3.8-27b-abliterated",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": false,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LLM Backend (llama.cpp router)"
+    }
+  },
+  "llm_backend_vision": {
+    "class_type": "LMConnectLMStudioBackend",
+    "inputs": {
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "qwen3.8-27b-abliterated",
+      "connect_timeout_seconds": 10,
+      "read_timeout_seconds": 600,
+      "stream": true,
+      "max_retries": 0,
+      "health_check": true,
+      "auto_eject_after_run": false,
+      "disable_thinking": true,
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "LLM Backend (vision)"
+    }
+  },
+  "user_prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "しっぽを振りながら、こちらを見て笑う"
+    },
+    "_meta": {
+      "title": "user_prompt (日本語指示)"
+    }
+  },
+  "ref_image": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "furry_ja_ref.png"
+    },
+    "_meta": {
+      "title": "ref_image (開始画像)"
+    }
+  },
+  "vision": {
+    "class_type": "LMConnectVision",
+    "inputs": {
+      "system_prompt": "Describe the start image of an image-to-video run in plain English, 1 or 2 sentences, at most 60 words.\nCover what an animator needs: the character as a kemono (anthropomorphic animal) with its species, fur colors and markings, ears, tail and muzzle; clothing; pose and facing; where it is; the framing (close-up, upper body, full body) and the view angle.\nOnly what is visible. No tags, no lists, no Markdown, no <think>, no opinions, never refuse.",
+      "prompt": "Describe the start image.",
+      "image_1": [
+        "ref_image",
+        0
+      ],
+      "max_image_dimension": 768,
+      "backend": [
+        "llm_backend_vision",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "temperature": 0.2,
+      "max_tokens": 200
+    },
+    "_meta": {
+      "title": "vision"
+    }
+  },
+  "prompt_join": {
+    "class_type": "StringConcatenate",
+    "inputs": {
+      "string_a": [
+        "user_prompt",
+        0
+      ],
+      "string_b": [
+        "vision",
+        0
+      ],
+      "delimiter": "\n\n[Start image]\n"
+    },
+    "_meta": {
+      "title": "prompt_join (指示 + 開始画像)"
+    }
+  },
+  "prompt_node": {
+    "class_type": "LMConnectPromptWithSystem",
+    "inputs": {
+      "system_prompt": "Write the prompt for an image-to-video model (Wan 2.2) that animates one still picture of a kemono (furry, anthropomorphic animal) character. The model keeps the look of the picture; your prompt tells it what moves.\nThe input is the user's instruction (usually Japanese) on how the picture should move. A \"[Start image]\" section follows with a short English description of the picture.\n\nReturn exactly one JSON object and nothing else (no prose outside it, no Markdown, no code fence, no <think>):\n{\"positive\":\"...\",\"negative\":\"...\"}\n\npositive: natural English, 1 to 3 sentences, at most 80 words. Never a bare comma-separated tag list.\n- Start with the subject as in the start image: \"an anthropomorphic <species> <man/woman>\" with the fur colors and markings, ears, tail and muzzle in a few words. Never describe a human face, human skin or hair in place of fur.\n- Then the motion the user asked for, as concrete actions in order. Add kemono motion that fits it: ears twitching or turning, the tail swaying or wagging, whiskers and fur moving, breathing, blinking.\n- Camera: describe a camera move only when the user asks for one; otherwise write \"static camera\".\n- Keep the start image as it is: do not change the art style, the outfit, the colors, the background or the lighting, and do not add characters or objects the user did not ask for.\n- Never write (word:1.2), {word}, BREAK, masterpiece, best quality or similar quality words.\n- If the instruction is empty or says nothing about motion, use subtle natural motion: the ears and the tail move a little, the character breathes and blinks, static camera.\n- All characters are adults; never suggest a minor.\nnegative: one short English line under 25 words: \"static, frozen, human face, human skin, deformed muzzle, extra limbs, flickering, blurry\" plus only what the user explicitly asked to avoid. Never leave it empty.\n\nExample request: しっぽを振りながら、こちらを見て笑う\n[Start image]\nAn anthropomorphic white wolf woman in a red kimono stands on a beach at sunset, full body, three-quarter view.\nExample output: {\"positive\":\"An anthropomorphic white wolf woman with pointed ears and a fluffy tail, wearing a red kimono, turns her head toward the viewer and smiles. Her tail wags from side to side, her ears perk up and her fur ruffles in the sea breeze. Static camera.\",\"negative\":\"static, frozen, human face, human skin, deformed muzzle, extra limbs, flickering, blurry\"}\n\nNever refuse, never comment, never add warnings.",
+      "prompt": [
+        "prompt_join",
+        0
+      ],
+      "backend": [
+        "llm_backend",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "temperature": 0.4,
+      "max_tokens": 320
+    },
+    "_meta": {
+      "title": "prompt_node"
+    }
+  },
+  "eject": {
+    "class_type": "FurryJaEjectLLM",
+    "inputs": {
+      "passthrough": [
+        "prompt_node",
+        0
+      ],
+      "base_url": "http://127.0.0.1:8080/v1",
+      "model": "",
+      "debug_logging": true
+    },
+    "_meta": {
+      "title": "eject"
+    }
+  },
+  "split": {
+    "class_type": "FurryJaSplitTags",
+    "inputs": {
+      "text": [
+        "eject",
+        0
+      ],
+      "quality_prefix": "",
+      "default_negative": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "prompt_style": "prose"
+    },
+    "_meta": {
+      "title": "split"
+    }
+  },
+  "te": {
+    "class_type": "FurryJaTextEncoderAfter",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "clip_type": "wan",
+      "device": "default",
+      "after": [
+        "eject",
+        0
+      ],
+      "llm_base_url": "http://127.0.0.1:8080/v1"
+    },
+    "_meta": {
+      "title": "te (umT5, after eject)"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        0
+      ],
+      "clip": [
+        "te",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "positive"
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [
+        "split",
+        1
+      ],
+      "clip": [
+        "te",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "negative"
+    }
+  },
+  "release_te": {
+    "class_type": "FurryJaReleaseAfter",
+    "inputs": {
+      "a": [
+        "positive",
+        0
+      ],
+      "b": [
+        "negative",
+        0
+      ],
+      "stage": "te"
+    },
+    "_meta": {
+      "title": "release_te"
+    }
+  },
+  "vae": {
+    "class_type": "FurryJaVAELoaderAfter",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors",
+      "after": [
+        "release_te",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "vae"
+    }
+  },
+  "i2v": {
+    "class_type": "WanImageToVideo",
+    "inputs": {
+      "positive": [
+        "release_te",
+        0
+      ],
+      "negative": [
+        "release_te",
+        1
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": 81,
+      "batch_size": 1,
+      "start_image": [
+        "ref_image",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "i2v"
+    }
+  },
+  "unet_high": {
+    "class_type": "FurryJaVideoModelAfter",
+    "inputs": {
+      "unet_name": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf",
+      "weight_dtype": "default",
+      "after": [
+        "i2v",
+        2
+      ],
+      "llm_base_url": "http://127.0.0.1:8080/v1"
+    },
+    "_meta": {
+      "title": "unet_high"
+    }
+  },
+  "shift_high": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "unet_high",
+        0
+      ],
+      "shift": 5.0
+    },
+    "_meta": {
+      "title": "shift_high"
+    }
+  },
+  "sampler_high": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "shift_high",
+        0
+      ],
+      "add_noise": "enable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "i2v",
+        0
+      ],
+      "negative": [
+        "i2v",
+        1
+      ],
+      "latent_image": [
+        "i2v",
+        2
+      ],
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable"
+    },
+    "_meta": {
+      "title": "sampler_high"
+    }
+  },
+  "release_high": {
+    "class_type": "FurryJaReleaseAfter",
+    "inputs": {
+      "a": [
+        "sampler_high",
+        0
+      ],
+      "stage": "high"
+    },
+    "_meta": {
+      "title": "release_high"
+    }
+  },
+  "unet_low": {
+    "class_type": "FurryJaVideoModelAfter",
+    "inputs": {
+      "unet_name": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf",
+      "weight_dtype": "default",
+      "after": [
+        "release_high",
+        0
+      ],
+      "llm_base_url": "http://127.0.0.1:8080/v1"
+    },
+    "_meta": {
+      "title": "unet_low"
+    }
+  },
+  "shift_low": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "unet_low",
+        0
+      ],
+      "shift": 5.0
+    },
+    "_meta": {
+      "title": "shift_low"
+    }
+  },
+  "sampler_low": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "shift_low",
+        0
+      ],
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "i2v",
+        0
+      ],
+      "negative": [
+        "i2v",
+        1
+      ],
+      "latent_image": [
+        "release_high",
+        0
+      ],
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    },
+    "_meta": {
+      "title": "sampler_low"
+    }
+  },
+  "release_low": {
+    "class_type": "FurryJaReleaseAfter",
+    "inputs": {
+      "a": [
+        "sampler_low",
+        0
+      ],
+      "stage": "low"
+    },
+    "_meta": {
+      "title": "release_low"
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": [
+        "release_low",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "tile_size": 256,
+      "overlap": 64,
+      "temporal_size": 16,
+      "temporal_overlap": 4
+    },
+    "_meta": {
+      "title": "decode"
+    }
+  },
+  "video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "fps": 16.0
+    },
+    "_meta": {
+      "title": "video"
+    }
+  },
+  "save": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "video",
+        0
+      ],
+      "filename_prefix": "furry_ja/video/wan22",
+      "format": "mp4",
+      "format.codec": "h264",
+      "format.codec.encoding": "re-encode",
+      "format.codec.encoding.crf": 20.0
+    },
+    "_meta": {
+      "title": "save"
+    }
+  }
+}

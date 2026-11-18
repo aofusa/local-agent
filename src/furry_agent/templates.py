@@ -227,6 +227,67 @@ def build_run_prompt(
     return insert_loras(prompt, loras or [])
 
 
+def insert_model_loras(prompt: dict, loras: list[LoraSpec], model_node: str, prefix: str) -> dict:
+    """Chain LoraLoaderModelOnly nodes ``<prefix>_1``... after ``model_node`` (a video expert) and repoint every
+    consumer of its MODEL to the chain end. Model-only: the video text encoder is a separate node (`te`)."""
+    if not loras:
+        return prompt
+    model = [model_node, 0]
+    ids = []
+    for i, spec in enumerate(loras, start=1):
+        node_id = f"{prefix}_{i}"
+        prompt[node_id] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {"model": model, "lora_name": spec.name, "strength_model": spec.strength_model},
+            "_meta": {"title": node_id},
+        }
+        model = [node_id, 0]
+        ids.append(node_id)
+    for node_id, node in prompt.items():
+        if node_id in ids:
+            continue
+        for name, value in node["inputs"].items():
+            if value == [model_node, 0]:
+                node["inputs"][name] = list(model)
+    return prompt
+
+
+VIDEO_REQUIRED_SLOTS = ("prompt", "start_image", "seed", "high_name", "low_name", "width", "height", "length")
+
+
+def build_video_prompt(
+    family: str,
+    template_id: str,
+    values: dict,
+    loras_high: list[LoraSpec] | None = None,
+    loras_low: list[LoraSpec] | None = None,
+    workflows_dir: Path = REPO_WORKFLOWS,
+    llm_read_timeout_s: float | None = None,
+) -> dict:
+    """Fill a video template (docs/image-to-video-design.md §5): ``values`` maps slot -> value. A slot of the map may
+    name several inputs (the seed and the sampler values go to both experts). LoRAs are inserted per expert, right
+    after `unet_high` / `unet_low`, so they load and unload with their expert."""
+    prompt, entry = load_template(family, template_id, workflows_dir)
+    slots = entry["slots"]
+    missing = [slot for slot in VIDEO_REQUIRED_SLOTS if values.get(slot) in (None, "")]
+    if missing:
+        raise TemplateError(f"テンプレート {template_id} の必須スロットが空です: {', '.join(missing)}")
+    for slot, value in values.items():
+        if value is None or slot not in slots:
+            continue
+        paths = slots[slot] if isinstance(slots[slot], list) else [slots[slot]]
+        for path in paths:
+            _set(prompt, path, value)
+    if llm_read_timeout_s:
+        # Same as build_run_prompt: the LM Connect read timeout is the idle timeout of the whole agent.
+        for node in prompt.values():
+            if node.get("class_type") == "LMConnectLMStudioBackend" and "read_timeout_seconds" in node.get("inputs", {}):
+                node["inputs"]["read_timeout_seconds"] = int(llm_read_timeout_s)
+    insert_model_loras(prompt, list(loras_high or []), "unet_high", "lora_high")
+    insert_model_loras(prompt, list(loras_low or []), "unet_low", "lora_low")
+    return prompt
+
+
 def unknown_node_types(prompt: dict, known: set[str]) -> list[str]:
     """Class types in the prompt that ComfyUI does not provide (WI §6: validate before /prompt)."""
     return sorted({n["class_type"] for n in prompt.values()} - known)
