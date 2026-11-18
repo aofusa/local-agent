@@ -17,7 +17,14 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import {
+  isBase64ContentBlock,
+  isVideoBlock,
+  resolveHostUrl,
+} from "@/lib/multimodal-utils";
+import { useVideoHandoff } from "../video-handoff";
+import { Film } from "lucide-react";
+import { useState } from "react";
 import {
   ChatModeBadge,
   ClaimTraceView,
@@ -49,31 +56,144 @@ function AIImageBlocks({ content }: { content: Message["content"] }) {
   if (!images.length) return null;
   return (
     <div className="flex flex-col gap-2">
-      {images.map((image, i) => {
-        const src = `data:${image.mimeType};base64,${image.data}`;
-        const name = image.metadata?.name || `image-${i + 1}.png`;
-        return (
-          <figure
-            key={`${name}-${i}`}
-            className="flex flex-col items-start gap-1"
+      {images.map((image, i) => (
+        <AIImage
+          key={`${image.metadata?.name || "image"}-${i}`}
+          image={image}
+          index={i}
+        />
+      ))}
+    </div>
+  );
+}
+
+function AIImage({
+  image,
+  index,
+}: {
+  image: { mimeType: string; data: string; metadata?: { name?: string } };
+  index: number;
+}) {
+  // local-agent: on the image tab, hand the picture to the video tab (not the pose preview: it is an input).
+  const animate = useVideoHandoff();
+  const src = `data:${image.mimeType};base64,${image.data}`;
+  const name = image.metadata?.name || `image-${index + 1}.png`;
+  return (
+    <figure className="flex flex-col items-start gap-1">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={name}
+        className="max-h-[80vh] max-w-full rounded-md border object-contain"
+      />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <a
+          href={src}
+          download={name}
+          className="text-muted-foreground text-xs underline [overflow-wrap:anywhere]"
+        >
+          {name} を保存
+        </a>
+        {animate && !name.startsWith("pose_") && (
+          <button
+            type="button"
+            onClick={() =>
+              animate({ mimeType: image.mimeType, data: image.data, name })
+            }
+            className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 text-xs underline"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={src}
-              alt={name}
-              className="max-h-[80vh] max-w-full rounded-md border object-contain"
-            />
-            <a
-              href={src}
-              download={name}
-              className="text-muted-foreground text-xs underline"
-            >
-              {name} を保存
-            </a>
-          </figure>
+            <Film className="size-3.5" />
+            この画像を動画にする
+          </button>
+        )}
+      </div>
+    </figure>
+  );
+}
+
+// local-agent: render the video graph's mp4. The host serves it (GET /media/video/<id>.mp4) and the block carries
+// only the URL, resolved here under the LangGraph URL the UI already talks to.
+function AIVideoBlocks({ content }: { content: Message["content"] }) {
+  const { apiUrl } = useStreamContext();
+  if (!Array.isArray(content)) return null;
+  const videos = (content as unknown[]).filter(isVideoBlock);
+  if (!videos.length) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {videos.map((video, i) => {
+        let src: string;
+        try {
+          src = resolveHostUrl(video.url, apiUrl);
+        } catch {
+          src = video.url;
+        }
+        return (
+          <AIVideo
+            key={`${src}-${i}`}
+            src={src}
+            mimeType={video.mimeType}
+            name={video.metadata?.name || `video-${i + 1}.mp4`}
+            width={video.metadata?.width}
+            height={video.metadata?.height}
+          />
         );
       })}
     </div>
+  );
+}
+
+function AIVideo({
+  src,
+  mimeType,
+  name,
+  width,
+  height,
+}: {
+  src: string;
+  mimeType: string;
+  name: string;
+  width?: number;
+  height?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  const download = `${src}${src.includes("?") ? "&" : "?"}download=1`;
+  if (failed) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        動画が見つかりません（outputs/video が消された可能性があります）
+      </p>
+    );
+  }
+  return (
+    <figure className="flex w-full min-w-0 flex-col items-start gap-1">
+      {/* The size is known before the file loads: keep the box (and the page) from jumping, never wider than the message. */}
+      <video
+        controls
+        loop
+        playsInline
+        preload="metadata"
+        onError={() => setFailed(true)}
+        style={
+          width && height
+            ? { aspectRatio: `${width} / ${height}`, width: `min(100%, ${width}px)` }
+            : undefined
+        }
+        className="h-auto max-h-[80vh] max-w-full rounded-md border bg-black object-contain"
+      >
+        <source
+          src={src}
+          type={mimeType}
+          onError={() => setFailed(true)}
+        />
+      </video>
+      <a
+        href={download}
+        download={name}
+        className="text-muted-foreground text-xs underline [overflow-wrap:anywhere]"
+      >
+        {name} を保存
+      </a>
+    </figure>
   );
 }
 
@@ -233,6 +353,7 @@ export function AssistantMessage({
             )}
 
             <AIImageBlocks content={content} />
+            <AIVideoBlocks content={content} />
 
             {/* local-agent: the chat tab's search trace */}
             {isSearchTrace(message?.additional_kwargs?.search_trace) && (

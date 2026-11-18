@@ -14,32 +14,50 @@ export const SUPPORTED_FILE_TYPES = [
 
 interface UseFileUploadOptions {
   initialBlocks?: ContentBlock.Multimodal.Data[];
+  // local-agent: what the active tab's graph takes (image tab: 4 images and PDFs, video tab: 1 image, chat tab:
+  // nothing). Read through a ref, so the window-wide drop and paste handlers always use the current tab's limits.
+  maxImages?: number;
+  allowPdf?: boolean;
 }
 
 export function useFileUpload({
   initialBlocks = [],
+  maxImages = MAX_IMAGES,
+  allowPdf = true,
 }: UseFileUploadOptions = {}) {
   const [contentBlocks, setContentBlocks] =
     useState<ContentBlock.Multimodal.Data[]>(initialBlocks);
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
+  const limits = useRef({ maxImages, allowPdf });
+  useEffect(() => {
+    limits.current = { maxImages, allowPdf };
+  }, [maxImages, allowPdf]);
 
-  // The graph accepts at most MAX_IMAGES reference images per message.
+  // The graph accepts at most maxImages images per message.
   const addBlocks = (newBlocks: ContentBlock.Multimodal.Data[]) => {
+    const { maxImages: max, allowPdf: pdf } = limits.current;
+    let accepted = newBlocks;
+    if (!pdf && accepted.some((b) => b.type === "file")) {
+      toast.error("このタブでは PDF を添付できません。");
+      accepted = accepted.filter((b) => b.type !== "file");
+    }
     setContentBlocks((prev) => {
       const images = prev.filter((b) => b.type === "image").length;
-      const room = Math.max(0, MAX_IMAGES - images);
-      const incoming = newBlocks.filter((b) => b.type === "image");
+      const room = Math.max(0, max - images);
+      const incoming = accepted.filter((b) => b.type === "image");
       if (incoming.length > room) {
         toast.error(
-          `画像は 1 メッセージ ${MAX_IMAGES} 枚までです。${incoming.length - room} 枚は追加しませんでした。`,
+          max === 0
+            ? "このタブでは画像を添付できません（画像タブか動画タブで添付してください）。"
+            : `画像は 1 メッセージ ${max} 枚までです。${incoming.length - room} 枚は追加しませんでした。`,
         );
       }
       let kept = 0;
       return [
         ...prev,
-        ...newBlocks.filter((b) => b.type !== "image" || kept++ < room),
+        ...accepted.filter((b) => b.type !== "image" || kept++ < room),
       ];
     });
   };

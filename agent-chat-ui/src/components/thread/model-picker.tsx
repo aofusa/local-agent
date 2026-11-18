@@ -1,14 +1,14 @@
 // local-agent: the model picker next to the send button (docs/host-model-selection-design.md §10), like the model
 // menu of Claude / Gemini. The list comes from the LangGraph host (GET <apiUrl>/models): only the models the host
 // offers can be picked, the run sends the catalog id (chat tab: configurable.inference_model, image tab:
-// configurable.image_model) and nothing when the user kept the host's default.
+// configurable.image_model, video tab: configurable.video_model) and nothing when the user kept the host's default.
 // The choice belongs to one conversation: kept per thread in sessionStorage, a new chat starts on the default,
 // a change applies from the next message and never stops the running one.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type ModelKind = "inference" | "image";
+export type ModelKind = "inference" | "image" | "video";
 
 export interface HostModel {
   id: string;
@@ -20,21 +20,45 @@ export interface HostModel {
   family?: string;
   family_label?: string;
   ckpt_name?: string;
+  // A video model's LoRAs as display strings ("high: <file>:<weight>", "low: …").
+  loras?: string[];
   // An inference model on another host (config/host_models.json "endpoint").
   remote?: { kind: string; host: string; model: string };
 }
 
+// The video tab's lengths (seconds) the host offers.
+export interface VideoOptions {
+  default_seconds: number;
+  max_seconds: number;
+  choices: number[];
+}
+
 export interface HostModels {
-  defaults: { inference: string; image: string };
+  defaults: { inference: string; image: string; video?: string };
   inference: HostModel[];
   image: HostModel[];
+  // Hosts before the video tab send neither.
+  video?: HostModel[];
+  video_options?: VideoOptions;
 }
 
 const STORAGE_PREFIX = "cirka.";
 const listeners = new Set<() => void>();
 
+const FIELDS: Record<ModelKind, string> = {
+  inference: "inference_model",
+  image: "image_model",
+  video: "video_model",
+};
+
+const KIND_LABELS: Record<ModelKind, string> = {
+  inference: "推論モデル",
+  image: "画像モデル",
+  video: "動画モデル",
+};
+
 function storageKey(kind: ModelKind, threadId: string | null): string {
-  const field = kind === "inference" ? "inference_model" : "image_model";
+  const field = FIELDS[kind];
   return threadId
     ? `${STORAGE_PREFIX}thread.${threadId}.${field}`
     : `${STORAGE_PREFIX}draft.${field}`;
@@ -140,9 +164,17 @@ function detail(kind: ModelKind, model: HostModel): string {
     if (model.thinking === false) parts.push("思考なし");
     return parts.join(" ・ ");
   }
+  if (kind === "video") return model.family_label || model.family || "";
   return [model.family_label || model.family, model.ckpt_name]
     .filter(Boolean)
     .join(" ・ ");
+}
+
+/** A video model's LoRAs on one line, without the file extension ("high: Furry Enhancer …:1.0 / low: …"). */
+function loraLine(model: HostModel): string {
+  return (model.loras ?? [])
+    .map((lora) => lora.replace(/\.safetensors(?=\s*:|$)/i, ""))
+    .join(" / ");
 }
 
 export function ModelPicker({
@@ -187,8 +219,8 @@ export function ModelPicker({
     };
   }, [open]);
 
-  const list = models ? models[kind] : [];
-  const defaultId = models?.defaults[kind] ?? "";
+  const list = models?.[kind] ?? [];
+  const defaultId = models?.defaults?.[kind] ?? "";
   const currentId = value || defaultId;
   const current = list.find((m) => m.id === currentId);
   const name = current?.label || (error ? "モデル" : value || "…");
@@ -235,7 +267,7 @@ export function ModelPicker({
         onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={kind === "inference" ? "推論モデルを選ぶ" : "画像モデルを選ぶ"}
+        title={`${KIND_LABELS[kind]}を選ぶ`}
         className="text-muted-foreground hover:text-foreground flex max-w-[48vw] min-w-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-sm sm:max-w-56"
       >
         <span className="truncate">{name}</span>
@@ -244,7 +276,7 @@ export function ModelPicker({
       {open && (
         <div
           role="listbox"
-          aria-label={kind === "inference" ? "推論モデル" : "画像モデル"}
+          aria-label={KIND_LABELS[kind]}
           style={
             place
               ? {
@@ -258,7 +290,7 @@ export function ModelPicker({
           className="bg-background fixed z-50 w-[min(20rem,calc(100vw-16px))] overflow-y-auto rounded-xl border p-1 shadow-lg"
         >
           <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-xs">
-            {kind === "inference" ? "推論モデル" : "画像モデル"}
+            {KIND_LABELS[kind]}
             {loading && <LoaderCircle className="size-3 animate-spin" />}
           </div>
           {error && !models && (
@@ -268,6 +300,7 @@ export function ModelPicker({
           )}
           {list.map((model) => {
             const selected = model.id === currentId;
+            const loras = kind === "video" ? loraLine(model) : "";
             return (
               <button
                 key={model.id}
@@ -275,7 +308,13 @@ export function ModelPicker({
                 role="option"
                 aria-selected={selected}
                 disabled={!model.available}
-                title={model.available ? model.id : model.reason}
+                title={
+                  !model.available
+                    ? model.reason
+                    : kind === "video"
+                      ? [model.id, ...(model.loras ?? [])].join("\n")
+                      : model.id
+                }
                 onClick={() => {
                   onChange(model.id);
                   setOpen(false);
@@ -299,6 +338,11 @@ export function ModelPicker({
                   <span className="text-muted-foreground block truncate text-xs">
                     {model.available ? detail(kind, model) : model.reason}
                   </span>
+                  {loras && (
+                    <span className="text-muted-foreground line-clamp-3 block text-[11px] [overflow-wrap:anywhere]">
+                      LoRA: {loras}
+                    </span>
+                  )}
                 </span>
                 {selected && <Check className="mt-0.5 size-4 shrink-0" />}
               </button>
