@@ -11,6 +11,11 @@
 > ループバック待受）とノード ID・JSON 契約・unload 順は変えていない。unload は LM Studio のネイティブ API ではなく、
 > ルータの `POST /models/unload` と `GET /models` の状態で行う。経緯、対応表、実測は `docs/llamacpp-router-design.md`。
 
+> 改訂（v0.14.0、利用者の指定）: この文書の「動画そのものの生成（Wan / LTX 等）」「動画生成ワークフロー」を作らないという
+> 定めは、この画像のワークフロー（画像タブ）の話である。動画の生成は動画タブ（graph `video`）だけが行い、その設計は
+> `docs/image-to-video-design.md` に従う（LLM → eject → 拡散モデルの順と、ComfyUI の中で LLM の GGUF を動かさないことは同じ。
+> 動画モデルの重みを ComfyUI-GGUF で読むことだけを例外とする）。
+
 ---
 
 ## 1. 結論

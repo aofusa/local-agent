@@ -6,11 +6,11 @@
 
 三つのプロセスの分担は固定する。
 
-- LangGraph は、チャット入力の受付、参照メディアの受け取り、ComfyUI への投入、完了待ち、画像の回収、ローカル保存の確認、UI へ返るメッセージの組み立てを行う。
-- ComfyUI は、設計書のワークフローで参照画像の取り込み、LLM サーバの呼び出し、モデルの eject、タグの分割、チェックポイントによる静止画生成、Save Image を行う。
-- LLM サーバ（ルータ）の 27B は、日本語と参照画像から Danbooru / e621 系タグの JSON を返す。画素は作らない。画素を作るのは ComfyUI のチェックポイントと KSampler である。
+- LangGraph は、チャット入力の受付、参照メディアの受け取り、ComfyUI への投入、完了待ち、画像と動画の回収、ローカル保存の確認、UI へ返るメッセージの組み立て、動画の配信（`/media/video`）を行う。
+- ComfyUI は、設計書のワークフローで参照画像の取り込み、LLM サーバの呼び出し、モデルの eject、タグの分割、チェックポイントによる静止画生成、Save Image を行う。動画タブでは、開始画像と動きの説明の生成（LLM）、eject、umT5・High・Low を 1 つずつ読んでは外すこと、SaveVideo を行う。
+- LLM サーバ（ルータ）の 27B は、日本語と参照画像から Danbooru / e621 系タグの JSON を返す（動画タブでは、開始画像と日本語から英語の動きの説明の JSON を返す）。画素は作らない。画素を作るのは ComfyUI のチェックポイント（動画は Wan 2.2）と KSampler である。
 
-LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成の経路を置き換えない。例外はチャットタブ（graph `chat`）と cirka のモデルゲート（`POST /coder/turn`）だけである。チャットタブは会話と検索の計画・統合のために LLM サーバ（ルータ）を直接呼び、検索の前後で unload する。モデルゲートは cirka の 1 ターン分の補完（tool calling）だけを LLM サーバに渡し、ツールは実行せず、`job_lock`（tab `coder`）を握るあいだだけ呼ぶ。推論モデルに別ホストのモデル（`config/host_models.json` の `endpoint`。リモートの llama.cpp か OpenAI 互換のサービス、[remote-llm-design.md](remote-llm-design.md)）を選んだ実行では、チャットタブとモデルゲートはこの端末のルータではなくその接続先を呼ぶ。この端末のメモリを使わないので unload せず、`job_lock` は今までどおり握る。接続できないときは理由を返し、ほかのモデルへ替えない。画像タブ（graph `agent`）の経路は変えない（タグ生成はこの端末のルータのまま）。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
+LangGraph から LLM サーバを直接呼んで、タグ生成や画像・動画の生成の経路を置き換えない。例外はチャットタブ（graph `chat`）と cirka のモデルゲート（`POST /coder/turn`）だけである。チャットタブは会話と検索の計画・統合のために LLM サーバ（ルータ）を直接呼び、検索の前後で unload する。モデルゲートは cirka の 1 ターン分の補完（tool calling）だけを LLM サーバに渡し、ツールは実行せず、`job_lock`（tab `coder`）を握るあいだだけ呼ぶ。推論モデルに別ホストのモデル（`config/host_models.json` の `endpoint`。リモートの llama.cpp か OpenAI 互換のサービス、[remote-llm-design.md](remote-llm-design.md)）を選んだ実行では、チャットタブとモデルゲートはこの端末のルータではなくその接続先を呼ぶ。この端末のメモリを使わないので unload せず、`job_lock` は今までどおり握る。接続できないときは理由を返し、ほかのモデルへ替えない。画像タブ（graph `agent`）と動画タブ（graph `video`）の経路は変えない（タグと動きの説明の生成は、この端末のルータのまま）。LLM のロードと unload の順序は、設計書の ComfyUI グラフが決める。同時に複数の生成を走らせない。前の Queue が終わるまで次を投入しない。
 
 ## 待受と到達範囲
 
@@ -18,7 +18,7 @@ LangGraph から LLM サーバを直接呼んで、タグ生成や画像生成�
 |---|---|---|
 | llama.cpp ルータ（llama-server --models-preset。macOS で MLX を使うときは `furry_agent.mlx_router`、同じ API） | `127.0.0.1:8080`（`LLM_PORT`） | この端末の ComfyUI、LangGraph（チャットタブと `/coder/turn`、`/models`）だけ。モデルは要求時に子プロセスで載せ（一度に 1 つ）、unload で止める |
 | ComfyUI | `127.0.0.1:8188` | この端末の LangGraph だけ |
-| LangGraph | 他ホストから到達できるアドレス。開発時の既定ポートは `2024` | agent-chat-ui、および他ホスト |
+| LangGraph | 他ホストから到達できるアドレス。開発時の既定ポートは `2024` | agent-chat-ui、および他ホスト（動画の配信 `GET /media/video/<UUID>.mp4` を含む） |
 | agent-chat-ui | 他ホストから到達できるアドレス。開発時の既定ポートは `3000` | 利用者のブラウザ |
 | 別ホストの LLM（`config/host_models.json` の `endpoint`） | 相手のホストの待受（このリポジトリは開かない） | この端末の LangGraph（チャットタブ、`/coder/turn`、`/models` の確認）だけ。ComfyUI と cirka は直接つながない |
 | Tor | `127.0.0.1:9050`（SOCKS） | この端末の LangGraph（チャットタブの検索）だけ |
@@ -42,7 +42,7 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 画像生成は ComfyUI 上の furry 系モデル。使えるモデルは `config/host_models.json` の `image` に並べ（ファイル名、系統、LoRA、サンプラーのパラメータ）、実行ごとに `configurable.image_model` の id で選ぶ（無指定は `DEFAULT_IMAGE_MODEL`、既定は `yiffinhell-vantablack` = `yiffInHell_yihVANTABLACK.safetensors`）。`CKPT_NAME`・`COMFY_MODEL_FAMILY`・`LORAS` は読まない。本文のモデル名（「Chroma で」）では切り替えない。
 - 24GB 級の共有メモリでは Q4 の 27B がページングで実用にならないため、既定ではセットアップが同じモデルを IQ3_M に再量子化して使う（`scripts/setup-llm.ps1`、`docs/setup.md`「メモリと LLM の量子化」）。元の GGUF と SHA-256 は `config/llm_model.json`。プリセットは `load-mode = mmap`（共有メモリの iGPU では無いと読み込みが `ErrorOutOfDeviceMemory` になる）。
 - 27B とチェックポイントは同時常駐しない。順序は、LLM がタグを返す、ルータから unload する（`eject` = `FurryJaEjectLLM`、`POST /models/unload` と `GET /models` での確認）、その後に CheckpointLoader と KSampler、で固定する。eject の前に KSampler へ進めたら失敗である。
-- ComfyUI プロセス内に GGUF を載せない。ローカル LLM の実行は llama.cpp の llama-server（別プロセス）だけが行う。
+- ComfyUI プロセス内に LLM の GGUF を載せない（llama-cpp-python を入れない）。ローカル LLM の実行は llama.cpp の llama-server（別プロセス）だけが行う。動画モデル（Wan 2.2）の重みを ComfyUI-GGUF（PyTorch で展開する）で読むことだけは例外（下の「動画タブ」）。
 - LLM の出力は次の JSON だけである。説明、Markdown の囲み、思考タグは禁止する。
 
 ```json
@@ -54,10 +54,23 @@ LAN に出すのは開発用の到達であり、LangSmith へのクラウドデ
 - 参照画像は 0〜4 枚で、役割（`character` / `pose` / `style` / `base` / `mask`）を持つ。役割の組み合わせから `planner.select_workflow` が `workflows/sdxl/` のテンプレート ID を一意に決める。役割推定は LangGraph 内のルール（日本語キーワードと序数）で行い、LM Studio は呼ばない。決められないときは LangGraph の interrupt で利用者に確認する。
 - `base` は同一性を残す経路（VAE Encode）。`character` / `style` は IP-Adapter Plus、`pose` は DWPose 等の前処理と ControlNet Union。どの役割も役割専用の Vision プロンプトでタグ化し、LLM の入力へ節として渡す。Vision の長辺は 768。画像が 0 枚の実行では Vision を走らせず、Load Image の欠損で落とさない。
 - IP-Adapter、ControlNet、前処理、LoRA のローダーは、すべて `ckpt`（eject の後）に依存させる。依存の無い前処理は `FurryJaImageAfter` で `ckpt` の後に止める。
-- 動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。動画生成モデルはロードしない。VHS が無い間は動画を対象外にし、その旨を `docs/troubleshooting.md` に書く。
+- 画像タブでは、動画は参照フレームの供給源に限る。VHS で 1〜4 フレームを抜き、1 枚目を img2img、残りを Vision へ渡す。画像タブは動画生成モデルをロードしない。VHS が無い間は動画の入力を対象外にし、その旨を `docs/troubleshooting.md` に書く。動画の生成は動画タブだけが行う（下の「動画タブ」）。
 - IP-Adapter / ControlNet は複数参照のテンプレートだけが使う。テキストだけと元画像 1 枚の経路（`t2i_basic` / `i2i_basic`）はフェーズ 1 と同じ投入 JSON のまま保つ。
 - ノード ID は設計書 §4.1 のまま固定する。LangGraph が書き換えてよい入力は、設計書の表で「フロントが書き換える入力」とされたもの（日本語指示、参照画像のファイル名、seed、および img2img のとき latent 側）と、`workflows/maps/<family>.json` のスロット（役割ごとの画像ファイル名、強度、denoise、サイズ、ポーズ前処理の候補、モデルファイル、サンプラーと `split` の quality_prefix / default_negative）に限る。構造の変更は、マップにある前処理候補の差し替えと、画像モデルの `loras` による LoraLoader の挿入（`ckpt` の直後）だけである。`llm_backend`、`user_prompt`、`ref_image`、`vision`、`prompt_node`、`eject`、`split`、`ckpt`、`positive`、`negative`、`latent`、`sampler`、`decode`、`save` を別の ID に変えない。
 - API 形式ワークフローの投入手順は設計書 §5 に従う。`POST /upload/image`、API JSON の書き換え、`POST /prompt`、WebSocket `/ws` で完了待ち、`GET /history/{prompt_id}`、`/view` で画像を取る。待ちは「その prompt の進捗イベントが `AGENT_IDLE_TIMEOUT_S`（既定 20 分）届かないとき」だけ打ち切る（利用者の指定で設計書の 10 分の固定値から変えた。[decisions.md](decisions.md) の「タイムアウト」）。この呼び出しを行うのは LangGraph である。
+
+## 動画タブ（画像から動画）
+
+設計と実装記録は [image-to-video-design.md](image-to-video-design.md)、作業指示は [image-to-video-work-instruction.md](image-to-video-work-instruction.md) にある（v0.14.0）。変えてはいけない点を次に置く。
+
+- 動画タブは graph `video` である。入力は画像 1 枚（開始画像）と日本語の指示（空なら控えめな既定の動き）。画像が 0 枚・2 枚以上のときは理由を返して生成しない。画像タブ・チャットタブ・cirka は動画を生成しない。
+- 動画モデルは ComfyUI 上の Wan 2.2 I2V A14B（High Noise / Low Noise の 2 エキスパート）。使えるモデルは `config/host_models.json` の `video` に並べ（エキスパートのファイル、テキストエンコーダ、VAE、`distill_loras`、`loras`、`params`）、実行ごとに `configurable.video_model` の id で選ぶ（無指定は `DEFAULT_VIDEO_MODEL`）。重みは GGUF で、ComfyUI-GGUF が読む。
+- 動きの説明は、画像タブと同じく ComfyUI のワークフローの中で作る: `vision`（開始画像の説明）→ `prompt_node`（`{"positive","negative"}` の JSON）→ `eject` → `split`（prose）。JSON が壊れても、リトライせず生文字列を positive にして生成まで進む。
+- 大きなモデルは 1 つずつ載せる。順序は「LLM → `eject`（unload の確認）→ `te`（umT5）→ `release_te` → `vae` → `i2v` → `unet_high`（と LoRA）→ `sampler_high` → `release_high` → `unet_low`（と LoRA）→ `sampler_low` → `release_low` → `decode`」で固定する。どのローダも `after` の入力で前の段に依存させ、`te`・`unet_high`・`unet_low` は読む前にルータが空かを確かめる。release ノードは使い終えたモデルを外し、残ったモデルと空きメモリを UI の出力に残す。ComfyUI は `--cache-none` で動かす（出力をキャッシュすると、使い終えたモデルが外れない）。
+- ノード ID は設計書 §5.1 のまま固定する。LangGraph が書き換えてよいのは、`workflows/maps/wan22.json` のスロット（指示、開始画像、幅・高さ・フレーム数、seed、モデルのファイル、サンプラーの値、shift、prompt_prefix と既定の negative、VAE のタイル、fps、CRF、テキストエンコーダの置き場）と、LoRA の挿入（`distill_loras` に続けて `loras` を、High / Low それぞれのローダの直後へ LoraLoaderModelOnly で）だけである。
+- LoRA の書き方は画像の `loras` と同じ（`"<ファイル>:<強度>"` を書いた順に当て、空なら当てない。ComfyUI に無ければ、そのモデルは理由つきで使えない）。High と Low に分けて書く。LoRA の有無と強度はカタログだけで決め、`.env` では変えない。
+- 出力は開始画像の縦横比を保ち、`VIDEO_MAX_PIXELS`（とモデルの上限）以下の 16 の倍数にする。フレーム数は秒数 × fps を 4k+1 に丸め、`VIDEO_MAX_SECONDS` を上限にする。端末の性能に合わせる値は `.env` の `VIDEO_*` に置く。
+- `job_lock`（tab `video`）を投入から完了まで握り、画像タブ・チャットタブ・`/coder/turn` と同時に動かない。投入の前と後（失敗時も）に ComfyUI の `/free` を呼ぶ。待ちは、その prompt の進捗が `AGENT_IDLE_TIMEOUT_S` 届かないときだけ打ち切る。
 
 ## チャットタブ（会話と Tor 経由検索）
 
@@ -109,6 +122,8 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 
 このリポジトリ側の複製は `outputs/` に置く。実行のたびに増える生成画像であり、ソースではない。`outputs/` は git に含めない。エージェントの作業メモを `outputs/` に置かない。
 
+動画タブは、ComfyUI の SaveVideo でこの端末に mp4 を残し、LangGraph が `outputs/video/<UUID>.mp4` に複製する（条件は同名の `.json`）。UI へは、LangGraph の http.app が `GET /media/video/<UUID>.mp4` で配信し、メッセージには `{"type": "video", "mimeType": "video/mp4", "url": "/media/video/<UUID>.mp4"}` を載せる（数 MB の動画を base64 でスレッドに載せると、UI がスレッドの値を送り直すたびに届くため）。配信は UUID の形の名前だけを受け付け、パスは受け取らない。他ホストのブラウザは、UI が接続している LangGraph の URL を通して再生する。
+
 ## 置き場所と UI の変更範囲
 
 プログラム、ワークフロー、プロンプト、UI は、このリポジトリの中に作る。ComfyUI 本体と llama.cpp は、セットアップが `tools/comfyui`（検証済みコミット、専用の Python 3.12 venv と GPU に合う PyTorch）と `tools/llama-prism` に導入する（git 管理外）。カスタムノードの導入先は `tools/comfyui/custom_nodes/`、モデルは `tools/comfyui/models/` だけである（外部フォルダは参照しない）。セットアップは指定なしで、この端末に既にあるモデル（LM Studio・以前の ComfyUI のモデルフォルダ、`hf download` の Hugging Face キャッシュ）を探して `tools/` へハードリンクし、無いものだけを Hugging Face のキャッシュ経由（`hf download`）で取得する（`docs/setup.md`「モデルの探し方」）。同じモデルを二重に取得しない。パスは `.env`（`COMFYUI_*`、`LLM_*`。git 管理外）に保存する。
@@ -127,3 +142,5 @@ ComfyUI の `/view` やこの端末のファイルパスは、他ホストのブ
 - 参照が無い実行は Empty Latent を使い、Load Image の欠損で落ちない。
 - LLM が JSON を壊しても、生文字列で生成まで進む。
 - ComfyUI と llama.cpp のルータは `127.0.0.1` のままである。
+- 他ホストの agent-chat-ui の動画タブから画像 1 枚と日本語 1 文を送り、mp4 が 1 本、UI で再生できる。同じ動画がこの端末に保存されている。
+- 動画の生成で、umT5 を読む前にルータの 27B が unload され、High を読む前に umT5 が、Low を読む前に High が外れている（release ノードの出力とログ）。
