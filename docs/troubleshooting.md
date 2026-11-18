@@ -9,7 +9,8 @@
 | 「PrismML 版 llama.cpp がありません」/「検索用モデルがありません」 | `.\scripts\setup-llamacpp.ps1` / `.\scripts\setup-search-models.ps1` を実行して LangGraph を再起動 |
 | 「〜に使えるモデルがありません（メモリ不足…）」 | 他のアプリを閉じる。`BONSAI_RESERVE_MB` を下げる。`SEARCH_FANOUT_WIDTH` を 1〜2 にする |
 | 「検索結果がありません。Tor 出口が拒否された…」 | しばらく置いて送り直す（出口が変わる）。`logs\furry_agent.log` の `search provider=` を確認 |
-| 「チャットタブ（画像タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す |
+| 「チャットタブ（画像タブ、動画タブ）が実行中です」 | もう片方のタブの処理が終わってから送り直す（`JOB_LOCK_TIMEOUT_S` を設定したときだけ出る。ComfyUI で動画を生成中のときも「画像タブ」と出る） |
+| `doctor.ps1` が「すべて OK」と出たのに終了コードが 1 | Docker Desktop が止まっていると、最後に動いた docker の確認の終了コードが残る。表示が「すべて OK」なら問題ない |
 | チャットタブのコードで「docker コマンドがありません」 | Docker（Docker Desktop か Docker Engine）を入れて `.\scripts\setup-sandbox.ps1`（イメージ取得と動作確認）。docker が無いあいだは何も起動しない |
 | チャットタブのコードで「Docker のエンジンに接続できません」 | Docker Desktop が入っていれば承認後に自動で起動・停止する。Docker Engine を使っているならそのエンジンを起動する |
 | 「コンテナイメージ python:3.12-slim がありません」 | `.\scripts\setup-sandbox.ps1`（Rust は `-Rust`）。実行時はイメージを取得しない（`--pull never`） |
@@ -49,6 +50,8 @@
 | 動画で「… 秒間進捗がありません」 | 1 ステップや VAE のデコードが `AGENT_IDLE_TIMEOUT_S` より長くかかった。`VIDEO_MAX_PIXELS` / `VIDEO_SECONDS` を下げるか、`AGENT_IDLE_TIMEOUT_S` を増やす。ComfyUI で完了していれば、動画タブで `再取得 <prompt_id>` と送ると受け取れる |
 | 動画の応答に「⚠️ release_high の時点で拡散モデル（…）が残っていました」 | ComfyUI が `--cache-none` なしで動いている（使い終えたエキスパートが外れず、メモリが 2 倍要る）。`start-comfyui.ps1` で起動し直す |
 | 動画の欄に「動画が見つかりません」 | `outputs\video\` の mp4 が消された。動画は ComfyUI の `output\furry_ja\video\` にも残っている |
+| 送ったのに途中経過が出ない（前の動画を生成中） | LangGraph（`langgraph dev`）は実行を 1 つずつ処理するため、前の実行が終わるまで順番を待つ（3 秒の動画で 25〜33 分）。`logs\furry_agent.log` の `video request` / `video saved` で進み具合が分かる |
+| `setup-video-models.ps1` のモデルの取得が進まない（Hugging Face の xet が「connection struggling」のまま） | 中断して、同じファイル（`config/host_models.json` の `downloads` の repo とファイル名）をブラウザなどで取得し `tools\comfyui\models\diffusion_models`（umT5 は `text_encoders`、VAE は `vae`、lightx2v は `loras`）に置いてから再実行する。置いたファイルは取り直さず、SHA-256 の照合だけを行う |
 | ComfyUI のログに furry_ja が読めない旨や「信頼されていないマウントポイント」 | `tools\comfyui\custom_nodes\furry_ja`（このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション）を、ジャンクションを許さないプロセスから起動している。`cmd /c rmdir` でジャンクションだけを消し、`New-Item -ItemType Junction` で作り直す（agent-chat-ui の `node_modules` なら `pnpm install --frozen-lockfile --offline`） |
 | cirka「ホストに届きません」 | `cirka status` で確認。`cirka config set host http://<LAN IP>:2024`（`localhost` は cirka を動かす PC 自身のこと）。ホスト側で `open-firewall.ps1` を実行し、LangGraph が起動しているか確認 |
 | cirka「ホストに /coder/turn がありません」 | ホストの local-agent が v0.7.0 より古い。更新して LangGraph を再起動する |
@@ -73,7 +76,7 @@
 
 - **動画入力は対象外**: ComfyUI-VideoHelperSuite（VHS）を前提にした経路は未実装です。動画を送るとチャットにその旨を返します（在庫の agent-chat-ui も動画の添付を受け付けません）。
 - **動画の生成は動画タブの「画像 1 枚から動画」だけ**（v0.14.0）: テキストだけからの動画、最初と最後のフレームの指定、音声、5 秒を超える延長、アップスケールはありません。cirka のツールにもありません。動きの説明を作る LLM は、画像のタグ生成と同じくルータの `LLM_MODEL` です。macOS では確かめていません（Wan 2.2 の GGUF は MPS でも動く見込みですが、未確認）。
-- 動画は 1 本ずつです（画像タブ・チャットタブ・cirka とも同時には動きません）。この端末（Radeon 890M）では 3 秒の動画で 25〜30 分、5 秒で 50 分前後かかり、生成中は空き RAM がほとんど無くなります。
+- 動画は 1 本ずつです（画像タブ・チャットタブ・cirka とも同時には動きません）。この端末（Radeon 890M）では 3 秒の動画で 25〜33 分（5 秒は 50 分前後の見込み）かかり、生成中は空き RAM がほとんど無くなります。生成中に送った別の要求は、LangGraph の中で順番を待ちます。
 - InstantID / PuLID（人の顔向けの同一性）は使いません。キャラクター参照は IP-Adapter Plus と Vision タグで行います。
 - 登録済みの系統は `sdxl`、`flux`（Chroma1-HD）、`krea2`（Krea 2）、`anima`（Anima）です（Flux Dev 本家、SD3 などは未登録）。
 - 画像のタグ生成の LLM は、選んだ推論モデルではなくルータの `LLM_MODEL` です（ワークフローの `llm_backend`。タグ生成まで選択に合わせるのは対象外）。

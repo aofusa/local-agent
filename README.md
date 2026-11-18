@@ -93,7 +93,7 @@ scripts/doctor.sh                     # 確認
 | ディスク | 空き 95GB 以上（全モデル。動画タブの既定のモデルで約 23GB）。一部のモデルだけなら 20GB 程度から |
 | ツール | Git、[uv](https://docs.astral.sh/uv/)、Node.js 20 以上（Mac は Homebrew と `hf` も）。cirka をビルドするなら Rust 1.85 以上、コード実行を使うなら Docker |
 
-確認済み: ROG Ally X（Radeon 890M、24GB）と Windows 11、Apple M4（24GB）と macOS 15.5。
+確認済み: ROG Ally X（Radeon 890M、24GB）と Windows 11、Apple M4（24GB）と macOS 15.5。動画タブは ROG Ally X で確認しました（3 秒の動画で 25〜33 分）。
 
 ## ライセンス
 

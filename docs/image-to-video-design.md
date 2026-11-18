@@ -378,7 +378,7 @@ D1〜D8 は 2026-11-18 に利用者が推奨どおりと決めた。D9、D10 は
 | `DEFAULT_VIDEO_MODEL` | `wan22-i2v-a14b-q3`（カタログの先頭） | Q4_K_M もこの端末で動き速さも同じだが、RAM を約 2.4GB 多く使い、ケモノ向け LoRA を当てた組み合わせを確かめたのは Q3_K_M。メモリの余裕を優先した。Q4_K_M は「画質優先」としてピッカーで選べる |
 | ケモノ向け LoRA | Furry Enhancer V3 を High と Low に強度 1.0（カタログの値のまま） | #4 で黒くならず、ケモノの特徴がよく残った |
 | `VIDEO_MAX_PIXELS` | 307200（832×1216 の画像から 448×656） | 1 本（3 秒）が 25 分前後に収まる。480p の面積（399,360）に近く、これより下げると Wan の画質が落ちる |
-| `VIDEO_SECONDS` / `VIDEO_MAX_SECONDS` | 3 / 5 | 3 秒で 25〜30 分（LLM を含む）。5 秒は 1 ステップが約 2 倍になり、50 分前後の見込み（1 ステップは `AGENT_IDLE_TIMEOUT_S` の 1200 秒に収まる） |
+| `VIDEO_SECONDS` / `VIDEO_MAX_SECONDS` | 3 / 5 | 3 秒で 25〜33 分（LLM を含む。§11.5 の実行は 32.7 分）。5 秒は 1 ステップが約 2 倍になり、50 分前後の見込み（1 ステップは `AGENT_IDLE_TIMEOUT_S` の 1200 秒に収まる） |
 | `VIDEO_VAE_TILE` / `VIDEO_VAE_TEMPORAL` | 256 / 16 | デコードは 73〜87 秒で、メモリ不足は起きなかった |
 | `VIDEO_TEXT_ENCODER_DEVICE` | `default` | GPU で 12〜30 秒。CPU に置いても共有メモリでは物理メモリは減らない |
 
