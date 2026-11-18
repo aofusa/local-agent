@@ -146,7 +146,7 @@
 | id | エキスパート | LoRA | 既定値 | 出典 |
 |---|---|---|---|---|
 | `wan22-i2v-a14b-q3` | Q3_K_M（1 本 7.2GB）。この端末の既定 | lightx2v 4 ステップ 1022 + Furry Enhancer Wan 2.2 V3 I2V（High / Low） | 4 steps（2 + 2）/ cfg 1 / shift 5 / euler simple / 16fps / 480p・81 フレームまで | [lightx2v/Wan2.2-Distill-Loras](https://huggingface.co/lightx2v/Wan2.2-Distill-Loras)（4 ステップ、CFG 1、shift 5、euler）、ComfyUI の Wan 2.2 14B I2V テンプレート（16fps、81 フレーム、832×480） |
-| `wan22-i2v-a14b-q4` | Q4_K_M（1 本 9.7GB）。GPU のメモリが 10GB を超える環境向け | 同上 | 同上 | 同上 |
+| `wan22-i2v-a14b-q4` | Q4_K_M（1 本 9.7GB）。画質優先。この端末でも動く（GPU に載らず CPU 側から読む形になり、速さは Q3_K_M と同じくらいだが RAM を約 2.4GB 多く使う）。GPU のメモリが 10GB を超える環境なら既定にしてよい | 同上 | 同上 | 同上 |
 
 モデルのファイル（エキスパート、umT5、VAE、lightx2v の LoRA）は `setup-video-models.ps1` が Hugging Face から取得し、SHA-256 を照合します（`downloads` の `wan22` と各 id）。ケモノ向けの LoRA は Civitai から利用者が入手して置きます（取得はしません）。動画モデルの id の付け方は画像モデルと同じで、系統は今は `wan22` だけです。
 

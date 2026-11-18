@@ -1,10 +1,10 @@
-# 画像から動画（Wan 2.2 I2V）設計書（v0.14.0 予定）
+# 画像から動画（Wan 2.2 I2V）設計書（v0.14.0）
 
 対象: 新しい動画タブ（graph `video`）、ComfyUI の動画ワークフロー、`config/host_models.json` の `video`、agent-chat-ui の動画タブ。
 この文書は要件、設計、決めたこと、実装記録をまとめる。作業の手順と受け入れ基準は [image-to-video-work-instruction.md](image-to-video-work-instruction.md) にある。LLM と ComfyUI の契約は [llm-comfyui-workflow-design.md](llm-comfyui-workflow-design.md)、モデルの一覧は [host-model-selection-design.md](host-model-selection-design.md) に従う。
 
-作成日: 2026-11-18（同日、§10 の D1〜D8 を推奨どおりに決め、ケモノ向け LoRA の要件を足した）
-ステータス: 設計は決定、作業の依頼待ち。ケモノ向け LoRA の入手と特定（§10 の D9、D10）は利用者の回答待ち。既定値（量子化、大きさ、長さ、LoRA の当て方と強度）は、フェーズ 0 の計測（作業指示書）が終わるまで案のまま。
+作成日: 2026-11-18（同日、§10 の D1〜D8 を推奨どおりに決め、ケモノ向け LoRA の要件を足した。D9、D10 も同日に決まった）
+ステータス: 実装済み（`feat/image-to-video`）。フェーズ 0 の計測と決めた既定値、確認した動作、設計からの変更は §11。
 
 ## 1. 要件（利用者の指定、2026-11-18）
 
@@ -131,7 +131,7 @@ LangGraph が mp4 を outputs/video/ に保存し、/media/video/<uuid>.mp4 の 
 | `video` | CreateVideo | フレームから動画 | fps |
 | `save` | SaveVideo | `output/furry_ja/video/` に mp4 | crf |
 
-フレーム補間（§7 の `VIDEO_INTERPOLATE`）を有効にしたときだけ、`decode` と `video` のあいだに `interp_model`（FrameInterpolationModelLoader）と `interp`（FrameInterpolate）を挟み、fps を倍にする。
+フレーム補間（§7 の `VIDEO_INTERPOLATE`）を有効にしたときだけ、`decode` と `video` のあいだに `interp_model`（FrameInterpolationModelLoader）と `interp`（FrameInterpolate）を挟み、fps を倍にする案だった（見送り。§11）。
 
 ### 5.2 順序の保証
 
@@ -280,7 +280,7 @@ LoRA の書き方（画像の `loras` と同じ）:
 | `VIDEO_VAE_TEMPORAL` | 16 | VAE が一度にデコードするフレーム数（重なりは 4） |
 | `VIDEO_TEXT_ENCODER_DEVICE` | `default` | `cpu` にすると umT5 を CPU で動かす |
 | `VIDEO_CRF` | 20 | h264 の画質（小さいほど高画質で、ファイルが大きい） |
-| `VIDEO_INTERPOLATE` | 0 | 2 にすると RIFE でフレームを補間し、fps を 2 倍にする（補間モデルの取得が要る。任意の機能） |
+| `VIDEO_INTERPOLATE` | — | 見送った（§11）。2 にすると RIFE でフレームを補間し、fps を 2 倍にする案だった（補間モデルの取得が要る。任意の機能） |
 
 既存のキーで効くもの: `COMFYUI_EXTRA_ARGS`（ComfyUI の起動引数。例: `--reserve-vram 0.5`）、`AGENT_IDLE_TIMEOUT_S`、`JOB_LOCK_*`、`HOST_MODELS_DISABLE`。LoRA の有無と強度は `.env` では変えない（§6.3）。
 
@@ -322,7 +322,7 @@ LoRA の書き方（画像の `loras` と同じ）:
 
 ## 10. 決めたこと・決めること
 
-D1〜D8 は 2026-11-18 に利用者が推奨どおりと決めた。D9、D10 はケモノ向け LoRA の追加（要件 6）で出た項目。
+D1〜D8 は 2026-11-18 に利用者が推奨どおりと決めた。D9、D10 はケモノ向け LoRA の追加（要件 6）で出た項目で、同日に利用者が決めた。
 
 | | 内容 | 決定 |
 |---|---|---|
@@ -334,9 +334,81 @@ D1〜D8 は 2026-11-18 に利用者が推奨どおりと決めた。D9、D10 は
 | D6 | セットアップ: `setup.ps1` に含め、`-SkipVideo` で外せるようにする（既定のモデルで 23〜28GB を取得） | `setup.ps1` に含める |
 | D7 | 対象外（§9） | このまま |
 | D8 | フェーズ 0 の計測のために、`tools/comfyui` へ ComfyUI-GGUF を入れ、モデル（Q4_K_M と Q3_K_M の両方と共通のファイルで約 42GB）を取得する。使わなかった量子化は計測の後に消す | 進める（作業の依頼の後） |
-| D9 | ケモノ向け LoRA の入手: Furry Enhancer の Wan 2.2 V3（I2V 用の High / Low）を、利用者が Civitai から入手して `Documents\ComfyUI\models\loras`（または `tools\comfyui\models\loras`）に置く。フェーズ 0 の前に要る | 回答待ち |
-| D10 | 参考案の「H-LoRA Anime」「Anime Style」: 配布元を特定できなかった。使いたい LoRA（Civitai のページかファイル）を教えてもらい、フェーズ 0 で比べてから採否を決める。教えてもらえないときは Furry Enhancer だけで進める | 回答待ち |
+| D9 | ケモノ向け LoRA の入手: Furry Enhancer の Wan 2.2 V3（I2V 用の High / Low）を、利用者が Civitai から入手して `Documents\ComfyUI\models\loras`（または `tools\comfyui\models\loras`）に置く。フェーズ 0 の前に要る | 利用者が置いた（2026-11-18） |
+| D10 | 参考案の「H-LoRA Anime」「Anime Style」: 配布元を特定できなかった。使いたい LoRA（Civitai のページかファイル）を教えてもらい、フェーズ 0 で比べてから採否を決める。教えてもらえないときは Furry Enhancer だけで進める | Furry Enhancer だけで進める（利用者、2026-11-18） |
 
 ## 11. 実装記録
 
-（実装の後に書く: フェーズ 0 の計測、決めた既定値と LoRA の当て方、確認した動作、設計からの変更）
+### 11.1 実装（2026-11-18、`feat/image-to-video`）
+
+| フェーズ | コミット | 内容 |
+|---|---|---|
+| 1 仕様の改定 | `17e7b4a`、`e30b6c1` | AGENTS.md、specification.md、llm-comfyui-workflow-design.md（D1、D2）。ロックは画像タブと同じく投入までと書き直した |
+| 2 ComfyUI | `ad4dfaa`、`a672db9` | `FurryJaTextEncoderAfter`、`FurryJaVAELoaderAfter`、`FurryJaVideoModelAfter`、`FurryJaReleaseAfter`。`build_workflows.py` が `workflows/wan22/i2v.api.json` とマップを生成（既存のテンプレートはバイト単位で同じ） |
+| 3 LangGraph | `b227551`、`d022d3b` | カタログの `video`（High / Low 別の LoRA、`distill_loras`）、`GET /models` の `video` と `video_options`、graph `video`、`video_plan.py`、`/media/video` |
+| 4 セットアップ | `f5516a2`、`8740857` | `setup-video-models.ps1`、`setup.ps1 -SkipVideo`、`doctor.ps1`、`.env.example` の `VIDEO_*`。カタログの先頭（既定）を Q3_K_M に |
+| 5 UI | `ff3c1d3` | 動画タブ、長さの選択、動画モデルのピッカー、再生と保存、「この画像を動画にする」 |
+| 7 文書 | `2167c19` ほか | setup、usage、configuration、architecture、models、troubleshooting、third-party-licenses、decisions、README、CHANGELOG |
+
+### 11.2 フェーズ 0 の計測
+
+条件: この端末（§2）。開始画像は画像タブで作った 832×1216 のケモノ（`outputs/20261008-192023_7442fd37_furry_ja_00018_.png`）、448×656・49 フレーム（3 秒）、seed 20261122、動きの説明は固定の英文（LLM のノードを外して投入）、VAE のタイル 256 / 時間方向 16、umT5 は GPU。スクリプトと結果は `artifacts/video/`（git 管理外）。番号は作業指示書のフェーズ 0 の表。
+
+| # | 量子化 | LoRA | 全体 | 1 ステップ（High / Low） | GPU に載った量（High / Low） | 空き RAM の最小 / コミットの最大 | 出力 |
+|---|---|---|---|---|---|---|---|
+| 1 | Q3_K_M | lightx2v だけ | 23.4 分 | 342 / 255 秒 | 3.6 / 3.0GB（残りは CPU 側） | 0.02GB / 35.8GB | 振り向いて笑う。黒いフレームなし。マズル・耳・尾・毛並みは最後まで保たれた |
+| 2 | Q4_K_M | lightx2v だけ | 23.9 分 | 308 / 284 秒 | 0 / 0GB（全部 CPU 側） | 0.02GB / 41.4GB | 壊れていない（全部を CPU 側から読んでも、以前の ROCm の画像のような破損は出なかった）。#1 と同じ動き、線が少し整う |
+| 3 | — | Furry Enhancer を Low だけ | — | — | — | — | 測らなかった（#4 で High に当てても黒くならなかったため） |
+| 4 | Q3_K_M | lightx2v + Furry Enhancer V3（High と Low、1.0） | 27.0 分 | 348 / 351 秒 | 1.5 / 1.6GB | 0.01GB / 40.6GB | 黒いフレームなし。毛並みの質感が増え、開始画像の細部（汗のマーク）も残った。動きの量は #1 と同じくらい |
+| 5 | — | アニメ調の LoRA | — | — | — | — | 対象外（D10） |
+| 6 | — | 832×480・81 フレーム | — | — | — | — | 測らなかった。トークン数が #1 の約 2 倍で、1 本 50 分を超える見込みのため（§11.3） |
+
+内訳（#1）: umT5 の読み込みとエンコード 51 秒、開始画像のエンコード 34 秒、High 11.7 分、Low 8.9 分、タイルデコード 73 秒（#2・#4 は 86 秒）、保存 1 秒。各段の release は、次のローダの前にモデルが 1 つも残っていないことを報告した（`alive before=[] after=[]`。`--cache-none` で使い終えたエキスパートが GC で外れている）。
+
+わかったこと:
+
+- 時間はほぼ計算で決まる。GPU に載る量が 3.6GB でも 0GB でも、1 ステップは 300〜350 秒で変わらない（Q4_K_M の展開は Q3_K_M より軽く、むしろ少し速い）。短くするには、画素数かフレーム数を減らすしかない。
+- この端末の GPU の予算（9.17GB）は、他のアプリ（dwm など約 1GB）と ROCm のランタイムに削られる。ComfyUI の起動直後は umT5 を外した後の空きが 6.9GB、2 本目以降は 0.2〜4.5GB（LLM を通した実行では 0.2GB）で、エキスパートの大半が CPU 側に置かれる（ComfyUI の推定に基づく部分読み込み。ROCm 7.2 では動的 VRAM が使えない）。それでも出力は壊れなかった。
+- サンプリング中は空き RAM がほぼ 0 になり、Windows のページファイルが広がる（システム管理のページファイルが 13.5GB まで伸びた）。生成中は他のアプリを閉じたほうがよい（usage と troubleshooting に書いた）。
+
+### 11.3 決めた既定値
+
+| 項目 | 値 | 理由 |
+|---|---|---|
+| `DEFAULT_VIDEO_MODEL` | `wan22-i2v-a14b-q3`（カタログの先頭） | Q4_K_M もこの端末で動き速さも同じだが、RAM を約 2.4GB 多く使い、ケモノ向け LoRA を当てた組み合わせを確かめたのは Q3_K_M。メモリの余裕を優先した。Q4_K_M は「画質優先」としてピッカーで選べる |
+| ケモノ向け LoRA | Furry Enhancer V3 を High と Low に強度 1.0（カタログの値のまま） | #4 で黒くならず、ケモノの特徴がよく残った |
+| `VIDEO_MAX_PIXELS` | 307200（832×1216 の画像から 448×656） | 1 本（3 秒）が 25 分前後に収まる。480p の面積（399,360）に近く、これより下げると Wan の画質が落ちる |
+| `VIDEO_SECONDS` / `VIDEO_MAX_SECONDS` | 3 / 5 | 3 秒で 25〜30 分（LLM を含む）。5 秒は 1 ステップが約 2 倍になり、50 分前後の見込み（1 ステップは `AGENT_IDLE_TIMEOUT_S` の 1200 秒に収まる） |
+| `VIDEO_VAE_TILE` / `VIDEO_VAE_TEMPORAL` | 256 / 16 | デコードは 73〜87 秒で、メモリ不足は起きなかった |
+| `VIDEO_TEXT_ENCODER_DEVICE` | `default` | GPU で 12〜30 秒。CPU に置いても共有メモリでは物理メモリは減らない |
+
+### 11.4 設計からの変更
+
+- `VIDEO_INTERPOLATE`（RIFE のフレーム補間、任意の機能）は見送った。補間モデルの取得が増え、この端末では 1 本が長いため（作業指示書の「やること」にも入っていない）。
+- D8 の「使わなかった量子化を消す」: Q4_K_M もこの端末で動き、ピッカーで選べる候補になったため消さなかった（`tools/comfyui/models/diffusion_models` の 2 ファイル、18.4GB）。要らなければ消してよい（一覧で「使えない」と表示されるだけ）。
+- Q4_K_M の位置づけを「GPU のメモリが 10GB を超える環境向け」から「画質優先（この端末でも動くが RAM を多く使う）」にした。
+- `langgraph dev` は既定で同時に 1 つの実行しか処理しない（`n_jobs_per_worker` = 1）。動画の生成中に送った別の要求は、LangGraph の中で `pending` のまま待つ（既存の動作。画像タブと同じ）。
+- 作業中、Windows の Redirection Guard で ComfyUI が `custom_nodes\furry_ja` のジャンクションをたどれなかった。ジャンクションを作り直して解消し、troubleshooting に書いた。
+- モデルの取得: Hugging Face の xet が止まったため、作業では範囲を分けた並列取得で SHA-256 を照合した（`setup-video-models.ps1` は `hf download` のまま）。
+
+### 11.5 確認した動作
+
+2026-11-18、この端末で ComfyUI・LLM のルータ・LangGraph・agent-chat-ui・Tor を起動して確かめた。
+
+- Web 画面から（受け入れ基準 1〜3、5、6）: この端末のヘッドレス Edge で LAN のアドレス（`http://192.168.11.41:3000`、LangGraph は `:2024`）の動画タブを開き、画像タブで作った 832×1216 のケモノの画像 1 枚と「しっぽを振りながら、こちらを向いて笑う」を、既定の長さ（3 秒）と既定のモデルで送った。送信から保存まで 32.7 分（27B の動きの説明 4.5 分、umT5 0.7 分、High 12.0 分、Low 12.3 分、デコードと保存 1.9 分）。27B は開始画像を見て JSON を返し（`split mode=json`。種族・毛色・耳・尾を書き、「振り向いて笑い、尾を左右に振る。耳とひげが少し動く。カメラは固定」）、448×656・49 フレーム・16fps の mp4（1.25MB）が ComfyUI の `output/furry_ja/video/` と `outputs/video/<UUID>.mp4`（条件の `.json` つき）に保存された。応答の `<video>` は LAN のアドレスの `/media/video/<UUID>.mp4` から読み込まれ（3.06 秒、448×656、エラーなし）、「… を保存」のリンクは `?download=1`。PC の幅と 390px の幅のどちらでも横にはみ出さない。キャラクターは振り向いて笑い、マズル・耳・尾・毛並みは最後まで保たれた。
+- 1 モデルずつ（受け入れ基準 3）: `logs/furry_agent.log` に、各ローダが前の段の後にルータが空であることを確かめて読み込んだこと（`LLM router unloaded=[True]`）と、各 release の時点でモデルが 1 つも残っていないこと（`alive_before=[]`、`diffusion_before=[]`）が残った。
+- 2 本目（受け入れ基準 6、7）: 1 本目の生成中に、正方形（1024×1024）の画像を指示なし・2 秒で API から送った。LangGraph の中で `pending` のまま待ち、1 本目の後に始まった。27B は既定の指示から控えめな動き（耳と尾が少し動き、呼吸とまばたき。カメラ固定）を書き、544×544・33 フレームで 20.6 分（1 ステップ約 200 秒）。
+- `.env` の反映（受け入れ基準 12）: `VIDEO_MAX_SECONDS=3`、`VIDEO_MAX_PIXELS=200000` を環境に置いて LangGraph を再起動すると、`GET /models` の長さの選択肢が 2 / 3 秒になり、5 秒の要求は「長さは上限の 3 秒にしました」の注記つきで 3 秒・368×528 になった。元に戻して再起動すると 2 / 3 / 5 秒に戻った。
+- 中断（受け入れ基準 11）: 上の要求を 27B の段で取り消すと（LangGraph の取り消し API。UI の停止と同じ）、実行は `interrupted` になり、ComfyUI に中断が届いた。27B の応答が返った時点で ComfyUI は止まり（`execution_interrupted`、出力なし）、動画モデルは読み込まれなかった。ルータの 27B は次の実行の eject まで載ったまま（画像タブと同じ）。
+- 拒否（受け入れ基準 7、9）: 画像なし「動かしたい画像を 1 枚添付してください」、2 枚「動画タブで添付できる画像は 1 枚だけです（2 枚添付されています）」、未知の id「動画モデル 'wan99-nope' はホストのモデル一覧にありません」。どれも生成せず、別のモデルに替えない。
+- UI: タブ（画像 / チャット / 動画）、動画タブの入力欄の案内、長さの選択（既定の 3 秒が選ばれている）、ピッカー（Q3_K_M が既定、Q4_K_M も使える、LoRA の行）、添付するまで送信できないこと、画像タブのスレッドの「この画像を動画にする」で動画タブに画像が添付された状態で開くこと、390px の幅で横にはみ出さないこと。
+- セットアップ: `setup-video-models.ps1` を 2 回（既定のモデルと `-Ids wan22-i2v-a14b-q4`）実行し、どちらも取り直さずに SHA-256 の照合だけで終わった（49 秒、58 秒）。`doctor.ps1` は動画のノード（9 個）と既定の動画モデル（2 エキスパートと LoRA 4 つ）、graph `video` を OK と報告した。
+- デグレ確認（同日、動画タブの実装の後）: 画像タブ（既定の SDXL、テキストのみ。eject の確認、`split mode=json`）、Tor 検索（速いモード、主張の突き合わせまで）、cirka（ファイルの作成からコマンドの実行まで）。
+- テスト: `uv run pytest` 778 件成功（2 件スキップ）。`build_workflows.py` を流し直しても差分なし。agent-chat-ui の型検査（`tsc --noEmit`）成功。
+
+確かめられなかったこと:
+
+- 別ホストの実機のブラウザとスマートフォン（この端末のヘッドレス Edge から LAN のアドレスで確かめた）。
+- 5 秒の動画と、832×480・81 フレーム（1 本 50 分前後の見込み。§11.3）。
+- UI の停止ボタンそのもの（LangGraph の取り消し API で確かめた）。動画の生成中にチャットタブ・画像タブ・cirka が ComfyUI のキューを見て待つこと（単体テストのみ）。
+- LLM が JSON を壊したときの生文字列の扱い（受け入れ基準 8。単体テストのみ。実機ではどれも JSON だった）、`loras` を空にしたエントリ、LoRA のファイルが無いときの「使えない」表示（単体テストのみ）。

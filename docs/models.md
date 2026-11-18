@@ -1,6 +1,6 @@
 # 採用モデルと選定の記録
 
-このプロジェクトが使うモデル（LLM、検索用の小さなモデル、画像モデル、参照画像用のモデル）について、誰がなぜ選んだか、どう評価したか、採らなかったものとその理由をまとめます。今の一覧と設定値は `config/host_models.json`（選べるモデル）、`config/llm_model.json`（27B）、`config/search_models.json`（検索モデル）が正で、各値の出典は [configuration.md › モデルの一覧とパラメータ](configuration.md#モデルの一覧とパラメータconfighost_modelsjsonv0120) にあります。
+このプロジェクトが使うモデル（LLM、検索用の小さなモデル、画像モデル、参照画像用のモデル、動画モデル）について、誰がなぜ選んだか、どう評価したか、採らなかったものとその理由をまとめます。今の一覧と設定値は `config/host_models.json`（選べるモデル）、`config/llm_model.json`（27B）、`config/search_models.json`（検索モデル）が正で、各値の出典は [configuration.md › モデルの一覧とパラメータ](configuration.md#モデルの一覧とパラメータconfighost_modelsjsonv0120) にあります。
 
 この記録は、過去の README・設計書・実装記録、コミットログ、開発セッションでの依頼と検証結果をもとにしています（末尾の「出典」）。
 
@@ -8,7 +8,7 @@
 
 - **すべてこの端末の上で動かす。** クラウド API は使わない（[AGENTS.md](../AGENTS.md)）。
 - **想定機は ROG Ally X 級（Radeon 890M、共有メモリ 24GB）。** OS から見える RAM は約 23GB で、GPU も同じメモリを使う。27B の LLM と画像モデルは同時に載らないため、ワークフローは「LLM がタグを返す → unload → 画像モデルを読み込む」の順に固定している。モデルの選び方と量子化は、ほぼこの制約で決まっている。
-- **モデルは利用者が指定したものを基本にする。** 利用者は 27B（Huihui Qwen3.8 27B Abliterated）と最初の画像モデル（yiffInHell VANTABLACK）を指定し、検索モデルは候補 8 つを示して「タスクに応じて自動で選ぶ」ことを求めた。v0.12.0 では選べる推論モデル 2 つと画像モデル 8 つを指定した。開発側が決めたのは、量子化、パラメータ、候補の中の役割と順位である。
+- **モデルは利用者が指定したものを基本にする。** 利用者は 27B（Huihui Qwen3.8 27B Abliterated）と最初の画像モデル（yiffInHell VANTABLACK）を指定し、検索モデルは候補 8 つを示して「タスクに応じて自動で選ぶ」ことを求めた。v0.12.0 では選べる推論モデル 2 つと画像モデル 8 つを指定し、v0.14.0 では動画モデル（Wan 2.2 I2V A14B と lightx2v の LoRA）とケモノ向けの LoRA を参考案として示した。開発側が決めたのは、量子化、パラメータ、候補の中の役割と順位である。
 
 ## 推論の LLM
 
@@ -109,6 +109,28 @@
 
 SDXL + ControlNet + IP-Adapter + エンコーダは GPU の予算（空き約 6.8GB）を超えたため、KSampler の直前でエンコーダを外すノードを足した。同じプロセスでの 2 回目以降の IP-Adapter 生成が壊れた件は、ComfyUI を `--cache-none` で起動して解消した。詳しくは [troubleshooting.md › 調整の記録](troubleshooting.md#調整の記録参照画像)。
 
+## 動画モデル（v0.14.0）
+
+動画タブ（画像 1 枚から短い動画）のモデルです。候補の比較は [image-to-video-design.md](image-to-video-design.md) §3、計測の記録は同 §11 にあります。
+
+| モデル | 採用の経緯 | 設定と評価 |
+|---|---|---|
+| Wan 2.2 I2V A14B（QuantStack の GGUF。High / Low の 2 エキスパート） | 利用者の参考案（2026-11-18）。ローカルで動く画像→動画のうち、画質と ComfyUI での実績が最も厚く、ケモノ向けの LoRA もある（Apache-2.0）。14B のエキスパートを 1 つずつ読み込めば、この端末の GPU の予算（9.17GB）に近い大きさで動く | 既定は Q3_K_M（1 本 7.2GB）。Q4_K_M（9.7GB）もこの端末で動き、速さも同じくらいだが RAM を多く使うため「画質優先」の選択肢にした（下の計測）。ComfyUI-GGUF で読み、ComfyUI の中で llama.cpp は使わない |
+| lightx2v の 4 ステップ LoRA（`wan2.2_i2v_A14b_*_lora_rank64_lightx2v_4step_1022`） | 参考案。lightx2v が公開している I2V A14B 用の最新版（2026-11 時点） | 20 ステップ・CFG 3.5 の標準の設定を、4 ステップ（High 2 + Low 2）・CFG 1・shift 5・euler / simple にする。カタログの `distill_loras` に、サンプリングの値と組で書く |
+| Furry Enhancer Wan 2.2 V3（I2V 用の High / Low） | 参考案のケモノ向け LoRA。ケモノに特化させる利用者の指定（2026-11-18）。参考案の「H-LoRA Anime」「Anime Style」は配布元を特定できず、利用者の判断で Furry Enhancer だけにした | Civitai から利用者が入手して置く。当て方と強度は下の計測で決めた |
+
+この端末（ROG Ally X、Radeon 890M、共有メモリ 24GB）での計測（2026-11-18。開始画像は画像タブで作った 832×1216 のケモノ、448×656・49 フレーム（3 秒）、seed 固定、動きの説明は固定の英文で LLM を通さない。# は作業指示書のフェーズ 0 の番号）:
+
+| # | 量子化 | ケモノ向け LoRA | 全体 | 1 ステップ（High / Low） | 結果 |
+|---|---|---|---|---|---|
+| 1 | Q3_K_M | なし（lightx2v だけ） | 23.4 分 | 342 秒 / 255 秒 | 黒いフレームなし。振り向いて笑う動きが出て、マズル・耳・尾・毛並みは最後まで保たれた |
+| 2 | Q4_K_M | なし（lightx2v だけ） | 23.9 分 | 308 秒 / 284 秒 | GPU に載らず全部 CPU 側から読む形になったが、出力は壊れなかった（以前の ROCm の画像のような破損なし）。#1 と同じ動きで、線が少し整う。Q4_K の展開は Q3_K より軽く、1 ステップはむしろ短い |
+| 4 | Q3_K_M | Furry Enhancer V3 を High と Low に 1.0 | 27.0 分 | 348 秒 / 351 秒 | 黒いフレームなし（古い版の「High に当てると黒くなる」は V3 では起きない）。毛並みの質感が増え、開始画像の細部（汗のマーク）も最後まで残った。動きの量は #1 とほぼ同じ |
+
+- 時間の内訳（#1）: umT5 の読み込みとエンコード約 50 秒、開始画像のエンコード 34 秒、High 11.7 分、Low 8.9 分、タイルデコード 73 秒、保存 1 秒。
+- メモリ: 他のアプリが GPU 用の共有メモリを約 1GB 使っていて、umT5 を外した後の GPU の空きは ComfyUI の起動直後で 6.9GB、2 本目以降は 0.2〜4.5GB だった。Q3_K_M でもエキスパートの半分以下（#1 で High 3.6GB、#4 で 1.5GB）しか GPU に載らず、残りは CPU 側から毎ステップ使う（部分読み込み）。それでも 1 ステップの時間はほとんど変わらない（計算で決まる）。サンプリング中の空き RAM はほぼ 0 まで減り、Windows のページファイルが広がった（コミットの最大は Q3_K_M で 36〜41GB、Q4_K_M で 41GB）。
+- 決めたこと: 既定は Q3_K_M + Furry Enhancer（High と Low、1.0）、448×656 相当の画素数、3 秒（選べる上限は 5 秒）。5 秒は 1 ステップが約 2 倍になり、1 本 50 分前後の見込み（測っていない）。832×480・81 フレーム（モデルの既定）も同じ理由で測らなかった。
+
 ## 採らなかったもの
 
 | 候補 | 理由 |
@@ -119,17 +141,25 @@ SDXL + ControlNet + IP-Adapter + エンコーダは GPU の予算（空き約 6.
 | Flux 用の ControlNet / IP-Adapter（Chroma、Anima、Krea 2 の参照画像） | これらのモデルで動作を確かめていないため、元画像 1 枚の img2img だけに対応する |
 | Qwen3-0.6B-heretic を旧形式のルータに使う | 検索の要否の判定に落ちた |
 | Bonsai の MLX 版、Qwen の MLX 版（確認機の Mac） | Bonsai に使える MLX の abliterated 版が無い。Qwen の MLX 版はディスクに入らない |
-| 動画生成モデル（Wan、LTX など） | 対象外（AGENTS.md の禁止） |
+| 画像タブ・チャットタブでの動画の生成、テキストだけからの動画 | 対象外（AGENTS.md）。動画は動画タブの「画像 1 枚から動画」だけ |
+| Wan 2.2 TI2V-5B | 720p 専用で公式の 4 ステップ蒸留が無い。A14B がこの端末で動いたため、予備のまま |
+| LTX 2.3（22B）、MiniMax H3 | この端末の GPU とメモリに載らない（LTX は Q4 の GGUF でも 12GB を超える）。ライセンスも独自 |
+| lightx2v の蒸留済みモデル（I2V A14B） | 1 エキスパート 15GB 以上で載らない。同じ蒸留を LoRA で当てる |
+| Wan 2.2 のコミュニティの統合モデル（Rapid AIO など） | 混ぜた LoRA と出所を確かめられない |
+| H-LoRA Anime、Anime Style（参考案） | 配布元を特定できず、利用者の判断で Furry Enhancer だけにした |
+| ComfyUI-VideoHelperSuite（参考案の Video Combine） | ComfyUI 標準の `CreateVideo` + `SaveVideo`（mp4 / h264）で足りる |
+| フレーム補間（RIFE、設計書の `VIDEO_INTERPOLATE`） | 補間モデルの取得と時間が増える割に、この端末では 1 本が長いため見送った |
 
 ## 評価の限界
 
 - 検索モデルの検証は、タスクごとに固定の短いテスト 1 本で合否を見ただけで、長い作業での安定性や回答の質の細かい差は測っていない。
 - 画像モデルのパラメータは配布元の推奨を写したもので、モデル同士の画質を同じ条件で比べてはいない。生成できることと、明らかな破綻が無いことを確かめた。
 - 速度とメモリは確認済み構成（ROG Ally X、Apple M4）での実測で、別の端末では変わる。
+- 動画モデルは、開始画像 1 枚・seed 1 つ・固定の動きの説明で比べただけで、絵柄や動きの種類による差は測っていない。ケモノらしさ（マズル・耳・尾・毛並みが保たれるか）と黒いフレームの有無は、先頭・中央・最後のフレームを目で見て判断した。
 
 ## 出典
 
 - 依頼と検証の記録: 開発セッションでの利用者の依頼（使うモデルの指定、検索モデルの候補と代理リーダーの指定、v0.12.0 の候補一覧、LM Studio から llama.cpp への切り替え時のモデルの同一性の確認）と、そのときの検証結果。
-- 設計書と実装記録: [llm-comfyui-workflow-design.md](llm-comfyui-workflow-design.md)（初期値）、[chroma-hd-support-work-instruction.md](chroma-hd-support-work-instruction.md)、[chat-search-tor-bonsai-work-instruction.md](chat-search-tor-bonsai-work-instruction.md) §4（検索モデルの実測）、[llamacpp-router-design.md](llamacpp-router-design.md)（モデルの同一性）、[host-model-selection-design.md](host-model-selection-design.md) §16（v0.12.0 のモデル）、[decisions.md](decisions.md)、[troubleshooting.md](troubleshooting.md)、[usage.md](usage.md)。
+- 設計書と実装記録: [llm-comfyui-workflow-design.md](llm-comfyui-workflow-design.md)（初期値）、[chroma-hd-support-work-instruction.md](chroma-hd-support-work-instruction.md)、[chat-search-tor-bonsai-work-instruction.md](chat-search-tor-bonsai-work-instruction.md) §4（検索モデルの実測）、[llamacpp-router-design.md](llamacpp-router-design.md)（モデルの同一性）、[host-model-selection-design.md](host-model-selection-design.md) §16（v0.12.0 のモデル）、[image-to-video-design.md](image-to-video-design.md) §3・§11（動画モデルの選定と計測）、[decisions.md](decisions.md)、[troubleshooting.md](troubleshooting.md)、[usage.md](usage.md)。
 - コミット: `50eac1f`（IQ3_M を使う）、`413ac3d`（Chroma の fp8 変換）、`0729046` / `0ec9383`（検索モデルの採否と再検証）、`8e637a0`（LM Studio での生成速度）、`b56478c`（repeat-penalty 1.1）、`08a1b87`（同じ IQ3_M ファイル）、`07b00b3` / `d6d16f8`（v0.12.0 の画像モデル）。
-- 配布ページ: [Wulver](https://civitai.com/models/2881657/wulver-krea-2)、[Indigo Furry Mix Anima](https://civitai.com/models/2787288/indigo-furry-mix-anima)、[Indigo Furry Mix XL](https://civitai.com/models/579632/indigo-furry-mix-xl)、[Yiff in Hell](https://civarchive.com/models/1570986)、[Nova Kemono XL](https://civitai.com/models/1641408/nova-kemono-xl)、[Ternary-Bonsai-2-27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Qwen3.8（Unsloth）](https://unsloth.ai/docs/models/qwen3.8)、[Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD)。
+- 配布ページ: [QuantStack/Wan2.2-I2V-A14B-GGUF](https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF)、[lightx2v/Wan2.2-Distill-Loras](https://huggingface.co/lightx2v/Wan2.2-Distill-Loras)、[Wulver](https://civitai.com/models/2881657/wulver-krea-2)、[Indigo Furry Mix Anima](https://civitai.com/models/2787288/indigo-furry-mix-anima)、[Indigo Furry Mix XL](https://civitai.com/models/579632/indigo-furry-mix-xl)、[Yiff in Hell](https://civarchive.com/models/1570986)、[Nova Kemono XL](https://civitai.com/models/1641408/nova-kemono-xl)、[Ternary-Bonsai-2-27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Qwen3.8（Unsloth）](https://unsloth.ai/docs/models/qwen3.8)、[Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD)。

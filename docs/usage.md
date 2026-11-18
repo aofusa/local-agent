@@ -190,9 +190,9 @@ BF16 の 17.8GB を読み込み時に fp8 へ落とすと、変換前の重み�
 
 - 出力の大きさは開始画像の縦横比のままで、1 フレームの画素数は `VIDEO_MAX_PIXELS` 以下です（既定では 832×1216 の画像から 448×656）。16fps です。
 - 流れ: LLM（ルータの 27B）が開始画像を見て英語の動きの説明を書く → LLM を unload → umT5 → High → Low の順に 1 つずつ読み込んで外しながら生成 → mp4。途中経過として、決めた大きさ・長さ・LoRA と、英語の説明（positive / negative）が出ます。
-- この端末（Radeon 890M）では 1 本に十数分以上かかります（長さと大きさに比例して増えます。実測は [models.md](models.md#動画モデルv0140)）。その間、画像タブ・チャットタブ・cirka の処理は待ちになります。
+- この端末（Radeon 890M）では、3 秒の動画で 25〜30 分（LLM を含む）、5 秒で 50 分前後かかります（実測は [models.md](models.md#動画モデルv0140)）。その間、画像タブ・チャットタブ・cirka の処理は待ちになります。生成中は空き RAM がほとんど無くなるので、他のアプリ（ゲーム、ブラウザのタブ、Docker Desktop など）は閉じてください。
 - 動画は応答の中で再生でき、「… を保存」で端末に保存できます。この端末には ComfyUI の `output\furry_ja\video\` と、リポジトリの `outputs\video\<UUID>.mp4`（条件は同名の `.json`）に残ります。他ホストのブラウザは LangGraph（`http://<LAN IP>:2024/media/video/…`）から再生します。
-- 動画モデルは `config/host_models.json` の `video` にあります（Wan 2.2 I2V A14B の Q4_K_M と Q3_K_M。どちらも lightx2v の 4 ステップ LoRA と、ケモノ向けの Furry Enhancer）。LoRA を使うかどうかと強度は、画像モデルと同じくカタログで決めます（[configuration.md › 動画モデル](configuration.md#動画モデルconfighost_modelsjson-の-videov0140)）。
+- 動画モデルは `config/host_models.json` の `video` にあります（Wan 2.2 I2V A14B の Q3_K_M（既定・省メモリ）と Q4_K_M（画質優先・RAM を多く使う）。どちらも lightx2v の 4 ステップ LoRA と、ケモノ向けの Furry Enhancer）。LoRA を使うかどうかと強度は、画像モデルと同じくカタログで決めます（[configuration.md › 動画モデル](configuration.md#動画モデルconfighost_modelsjson-の-videov0140)）。
 - 時間がかかりすぎて「… 秒間進捗がありません」で止まったときは、ComfyUI で完了していれば `再取得 <prompt_id>` と送ると受け取れます。
 
 ## チャットタブ（会話、Tor 経由の検索、文章、コード）
