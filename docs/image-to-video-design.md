@@ -197,10 +197,10 @@ ingest → plan → submit → await_prompt → await_video → END
 | `await_prompt` | `split` まで待ち、英語の説明（positive / negative）を途中経過として出す |
 | `await_video` | 完了まで待つ（その prompt の進捗が `AGENT_IDLE_TIMEOUT_S` 届かないときだけ打ち切る）。`save` の mp4 を `/view` で取り、`outputs/video/<uuid>.mp4` に保存し（同名の `.json` に条件を残す）、要約・positive / negative・保存先と一緒に、動画の URL（§6.4）を UI に返す。最後に `/free` |
 
-- ロック: 画像タブと同じく投入から完了まで握り、待つあいだ期限を延長する。`job_lock.TAB_LABELS` に `video`（動画タブ）を足す。
+- ロック: 画像タブと同じく、`job_lock` を握って ComfyUI のキューが空くのを待ち、投入したら放す。生成のあいだはチャットタブと `/coder/turn` が ComfyUI のキューが空くのを待ち（`chat_common._image_tab_busy`）、画像タブは投入の前にキューが空くのを待つ。`job_lock.TAB_LABELS` に `video`（動画タブ）を足す。
 - 中断: UI で止めたら ComfyUI の prompt を interrupt し、`/free` を呼ぶ（画像タブと同じ）。
 - 失敗の段: 入力、モデル、ノード、アップロード、キュー投入、プロンプト生成、生成、タイムアウト、保存。
-- ログ: `logs/furry_agent.log` に prompt_id、モデル、LoRA、幅×高さ×フレーム数、seed、各段の unload の確認、保存先を残す。指示の全文は残さない（画像タブと同じ）。
+- ログ: `logs/furry_agent.log` に prompt_id、モデル、LoRA、幅×高さ×フレーム数、seed、各段の unload の確認、保存先を残す。指示の全文は残さない（字数だけ）。
 
 ### 6.2 大きさと長さ（`video_plan.py`、純粋関数）
 
