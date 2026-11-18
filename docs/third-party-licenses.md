@@ -34,6 +34,11 @@
 | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) | macOS の MLX での推論（`tools/mlx/.venv`） | `setup-mlx.sh`（v0.12.0） | MIT |
 | MLX 版の LLM（例 [AutisticAF/Huihui-Qwen3.8-27B-abliterated-mlx-4Bit](https://huggingface.co/AutisticAF/Huihui-Qwen3.8-27B-abliterated-mlx-4Bit)） | macOS で MLX を優先するときのモデル | `setup-mlx.sh --models`（任意） | Apache-2.0（配布ページで確認） |
 | [Homebrew の tor](https://formulae.brew.sh/formula/tor)、PrismML fork の macOS arm64 版 | macOS の Tor と llama-server | `setup-tor.sh`、`setup-llamacpp.sh` | BSD-3-Clause、MIT |
+| [city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) | ComfyUI カスタムノード（Wan 2.2 の GGUF を PyTorch で読む）と依存の [gguf](https://pypi.org/project/gguf/) | `setup-video-models.ps1`（v0.14.0） | Apache-2.0（gguf は MIT） |
+| [QuantStack/Wan2.2-I2V-A14B-GGUF](https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF) | Wan 2.2 I2V A14B の High / Low の GGUF（元は [Wan-AI/Wan2.2-I2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B)） | `setup-video-models.ps1` | Apache-2.0 |
+| [Comfy-Org/Wan_2.1_ComfyUI_repackaged](https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged)、[Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged) | umT5-XXL fp8（テキストエンコーダ）、Wan 2.1 VAE | `setup-video-models.ps1` | Apache-2.0 |
+| [lightx2v/Wan2.2-Distill-Loras](https://huggingface.co/lightx2v/Wan2.2-Distill-Loras) | 4 ステップの蒸留 LoRA（I2V 用の High / Low） | `setup-video-models.ps1` | Apache-2.0 |
+| Furry Enhancer（Wan 2.2 V3、I2V 用の High / Low） | ケモノ向けの動画 LoRA。Civitai から入手 | 事前準備（手動） | 配布ページで確認 |
 | チェックポイント（yiffInHell、Rekemono など）、LoRA | Civitai などから入手 | 事前準備（手動） | 配布ページで確認（生成物や商用利用に条件があることが多い） |
 
 - 例外として、Chroma1-HD の公式ワークフロー `ComfyUI_Chroma1-HD_T2I-workflow.json`（Apache-2.0、[lodestones/Chroma1-HD](https://huggingface.co/lodestones/Chroma1-HD)）は参照用に `workflows/reference/` へ無改変で同梱しています（出典は同フォルダの README）。

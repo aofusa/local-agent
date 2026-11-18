@@ -40,6 +40,16 @@
 | 参照画像を送っても説明が空 | プリセットの `mmproj` のファイルがあるか確認（`doctor.ps1` の preset と model の行） |
 | ルータのログに `ErrorOutOfDeviceMemory` | プリセットに `load-mode = mmap` があるか確認（`setup-llm.ps1` が書く）。ComfyUI の ROCm が GPU メモリを持ったままなら ComfyUI を再起動 |
 | `langgraph dev` が `UnicodeDecodeError: 'cp932'` で落ちる | `start-langgraph.ps1` から起動する（`PYTHONUTF8=1` を設定します） |
+| 動画モデルの一覧で「使えません: ComfyUI にノードがありません: UnetLoaderGGUF …」 | `.\scripts\setup-video-models.ps1`（ComfyUI-GGUF を入れる）を実行して ComfyUI を再起動。furry_ja の動画ノードが無いときも ComfyUI の再起動で読み込まれる |
+| 動画モデルの一覧で「使えません: ComfyUI にファイルがありません: Wan2.2-…gguf」 | `.\scripts\setup-video-models.ps1`（ほかのモデルは `-Ids <id>`）を実行して ComfyUI を再起動 |
+| 動画で「LoRA が ComfyUI に見つかりません: Furry Enhancer …」 | ケモノ向けの LoRA（Furry Enhancer の Wan 2.2 V3、I2V の High / Low）を Civitai から入手して `Documents\ComfyUI\models\loras` か `tools\comfyui\models\loras` に置き、`setup-video-models.ps1` を実行する。使わないなら `config/host_models.json` のそのモデルの `loras` を空にする |
+| 動画タブで「動かしたい画像を 1 枚添付してください」/「添付できる画像は 1 枚だけです」 | 開始画像を 1 枚だけ付けて送る。画像タブで作った画像は、その下の「この画像を動画にする」で渡せる |
+| 動画が真っ黒になる / ほとんど動かない | ケモノ向けの LoRA が合っていない。`config/host_models.json` の `loras.high` を空にする（High に当てると黒くなる版がある）か強度を下げる。lightx2v の 4 ステップは動きが遅めになりがち |
+| 動画がとても遅い・途中で止まる（ページング） | 他のアプリ（ブラウザ、ゲーム、Docker Desktop の WSL など）を閉じる。`.env` の `VIDEO_MAX_PIXELS` か `VIDEO_SECONDS` を下げ、Q3_K_M のモデルを使う（[configuration.md › 動画タブの調整](configuration.md#動画タブの調整video_v0140)） |
+| 動画で「… 秒間進捗がありません」 | 1 ステップや VAE のデコードが `AGENT_IDLE_TIMEOUT_S` より長くかかった。`VIDEO_MAX_PIXELS` / `VIDEO_SECONDS` を下げるか、`AGENT_IDLE_TIMEOUT_S` を増やす。ComfyUI で完了していれば、動画タブで `再取得 <prompt_id>` と送ると受け取れる |
+| 動画の応答に「⚠️ release_high の時点で拡散モデル（…）が残っていました」 | ComfyUI が `--cache-none` なしで動いている（使い終えたエキスパートが外れず、メモリが 2 倍要る）。`start-comfyui.ps1` で起動し直す |
+| 動画の欄に「動画が見つかりません」 | `outputs\video\` の mp4 が消された。動画は ComfyUI の `output\furry_ja\video\` にも残っている |
+| ComfyUI のログに furry_ja が読めない旨や「信頼されていないマウントポイント」 | `tools\comfyui\custom_nodes\furry_ja`（このリポジトリの `comfyui_nodes\furry_ja` へのジャンクション）を、ジャンクションを許さないプロセスから起動している。`cmd /c rmdir` でジャンクションだけを消し、`New-Item -ItemType Junction` で作り直す（agent-chat-ui の `node_modules` なら `pnpm install --frozen-lockfile --offline`） |
 | cirka「ホストに届きません」 | `cirka status` で確認。`cirka config set host http://<LAN IP>:2024`（`localhost` は cirka を動かす PC 自身のこと）。ホスト側で `open-firewall.ps1` を実行し、LangGraph が起動しているか確認 |
 | cirka「ホストに /coder/turn がありません」 | ホストの local-agent が v0.7.0 より古い。更新して LangGraph を再起動する |
 | cirka が「… の処理を待っています」のまま進まない | 画像タブやチャットタブが共有ロックを使っている。終われば自動で進む（最大 600 秒） |
@@ -62,6 +72,8 @@
 ## 既知の対象外・制約
 
 - **動画入力は対象外**: ComfyUI-VideoHelperSuite（VHS）を前提にした経路は未実装です。動画を送るとチャットにその旨を返します（在庫の agent-chat-ui も動画の添付を受け付けません）。
+- **動画の生成は動画タブの「画像 1 枚から動画」だけ**（v0.14.0）: テキストだけからの動画、最初と最後のフレームの指定、音声、5 秒を超える延長、アップスケールはありません。cirka のツールにもありません。動きの説明を作る LLM は、画像のタグ生成と同じくルータの `LLM_MODEL` です。macOS では確かめていません（Wan 2.2 の GGUF は MPS でも動く見込みですが、未確認）。
+- 動画は 1 本ずつです（画像タブ・チャットタブ・cirka とも同時には動きません）。この端末（Radeon 890M）では 1 本に十数分以上かかります。
 - InstantID / PuLID（人の顔向けの同一性）は使いません。キャラクター参照は IP-Adapter Plus と Vision タグで行います。
 - 登録済みの系統は `sdxl`、`flux`（Chroma1-HD）、`krea2`（Krea 2）、`anima`（Anima）です（Flux Dev 本家、SD3 などは未登録）。
 - 画像のタグ生成の LLM は、選んだ推論モデルではなくルータの `LLM_MODEL` です（ワークフローの `llm_backend`。タグ生成まで選択に合わせるのは対象外）。

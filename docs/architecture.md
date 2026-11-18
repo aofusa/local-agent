@@ -8,7 +8,13 @@
 AGENTS.md                             開発の規則と構成（最小限）
 docs/specification.md / decisions.md  仕様と契約の詳細 / 実装時の決定と経緯
 docs/*-design.md, *-work-instruction.md  機能ごとの設計と実装記録
-langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph、http.app -> coder_app.py:app（/coder/turn）
+langgraph.json                        graphs.agent（= image）-> graph.py:graph、graphs.chat -> chat_graph.py:graph、graphs.video -> video_graph.py:graph、http.app -> coder_app.py:app（/coder/turn、/models、/media/video）
+src/furry_agent/video_graph.py        動画タブのグラフ（ingest → plan → submit → await_prompt → await_video）。開始画像 1 枚と指示から Wan 2.2 I2V の動画
+src/furry_agent/video_plan.py         動画の大きさ（開始画像の縦横比、VIDEO_MAX_PIXELS）・長さ（4k+1 フレーム）・端末の設定（VIDEO_*）。純粋関数
+src/furry_agent/media_api.py          GET /media/video/<UUID>.mp4（outputs/video の動画を配信。Range 対応、?download=1 で保存）
+workflows/wan22/i2v.api.json          Wan 2.2 I2V A14B のテンプレート。workflows/maps/wan22.json がスロット（1 つのスロットが High と Low の両方を指すことがある）
+prompts/system_video_i2v.txt          動画の動きの説明（ケモノに特化。{"positive","negative"} の JSON）。system_vision_video.txt は開始画像の説明
+scripts/setup-video-models.ps1        ComfyUI-GGUF、動画モデル（Wan 2.2 の GGUF、umT5、VAE、lightx2v の LoRA）の取得、ケモノ向け LoRA の取り込み
 src/furry_agent/chat_graph.py         チャットタブのグラフ（ingest → route → chat | plan → search → filter → read → critique → synthesize）
 src/furry_agent/chat_models.py        チャットタブの llama-server（reader、代理リーダー）の起動と停止、外部依存の差し替え口
 src/furry_agent/claim_verify.py       主張の突き合わせ: EvidenceCard / Claim、門（字面・数値・固有名詞）、文の分割と削除。モデルなし
@@ -113,6 +119,26 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 
 `t2i_basic` / `i2i_basic` は、フェーズ 1 の `furry_ja_api.json` から作る投入 JSON と完全に同じです（テストで確認）。
 
+## 動画のワークフローのノード（`wan22` / `i2v`、v0.14.0）
+
+LLM の部分（`llm_backend`、`llm_backend_vision`、`user_prompt`、`ref_image`、`vision`、`prompt_join`、`prompt_node`、`eject`、`split`）は画像の i2i と同じノードです（`split` は prose、`ref_image` は開始画像）。その後の大きなモデルは 1 つずつ載せ、使い終えたら外します。設計は [image-to-video-design.md](image-to-video-design.md) §5。
+
+| ID | クラス | 役割 |
+|---|---|---|
+| `te` | FurryJaTextEncoderAfter | `eject` の後に umT5 を読む（CLIPLoader の type `wan`）。読む前にルータが空かを確かめる |
+| `positive` / `negative` | CLIPTextEncode | |
+| `release_te` | FurryJaReleaseAfter | 両方の条件付けができたら umT5 を外す（GC で解放し、残ったモデルと空きメモリを UI の出力に残す） |
+| `vae` | FurryJaVAELoaderAfter | `release_te` の後に Wan 2.1 VAE を読む |
+| `i2v` | WanImageToVideo | 開始画像を latent に入れる（幅・高さ・フレーム数） |
+| `unet_high` → `lora_high_*` → `shift_high` → `sampler_high` | FurryJaVideoModelAfter（GGUF は ComfyUI-GGUF の UnetLoaderGGUF）、LoraLoaderModelOnly、ModelSamplingSD3、KSamplerAdvanced | High Noise のエキスパート。`i2v` の後に読み、0〜split ステップ（ノイズあり、残りのノイズを返す）。LoRA は `distill_loras.high`（lightx2v）、`loras.high`（ケモノ向け）の順に挿入 |
+| `release_high` | FurryJaReleaseAfter | High（と、その LoRA）を外す |
+| `unet_low` → `lora_low_*` → `shift_low` → `sampler_low` | 同上 | Low Noise のエキスパート。`release_high` の後に読み、split〜最後 |
+| `release_low` | FurryJaReleaseAfter | Low を外す |
+| `decode` | VAEDecodeTiled | 空間と時間方向のタイル（`VIDEO_VAE_TILE`、`VIDEO_VAE_TEMPORAL`） |
+| `video` / `save` | CreateVideo / SaveVideo | 16fps の mp4（h264、CRF は `VIDEO_CRF`）を `output/furry_ja/video/` に保存 |
+
+ローダはすべて `after` の入力で前の段に依存させています（ComfyUI は入力の無いローダを先に実行しうるため）。ComfyUI は `--cache-none` で、ノードの出力を使い終えた時点で手放し、モデル管理は弱参照なので、使い終えたエキスパートは release ノードの GC で解放されます（CPU への退避コピーをしない）。
+
 ## UI の変更点
 
 - 画像表示: agent-chat-ui は AI メッセージのテキスト部分しか描画しないため、グラフが返す画像ブロック
@@ -133,6 +159,7 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
 - 表示崩れの修正（v0.13.0、表示だけ）: 本体のグリッドを `minmax(0, …)` の列にし（素の `1fr` は中身の最小幅まで広がり、スマートフォンで右側の送信ボタンやモデル名が切れていた）、入力欄の操作の行を折り返す（モデルと送信は右にまとめる）。開始画面のヘッダは 3 列のグリッド（タブが GitHub のリンクに重なっていた）、会話中のヘッダは `lg` 未満でタブを題名の下の行に出す（以前は `md` 未満で隠れていた）。表・ツール呼び出しの表は横スクロール、コードはメッセージの幅まで、長い URL は折り返し、ラベルとスイッチは文字ごとに折り返さない。モデルの一覧は画面の中に収める。タッチ画面ではコピー / 再生成を常に出す。高さは `100dvh`（`thread/index.tsx`、`markdown-text.tsx`、`messages/human.tsx`、`messages/tool-calls.tsx`、`messages/search-trace.tsx`、`mode-tabs.tsx`、`model-picker.tsx`）。別ホストのモデルはピッカーの副行に「リモート（種類）ホスト」を出す。
 - 応答時間（v0.13.0）: チャットタブの応答の `additional_kwargs.response_time`（`{"seconds"}`。ホストが計る）を、モデル名とモードの横に「応答時間 1 分 08 秒」の形で出します（`messages/response-time.tsx`、`ai.tsx`）。
 - 自律の手順: 自律モードのメッセージの `task_trace`（`kind: "control"`。選んだ道具、理由、依頼文、結果の要約、終了理由）を、執筆・コードの手順と同じ折りたたみで描画します（`search-trace.tsx` の `TaskTraceView`）。
+- 動画タブ（v0.14.0）: 画面上部の 3 つ目のタブ「動画」（graph `video`、`mode-tabs.tsx`）。添付は画像 1 枚だけ（PDF と役割の指定は無し。`use-file-upload.tsx` のタブごとの上限）、入力欄に長さの選択（`GET /models` の `video_options`、`configurable.video_seconds`）、モデルのピッカーは動画モデル（`configurable.video_model`）。応答の `{"type": "video", "url": "/media/video/<UUID>.mp4"}` を LangGraph の URL と結合して `<video>` で再生し、保存のリンクは `?download=1`（`ai.tsx`、`lib/multimodal-utils.ts`）。画像タブの生成画像の下の「この画像を動画にする」は、新しい動画タブのスレッドを開いてその画像を添付します（`video-handoff.ts`、`thread/index.tsx`）。タブを切り替えると添付は消えます（受け渡しの画像を除く）。
 
 ## ログ
 
@@ -140,6 +167,7 @@ outputs/  logs/  artifacts/           実行時に生成（git 管理外）
   `KSampler started ... LLM router unloaded at checkpoint load=[True]`、`eject verified`、保存先。
 - ComfyUI のコンソール: `[furry_ja] eject: LLM router unloaded [...]`、`[furry_ja] split mode=json|fallback`、
   `[furry_ja] LLM router verified unloaded before checkpoint/KSampler`。
+- 動画タブ: `logs\furry_agent.log` に `video request`（モデル、開始画像の大きさ、指示の字数。指示の本文は残しません）、`video submitted`（prompt_id、大きさ、フレーム数、seed、LoRA）、`video prompt`（positive）、`video te / unet_high / unet_low loaded ... LLM router unloaded=[True]`、`video release_* alive_before=… diffusion_before=… free_vram=… free_ram=…`、`video saved`。ComfyUI のコンソールに `[furry_ja] video model … loaded after the previous stage`、`[furry_ja] release …: alive before=… after=…`。
 - `/coder/turn`（cirka）: LangGraph のコンソールに `coder turn mode=… messages=… tools=… calls=… finish=… tokens=… seconds=…` だけを出します（会話やファイルの中身は残しません）。
 - cirka: 利用者の PC の `%LOCALAPPDATA%\cirka\sessions`（macOS / Linux は `~/.local/share/cirka/sessions`）にセッションを JSON Lines で残します（ツールの結果を含む。`/forget` で削除）。
 
