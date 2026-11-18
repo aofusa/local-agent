@@ -5,6 +5,11 @@
         checkpoint / diffusion model, LoRA, text encoder and VAE, and {"download": {...}} for the files the setup
         fetches from Hugging Face (config/host_models.json "downloads", per family in use).
 
+    uv run python scripts/host_models.py video-wanted [--ids a,b]
+        The same for video entries (default: DEFAULT_VIDEO_MODEL, else the first): {"download": {...}} for every file
+        "downloads" lists under the entry's family or its id (experts, text encoder, VAE, distill LoRAs), and
+        {"folders", "name", ...} for the rest (the kemono LoRAs the user places; setup imports them, never downloads).
+
     uv run python scripts/host_models.py preset --out tools/llm/models.ini [--offload 0.45] [--engine llamacpp|mlx]
             [--qwen-model PATH] [--qwen-mmproj PATH] [--models-dir DIR] [--sleep-idle 300]
         Write the llama.cpp router preset: one section per inference entry whose GGUF exists (the others are
@@ -27,11 +32,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from furry_agent.model_catalog import gguf_path, image_files, load_catalog  # noqa: E402
+from furry_agent.model_catalog import EXPERTS, default_ids, gguf_path, image_files, load_catalog, video_files  # noqa: E402
 from furry_agent.templates import load_map  # noqa: E402
 
 FOLDERS = {"ckpt_name": ["checkpoints", "diffusion_models", "unet"], "clip_name": ["text_encoders", "clip"],
-           "vae_name": ["vae"]}
+           "vae_name": ["vae"], "high_name": ["diffusion_models", "unet"], "low_name": ["diffusion_models", "unet"]}
 # Router defaults for every section (scripts/setup-llm.ps1 before v0.12.0 wrote these for the 27B only).
 COMMON = {
     "flash-attn": "on",
@@ -71,6 +76,30 @@ def wanted(ids: set[str] | None) -> list[dict]:
                 continue
             seen.add(("download", name))
             out.append({"download": {**item, "name": name}, "family": family})
+    return out
+
+
+def video_wanted(ids: set[str] | None) -> list[dict]:
+    catalog = load_catalog()
+    ids = ids or {default_ids(catalog)["video"]} - {""}
+    unknown = sorted(ids - set(catalog.video))
+    if unknown:
+        raise SystemExit(f"動画モデル {', '.join(unknown)} は config/host_models.json にありません（{', '.join(catalog.video)}）")
+    out, seen = [], set()
+    for model in (catalog.video[i] for i in catalog.video if i in ids):
+        downloads = {item["file"].rsplit("/", 1)[-1]: item
+                     for item in catalog.downloads.get(model.family, []) + catalog.downloads.get(model.id, [])}
+        needed = [(slot, name) for slot, name in video_files(model, load_map(model.family)).items()]
+        needed += [("lora", spec.name) for expert in EXPERTS for spec in model.loras_for(expert)]
+        for slot, name in needed:
+            if name in seen:
+                continue
+            seen.add(name)
+            if name in downloads:
+                out.append({"download": {**downloads[name], "name": name}, "model": model.id})
+            else:
+                out.append({"folders": FOLDERS.get(slot, ["loras"]), "name": name, "required": True, "kind": slot,
+                            "model": model.id})
     return out
 
 
@@ -136,6 +165,8 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     w = sub.add_parser("wanted")
     w.add_argument("--ids", default="")
+    v = sub.add_parser("video-wanted")
+    v.add_argument("--ids", default="")
     p = sub.add_parser("preset")
     p.add_argument("--out", required=True)
     p.add_argument("--offload", type=float, default=1.0)
@@ -148,6 +179,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "wanted":
         ids = {x.strip() for x in args.ids.split(",") if x.strip()} or None
         result = wanted(ids)
+    elif args.command == "video-wanted":
+        result = video_wanted({x.strip() for x in args.ids.split(",") if x.strip()} or None)
     else:
         result = preset(args)
     sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")

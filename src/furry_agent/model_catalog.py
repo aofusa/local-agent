@@ -37,6 +37,14 @@ FAMILY_STYLES = {"sdxl": "danbooru", "anima": "danbooru", "flux": "prose", "krea
 # A model on another host (docs/remote-llm-design.md): a llama.cpp server or an OpenAI-compatible service.
 ENDPOINT_KINDS = ("llamacpp", "openai")
 ENDPOINT_KEYS = {"kind", "url", "model", "api_key"}
+# Video models (docs/image-to-video-design.md §6.3): video family -> prompt style of its workflows.
+VIDEO_FAMILIES = {"wan22": "prose"}
+VIDEO_KEYS = {"id", "label", "family", "experts", "models", "distill_loras", "loras", "params"}
+VIDEO_MODEL_KEYS = {"clip_name", "vae_name", "weight_dtype"}
+VIDEO_PARAMS = {"steps": int, "split_step": int, "cfg": float, "shift": float, "sampler_name": str, "scheduler": str,
+                "fps": float, "max_pixels": int, "frames": int, "prompt_prefix": str, "negative": str}
+# Wan 2.2 A14B is two models: the high-noise expert samples the first steps, the low-noise expert the rest.
+EXPERTS = ("high", "low")
 
 
 class CatalogError(ValueError):
@@ -112,10 +120,34 @@ class ImageModel:
 
 
 @dataclass(frozen=True)
+class VideoModel:
+    """A video entry: the two Wan 2.2 experts, its text encoder / VAE, the distill LoRAs its sampler values assume
+    (lightx2v) and the kemono LoRAs, both per expert in the image format ("<file>:<weight>")."""
+
+    id: str
+    label: str
+    family: str
+    experts: dict[str, str]
+    models: dict[str, str] = field(default_factory=dict)
+    distill_loras: dict[str, tuple[LoraSpec, ...]] = field(default_factory=dict)
+    loras: dict[str, tuple[LoraSpec, ...]] = field(default_factory=dict)
+    params: dict = field(default_factory=dict)
+
+    def loras_for(self, expert: str) -> list[LoraSpec]:
+        """The order they are chained after the expert: the distill LoRAs, then the kemono LoRAs."""
+        return [*self.distill_loras.get(expert, ()), *self.loras.get(expert, ())]
+
+    @property
+    def lora_text(self) -> list[str]:
+        return [f"{expert}: {s.name}:{s.strength_model:g}" for expert in EXPERTS for s in self.loras_for(expert)]
+
+
+@dataclass(frozen=True)
 class HostCatalog:
     inference: dict[str, InferenceModel]
     image: dict[str, ImageModel]
     downloads: dict[str, list[dict]] = field(default_factory=dict)
+    video: dict[str, VideoModel] = field(default_factory=dict)
 
 
 def _check_id(value: Any, where: str) -> str:
@@ -157,6 +189,64 @@ def _image_params(raw: Any, where: str) -> dict:
         except (TypeError, ValueError) as exc:
             raise CatalogError(f"{where}: params の {key} が不正です（{value!r}）") from exc
     return params
+
+
+def _video_params(raw: Any, where: str) -> dict:
+    params = dict(raw or {})
+    for key, value in params.items():
+        cast = VIDEO_PARAMS.get(key)
+        if cast is None:
+            raise CatalogError(f"{where}: params の {key} は使えません（{', '.join(VIDEO_PARAMS)}）")
+        try:
+            params[key] = cast(value)
+        except (TypeError, ValueError) as exc:
+            raise CatalogError(f"{where}: params の {key} が不正です（{value!r}）") from exc
+    steps, split = params.get("steps"), params.get("split_step")
+    if steps is not None and steps < 2:
+        raise CatalogError(f"{where}: params の steps は 2 以上です（High と Low に分けるため）")
+    if split is not None and not 0 < split < (steps or 10 ** 6):
+        raise CatalogError(f"{where}: params の split_step は 1 以上、steps 未満です（{split}）")
+    frames = params.get("frames")
+    if frames is not None and (frames < 5 or (frames - 1) % 4):
+        raise CatalogError(f"{where}: params の frames は 4k+1（5 以上）です（{frames}）")
+    if params.get("fps") is not None and not 1 <= params["fps"] <= 60:
+        raise CatalogError(f"{where}: params の fps は 1〜60 です")
+    if params.get("max_pixels") is not None and params["max_pixels"] < 64 * 64:
+        raise CatalogError(f"{where}: params の max_pixels が小さすぎます")
+    for key in ("cfg", "shift"):
+        if params.get(key) is not None and params[key] <= 0:
+            raise CatalogError(f"{where}: params の {key} は 0 より大きい値です")
+    return params
+
+
+def _video_loras(raw: Any, where: str, key: str) -> dict[str, tuple[LoraSpec, ...]]:
+    """{"high": [...], "low": [...]} -> per-expert specs; each list is an image entry's "loras" ("<file>:<weight>")."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or set(raw) - set(EXPERTS):
+        raise CatalogError(f"{where}: {key} は {{\"high\": [...], \"low\": [...]}} です（Wan 2.2 の 2 つのモデルに分けて書きます）")
+    return {expert: parse_catalog_loras(raw.get(expert) or [], f"{where} {key}.{expert}") for expert in EXPERTS}
+
+
+def _video_model(item: dict, model_id: str) -> VideoModel:
+    where = f"video {model_id}"
+    unknown = set(item) - VIDEO_KEYS
+    if unknown:
+        raise CatalogError(f"{where}: {', '.join(sorted(unknown))} は使えません（{', '.join(sorted(VIDEO_KEYS))}）")
+    family = str(item.get("family") or "")
+    if family not in VIDEO_FAMILIES:
+        raise CatalogError(f"{where}: family {family!r} は登録されていません（{', '.join(VIDEO_FAMILIES)}）")
+    experts = item.get("experts")
+    if not isinstance(experts, dict) or set(experts) != set(EXPERTS) or not all(
+            isinstance(v, str) and v.strip() for v in experts.values()):
+        raise CatalogError(f"{where}: experts は {{\"high\": <ファイル>, \"low\": <ファイル>}} です")
+    models = item.get("models") or {}
+    if not isinstance(models, dict) or set(models) - VIDEO_MODEL_KEYS:
+        raise CatalogError(f"{where}: models に書けるのは {', '.join(sorted(VIDEO_MODEL_KEYS))} です")
+    return VideoModel(
+        model_id, str(item.get("label") or model_id), family, {k: v.strip() for k, v in experts.items()},
+        {k: str(v) for k, v in models.items()}, _video_loras(item.get("distill_loras"), where, "distill_loras"),
+        _video_loras(item.get("loras"), where, "loras"), _video_params(item.get("params"), where))
 
 
 def _endpoint(raw: Any, where: str) -> Endpoint:
@@ -215,7 +305,13 @@ def parse_catalog(raw: dict) -> HostCatalog:
             model_id, str(item.get("label") or model_id), family, str(item.get("ckpt") or "").strip(), style,
             parse_catalog_loras(item.get("loras") or [], where), _image_params(item.get("params"), where),
             {k: str(v) for k, v in (item.get("models") or {}).items()})
-    return HostCatalog(inference, image, {k: list(v) for k, v in (raw.get("downloads") or {}).items()})
+    video: dict[str, VideoModel] = {}
+    for item in raw.get("video") or []:
+        model_id = _check_id(item.get("id"), "video")
+        if model_id in video:
+            raise CatalogError(f"video {model_id}: id が重複しています")
+        video[model_id] = _video_model(item, model_id)
+    return HostCatalog(inference, image, {k: list(v) for k, v in (raw.get("downloads") or {}).items()}, video)
 
 
 _cache: dict[str, tuple[float, HostCatalog]] = {}
@@ -258,7 +354,8 @@ def default_ids(catalog: HostCatalog) -> dict[str, str]:
     """The ids used when a request names none (.env; else the first entry of each list)."""
     inference = os.environ.get("DEFAULT_INFERENCE_MODEL", "").strip() or next(iter(catalog.inference), "")
     image = os.environ.get("DEFAULT_IMAGE_MODEL", "").strip() or next(iter(catalog.image), "")
-    return {"inference": inference, "image": image}
+    video = os.environ.get("DEFAULT_VIDEO_MODEL", "").strip() or next(iter(catalog.video), "")
+    return {"inference": inference, "image": image, "video": video}
 
 
 def requested_id(value: Any) -> str:
@@ -272,7 +369,7 @@ def requested_id(value: Any) -> str:
 
 def _pick(kind: str, entries: dict, requested: Any, default: str, unavailable: dict[str, str] | None):
     model_id = requested_id(requested) or default
-    label = "推論モデル" if kind == "inference" else "画像モデル"
+    label = {"inference": "推論モデル", "image": "画像モデル", "video": "動画モデル"}[kind]
     if model_id not in entries:
         raise ModelChoiceError(f"{label} {model_id!r} はホストのモデル一覧にありません"
                                f"（{', '.join(entries) or 'なし'}）", "unknown_model")
@@ -295,6 +392,12 @@ def resolve_image(requested: Any = None, catalog: HostCatalog | None = None,
                   unavailable: dict[str, str] | None = None) -> ImageModel:
     catalog = catalog or load_catalog()
     return _pick("image", catalog.image, requested, default_ids(catalog)["image"], unavailable)
+
+
+def resolve_video(requested: Any = None, catalog: HostCatalog | None = None,
+                  unavailable: dict[str, str] | None = None) -> VideoModel:
+    catalog = catalog or load_catalog()
+    return _pick("video", catalog.video, requested, default_ids(catalog)["video"], unavailable)
 
 
 # --- availability -------------------------------------------------------------------------------------------------
@@ -393,6 +496,66 @@ def image_unavailable(catalog: HostCatalog, maps: dict[str, dict],
         if model.loras and comfy_loras is not None:
             try:
                 resolve_lora_names(list(model.loras), comfy_loras)
+            except TemplateError as exc:
+                out[model.id] = str(exc)
+    return out
+
+
+# The ComfyUI nodes a video run needs (furry_ja's stage loaders; UnetLoaderGGUF only for GGUF experts).
+VIDEO_NODES = ("FurryJaTextEncoderAfter", "FurryJaVAELoaderAfter", "FurryJaVideoModelAfter", "FurryJaReleaseAfter")
+# Which loader input lists the files of each video slot (ComfyUI /object_info).
+VIDEO_LOADERS = {"high_name": ("FurryJaVideoModelAfter", "unet_name"), "low_name": ("FurryJaVideoModelAfter", "unet_name"),
+                 "clip_name": ("FurryJaTextEncoderAfter", "clip_name"), "vae_name": ("FurryJaVAELoaderAfter", "vae_name")}
+
+
+def video_nodes(model: VideoModel) -> set[str]:
+    gguf = any(name.lower().endswith(".gguf") for name in model.experts.values())
+    return set(VIDEO_NODES) | ({"UnetLoaderGGUF"} if gguf else set())
+
+
+def video_files(model: VideoModel, family_map: dict) -> dict[str, str]:
+    """slot -> file the entry needs in ComfyUI: both experts, then the family's (or the entry's) text encoder and VAE."""
+    models = {**(family_map.get("models") or {}), **model.models}
+    files = {"high_name": model.experts["high"], "low_name": model.experts["low"]}
+    for slot in ("clip_name", "vae_name"):
+        if models.get(slot):
+            files[slot] = models[slot]
+    return files
+
+
+def video_unavailable(catalog: HostCatalog, maps: dict[str, dict],
+                      comfy_files: dict[str, dict[str, list[str]]] | None, comfy_loras: list[str] | None,
+                      comfy_nodes: set[str] | None = None) -> dict[str, str]:
+    """id -> reason, like image_unavailable. ``comfy_nodes`` is the node classes ComfyUI offers (None: not checked).
+    A LoRA written in the entry (distill or kemono) that ComfyUI lacks makes the model unusable, as for images."""
+    from furry_agent.templates import resolve_lora_names
+
+    out = {}
+    for model in catalog.video.values():
+        if model.id in disabled_ids():
+            out[model.id] = "このホストで無効（HOST_MODELS_DISABLE）"
+            continue
+        if model.family not in maps:
+            out[model.id] = f"動画の系統 {model.family} のテンプレートがありません"
+            continue
+        if comfy_files is None:
+            continue
+        if comfy_nodes is not None:
+            missing_nodes = sorted(video_nodes(model) - comfy_nodes)
+            if missing_nodes:
+                out[model.id] = (f"ComfyUI にノードがありません: {', '.join(missing_nodes)}"
+                                 f"（{maps[model.family].get('node_setup_hint', '')}）")
+                continue
+        offered = comfy_files.get(model.family) or {}
+        missing = [name for slot, name in video_files(model, maps[model.family]).items()
+                   if name not in (offered.get(slot) or [])]
+        if missing:
+            out[model.id] = f"ComfyUI にファイルがありません: {', '.join(missing)}"
+            continue
+        loras = model.loras_for("high") + model.loras_for("low")
+        if loras and comfy_loras is not None:
+            try:
+                resolve_lora_names(loras, comfy_loras)
             except TemplateError as exc:
                 out[model.id] = str(exc)
     return out
