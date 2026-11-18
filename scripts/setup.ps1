@@ -10,9 +10,11 @@
      (scripts\setup-llm.ps1: download, IQ3_M requantization, preset). LM Studio is not needed.
   5. ComfyUI installed into tools\comfyui with its own venv (scripts\setup-comfyui.ps1), then the multi-image
      reference nodes and models (scripts\setup-comfyui-refs.ps1: IP-Adapter, ControlNet, DWPose / depth; about 6 GB).
-  6. Chat tab search: Tor Expert Bundle (setup-tor.ps1), the search models (setup-search-models.ps1, about 20 GB)
+  6. Video tab: ComfyUI-GGUF and the default video model (scripts\setup-video-models.ps1: Wan 2.2 I2V A14B, umT5,
+     VAE, lightx2v LoRAs; 23 to 28 GB; the kemono LoRAs from Civitai are imported, not downloaded). -SkipVideo skips it.
+  7. Chat tab search: Tor Expert Bundle (setup-tor.ps1), the search models (setup-search-models.ps1, about 20 GB)
      and their probe (probe-bonsai.ps1). -SkipSearch skips it.
-  7. Optionally open the Windows firewall for TCP 2024/3000 on Private networks (-OpenFirewall, asks for admin).
+  8. Optionally open the Windows firewall for TCP 2024/3000 on Private networks (-OpenFirewall, asks for admin).
   The Docker sandbox of the chat tab's code is optional and separate: scripts\setup-sandbox.ps1.
 
 .EXAMPLE
@@ -32,6 +34,7 @@ param(
     [switch]$SkipLLM,
     [switch]$SkipComfyUI,
     [switch]$SkipReferenceModels,      # text-only / plain img2img work without them
+    [switch]$SkipVideo,                # the video tab (Wan 2.2, 23-28 GB of models)
     [switch]$SkipSearch,               # the chat tab's web search (Tor, ~20 GB of models)
     [switch]$SkipProbe,
     [switch]$OpenFirewall
@@ -86,6 +89,11 @@ if (-not $SkipComfyUI) {
     if ($CheckpointUrl) { $comfyArgs["CheckpointUrl"] = $CheckpointUrl }
     & (Join-Path $PSScriptRoot "setup-comfyui.ps1") @comfyArgs
     if (-not $SkipReferenceModels) { & (Join-Path $PSScriptRoot "setup-comfyui-refs.ps1") }
+    if (-not $SkipVideo) {
+        $videoArgs = @{}
+        if ($ModelsDir) { $videoArgs["ModelsDir"] = $ModelsDir }
+        & (Join-Path $PSScriptRoot "setup-video-models.ps1") @videoArgs
+    }
 }
 
 if (-not $SkipSearch) {

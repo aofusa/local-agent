@@ -124,6 +124,38 @@ Check "checkpoint $ckptName" {
     "found"
 }
 
+# The video tab is optional: the image tab works without it (warnings only).
+$videoEntries = @($imageCatalog.video | Where-Object { $_ })
+$videoId = Get-DotEnvValue "DEFAULT_VIDEO_MODEL" ""
+$videoEntry = @($videoEntries | Where-Object { $_.id -eq $videoId } | Select-Object -First 1)
+if (-not $videoEntry -and $videoEntries) { $videoEntry = $videoEntries[0] }
+if ($videoEntry) {
+    Check "video nodes (ComfyUI-GGUF, furry_ja video loaders, Wan, SaveVideo)" {
+        $needed = "UnetLoaderGGUF", "FurryJaVideoModelAfter", "FurryJaTextEncoderAfter", "FurryJaVAELoaderAfter",
+                  "FurryJaReleaseAfter", "WanImageToVideo", "KSamplerAdvanced", "CreateVideo", "SaveVideo"
+        $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info"
+        $absent = $needed | Where-Object { -not $info.PSObject.Properties[$_] }
+        if ($absent) { throw "未登録: $($absent -join ', ')（setup-video-models.ps1 の後に ComfyUI を再起動）" }
+        "$($needed.Count) nodes"
+    } -Optional
+    Check "video model $($videoEntry.id) (experts and LoRAs)" {
+        $info = Get-Json "http://127.0.0.1:$ComfyPort/object_info/FurryJaVideoModelAfter"
+        $names = @($info.FurryJaVideoModelAfter.input.required.unet_name[0])
+        $missing = @($videoEntry.experts.high, $videoEntry.experts.low) | Where-Object { $names -notcontains $_ }
+        $loraInfo = Get-Json "http://127.0.0.1:$ComfyPort/object_info/LoraLoader"
+        $available = @($loraInfo.LoraLoader.input.required.lora_name[0]) | ForEach-Object { "$_".Replace('\', '/').ToLower() }
+        $loras = @(@($videoEntry.distill_loras.high) + @($videoEntry.distill_loras.low) + @($videoEntry.loras.high) +
+                   @($videoEntry.loras.low) | Where-Object { $_ })
+        foreach ($item in $loras) {
+            $name = ($item -split ':')[0].Trim().Replace('\', '/').ToLower()
+            $hit = $available | Where-Object { $_ -eq $name -or ($_ -replace '\.[^.]+$', '') -eq $name }
+            if (-not $hit) { $missing += ($item -split ':')[0] }
+        }
+        if ($missing) { throw "ComfyUI にありません: $($missing -join ', ')（setup-video-models.ps1。ケモノ向けの LoRA は自分で置く）" }
+        "2 experts + $($loras.Count) LoRAs"
+    } -Optional
+}
+
 Write-Step "チャットタブの検索（Tor / PrismML llama.cpp / Bonsai）"
 Check "Tor SOCKS 127.0.0.1:9050" {
     $addr = Assert-LoopbackOnly 9050
@@ -182,11 +214,11 @@ Check "image python:3.12-slim" {
 
 Write-Step "LangGraph / agent-chat-ui"
 $lan = Get-LanIPv4
-Check "LangGraph graphs 'agent' (image) and 'chat' on :$LangGraphPort" {
+Check "LangGraph graphs 'agent' (image), 'chat' and 'video' on :$LangGraphPort" {
     $assistants = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$LangGraphPort/assistants/search" `
         -ContentType "application/json" -Body "{}" -TimeoutSec 10
     $ids = @((ConvertTo-ObjectArray $assistants) | ForEach-Object { $_.graph_id })
-    $absent = @("agent", "chat") | Where-Object { $_ -notin $ids }
+    $absent = @("agent", "chat", "video") | Where-Object { $_ -notin $ids }
     if ($absent) { throw "graph_id がありません: $($absent -join ', ')（LangGraph を再起動）" }
     "listening on $((Get-ListenAddresses $LangGraphPort) -join ', ')"
 }
