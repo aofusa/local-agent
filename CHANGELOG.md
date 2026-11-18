@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.14.0 — 動画タブ（画像 1 枚からケモノの短い動画、Wan 2.2 I2V A14B）
+
+- 動画タブ（`docs/image-to-video-design.md`、作業は `docs/image-to-video-work-instruction.md`）: 画像 1 枚と日本語の指示（空なら控えめな自然な動き）から、Wan 2.2 I2V A14B の GGUF（High / Low の 2 エキスパート、ComfyUI-GGUF）と lightx2v の 4 ステップ LoRA で短い動画（16fps、2 / 3 / 5 秒、h264 の mp4）を作る。ケモノに特化させる利用者の指定で、Furry Enhancer の Wan 2.2 V3（I2V）を既定の LoRA にし、動きの説明のプロンプト（`prompts/system_video_i2v.txt`、`prompts/system_vision_video.txt`）も耳・尾・毛並みの動きを優先し、ケモノの特徴を最後まで保つよう書く。
+  - ComfyUI のワークフロー `workflows/wan22/i2v.api.json`（マップ `workflows/maps/wan22.json`、`build_workflows.py` が生成）: 27B が開始画像を見て英語の動きの説明（`{"positive","negative"}`）を書く → eject → umT5 → `release_te` → VAE → High（ノイズを残して前半）→ `release_high` → Low（後半）→ `release_low` → タイルデコード → `CreateVideo` + `SaveVideo`。ローダはすべて前の段に `after` で依存し、大きなモデルは 1 つずつしか載らない。
+  - ComfyUI のノード（`comfyui_nodes/furry_ja`）: `FurryJaTextEncoderAfter`、`FurryJaVAELoaderAfter`、`FurryJaVideoModelAfter`（`.gguf` は ComfyUI-GGUF の `UnetLoaderGGUF`）、`FurryJaReleaseAfter`（使い終えたモデルを GC で手放し、残っていないことと空きをログと UI の出力に出す。CPU への退避コピーはしない）。
+  - LangGraph: graph `video`（`src/furry_agent/video_graph.py`、大きさと長さは `video_plan.py`）。画像タブと同じく `job_lock` を投入まで握り、生成中はチャットタブと `/coder/turn` が ComfyUI のキューを見て待つ。大きさは開始画像の縦横比のまま `VIDEO_MAX_PIXELS` 以下の 16 の倍数、フレーム数は秒数 × 16fps を 4k+1 に丸める。動画は `outputs/video/<UUID>.mp4`（条件は同名の `.json`）に保存し、LangGraph の http.app が `GET /media/video/<UUID>.mp4`（Range 対応、`?download=1` で保存用）で返す（スレッドに base64 を載せない）。
+  - モデルの一覧 `config/host_models.json` の `video`: `wan22-i2v-a14b-q3`（既定）と `wan22-i2v-a14b-q4`。LoRA は画像モデルの `loras` と同じ `"<ファイル>:<強度>"` を High / Low に分けて書き、サンプリングの値と組の蒸留 LoRA は `distill_loras` に分ける。`GET /models` に `video`（使えるか、理由、LoRA）と `video_options`（既定の秒数、上限、選べる秒数）。
+  - `.env`: `DEFAULT_VIDEO_MODEL` と、この端末に合わせる `VIDEO_MAX_PIXELS`、`VIDEO_SECONDS`、`VIDEO_MAX_SECONDS`、`VIDEO_VAE_TILE`、`VIDEO_VAE_TEMPORAL`、`VIDEO_TEXT_ENCODER_DEVICE`、`VIDEO_CRF`（`docs/configuration.md`）。
+- UI: 動画タブ（画像 1 枚、長さ 2 / 3 / 5 秒、動画モデルのピッカー）、応答の中で再生と保存、画像タブの画像に「この画像を動画にする」（動画タブへ画像を渡す）。
+- セットアップ: `scripts/setup-video-models.ps1`（ComfyUI-GGUF をコミット固定で入れ、既定の動画モデルのエキスパート・umT5・VAE・lightx2v の LoRA を取得して SHA-256 を照合し、ケモノ向けの LoRA は手元のフォルダから取り込む）、`setup.ps1 -SkipVideo`、`doctor.ps1` の動画の確認。macOS の `scripts/*.sh` は対象外。
+- 仕様の改定: 動画の生成は動画タブの画像→動画だけ（画像タブとチャットタブは変えない）。動画モデルの重みを ComfyUI-GGUF で読むことは「ComfyUI の中で GGUF を動かさない」の例外（AGENTS.md、`docs/specification.md`、`docs/llm-comfyui-workflow-design.md`）。
+- 計測（この端末、448×656・49 フレーム = 3 秒、`docs/image-to-video-design.md` §11、`docs/models.md`）: Q3_K_M 23.4 分、Q3_K_M + Furry Enhancer（High と Low）27.0 分、Q4_K_M 23.9 分。1 ステップは 300〜350 秒で、GPU に載る量（3.6GB〜0GB）にほとんどよらない。どれも黒いフレームや破損は無く、ケモノの特徴は最後まで保たれた。既定は Q3_K_M + Furry Enhancer（High と Low、1.0）、1 フレーム 307,200 画素まで、3 秒（選べる上限 5 秒）。Q4_K_M もこの端末で動くが RAM を約 2.4GB 多く使うため、ピッカーの「画質優先」にした。フレーム補間（設計書の `VIDEO_INTERPOLATE`）は見送った。
+- テスト: `tests/test_video_workflow.py`（ノード ID、ローダの依存の順、LoRA の挿入）、`tests/test_video_nodes.py`（ComfyUI を差し替えた新ノード）、`tests/test_video_plan.py`、`tests/test_video_catalog.py`、`tests/test_video_graph.py`、`tests/test_media_api.py`。pytest 778 件。
+- 確認（Windows の ROG Ally X、2026-11-18。この端末のヘッドレス Edge から LAN のアドレスで）:
+  - 動画タブからケモノの画像 1 枚と「しっぽを振りながら、こちらを向いて笑う」を送り、32.7 分（27B の動きの説明 4.5 分を含む）で 448×656・49 フレームの mp4 が応答の中で再生でき（PC の幅と 390px）、ComfyUI の output と `outputs/video/` に保存された。ログで、各ローダの前にルータが空で、各 release の時点でモデルが残っていないことを確かめた。
+  - 正方形の画像・指示なし・2 秒（544×544・33 フレーム、20.6 分。1 本目の生成中に送り、LangGraph の中で待ってから始まった）、`VIDEO_MAX_SECONDS` / `VIDEO_MAX_PIXELS` を変えた再起動の反映、取り消しで ComfyUI が止まること、画像なし・2 枚・未知のモデル id の拒否、`setup-video-models.ps1` の 2 回目、`doctor.ps1`。
+  - デグレ確認: 画像タブ（既定の SDXL、テキストのみ）、Tor 検索（速いモード）、cirka（ファイルの作成からコマンドの実行まで）。
+  - 確かめていない: 別ホストの実機のブラウザとスマートフォン、5 秒の動画（50 分前後の見込み）、UI の停止ボタンそのもの（LangGraph の取り消し API で確認）。
+
 ## v0.13.0 — 別ホストの LLM（リモートの llama.cpp、OpenAI 互換サービス）、UI の表示崩れの修正と応答時間
 
 - 別ホストの推論モデル（`docs/remote-llm-design.md`）: `config/host_models.json` の推論モデルに `endpoint`（`kind` = `llamacpp` / `openai`、`url`、`model`、任意の `api_key`）を書くと、チャットタブと `POST /coder/turn` がその接続先を呼ぶ（`llm_client.RemoteLLM`）。接続先の情報はカタログに直接書き、`.env` と `.env.example` は変えない。
