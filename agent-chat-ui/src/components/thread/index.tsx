@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useCallback, useEffect, useRef } from "react";
+import { ContentBlock } from "@langchain/core/messages";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -43,10 +44,20 @@ import {
   CHAT_GRAPH,
   ChatModeSwitch,
   ModeTabs,
+  VIDEO_GRAPH,
+  VideoLengthSwitch,
   useActiveTab,
   useChatMode,
+  useSwitchTab,
+  useVideoSeconds,
 } from "./mode-tabs";
-import { ModelPicker, useModelChoice } from "./model-picker";
+import {
+  ModelKind,
+  ModelPicker,
+  useHostModels,
+  useModelChoice,
+} from "./model-picker";
+import { HandoffImage, VideoHandoffContext } from "./video-handoff";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -157,6 +168,12 @@ export function Thread() {
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
+  // local-agent: the tab is the graph. The chat tab takes text only, the image tab up to 4 images (and PDFs),
+  // the video tab exactly one image (the start frame).
+  const tab = useActiveTab();
+  const isChatTab = tab === CHAT_GRAPH;
+  const isVideoTab = tab === VIDEO_GRAPH;
+  const isImageTab = !isChatTab && !isVideoTab;
   const {
     contentBlocks,
     setContentBlocks,
@@ -167,11 +184,15 @@ export function Thread() {
     dragOver,
     handlePaste,
     updateBlockMetadata,
-  } = useFileUpload();
+  } = useFileUpload({
+    maxImages: isVideoTab ? 1 : isChatTab ? 0 : undefined,
+    allowPdf: isImageTab,
+  });
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  // local-agent: the chat tab takes text only (attachments belong to the image tab).
-  const isChatTab = useActiveTab() === CHAT_GRAPH;
+  const stream = useStreamContext();
+  const messages = stream.messages;
+  const isLoading = stream.isLoading;
   // local-agent: 自動 / 速い / 思考, sent with every chat-tab run as configurable.mode.
   const [chatMode, setChatMode] = useChatMode();
   // local-agent: the model picked for this conversation (null = the host's default, nothing is sent).
@@ -180,6 +201,13 @@ export function Thread() {
     threadId,
   );
   const [imageModel, setImageModel] = useModelChoice("image", threadId);
+  const [videoModel, setVideoModel] = useModelChoice("video", threadId);
+  // local-agent: the video tab's length choices come from the host (GET /models "video_options").
+  const { models: hostModels } = useHostModels(
+    isVideoTab ? stream.apiUrl : undefined,
+  );
+  const videoOptions = isVideoTab ? (hostModels?.video_options ?? null) : null;
+  const [videoSeconds, setVideoSeconds] = useVideoSeconds(videoOptions);
   const runConfig = isChatTab
     ? {
         config: {
@@ -189,13 +217,71 @@ export function Thread() {
           },
         },
       }
-    : imageModel
-      ? { config: { configurable: { image_model: imageModel } } }
-      : {};
+    : isVideoTab
+      ? videoModel || videoSeconds !== null
+        ? {
+            config: {
+              configurable: {
+                ...(videoModel ? { video_model: videoModel } : {}),
+                ...(videoSeconds !== null
+                  ? { video_seconds: videoSeconds }
+                  : {}),
+              },
+            },
+          }
+        : {}
+      : imageModel
+        ? { config: { configurable: { image_model: imageModel } } }
+        : {};
+  const pickerKind: ModelKind = isChatTab
+    ? "inference"
+    : isVideoTab
+      ? "video"
+      : "image";
+  const pickerModel = isChatTab
+    ? inferenceModel
+    : isVideoTab
+      ? videoModel
+      : imageModel;
+  const setPickerModel = isChatTab
+    ? setInferenceModel
+    : isVideoTab
+      ? setVideoModel
+      : setImageModel;
+  const hasImage = contentBlocks.some((block) => block.type === "image");
+  // The video graph's 「再取得 <prompt_id>」 (offered after a timeout) fetches a finished run: no image needed.
+  const isRefetch =
+    /^\s*再取得\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*$/.test(
+      input,
+    );
+  const needsImage = isVideoTab && !hasImage && !isRefetch;
 
-  const stream = useStreamContext();
-  const messages = stream.messages;
-  const isLoading = stream.isLoading;
+  // local-agent: attachments belong to one tab (they were sent from the chat tab too, where only the button was
+  // hidden): a switch drops them, except the image the 「この画像を動画にする」 hand-off carries to the video tab.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const switchTab = useSwitchTab();
+  const [handoff, setHandoff] = useState<ContentBlock.Multimodal.Data | null>(
+    null,
+  );
+  const [blocksTab, setBlocksTab] = useState(tab);
+  if (blocksTab !== tab) {
+    setBlocksTab(tab);
+    setContentBlocks(handoff && isVideoTab ? [handoff] : []);
+    if (handoff) setHandoff(null);
+  }
+  const animateImage = useCallback(
+    (image: HandoffImage) => {
+      setHandoff({
+        type: "image",
+        mimeType: image.mimeType,
+        data: image.data,
+        metadata: { name: image.name },
+      });
+      switchTab(VIDEO_GRAPH, { newThread: true });
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    },
+    [switchTab],
+  );
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -253,6 +339,10 @@ export function Thread() {
     e.preventDefault();
     if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
       return;
+    if (needsImage) {
+      toast.error("動画にする画像を 1 枚添付してください。");
+      return;
+    }
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
@@ -313,7 +403,9 @@ export function Thread() {
   );
 
   return (
-    // local-agent: h-dvh keeps the input above a phone's browser bar (100vh is taller than the visible area).
+    // local-agent: 「この画像を動画にする」 under generated images (image tab only).
+    <VideoHandoffContext.Provider value={isImageTab ? animateImage : null}>
+    {/* local-agent: h-dvh keeps the input above a phone's browser bar (100vh is taller than the visible area). */}
     <div className="flex h-screen w-full overflow-hidden supports-[height:100dvh]:h-dvh">
       <div className="relative hidden lg:flex">
         <motion.div
@@ -531,9 +623,11 @@ export function Thread() {
                       <ContentBlocksPreview
                         blocks={contentBlocks}
                         onRemove={removeBlock}
-                        onUpdate={updateBlockMetadata}
+                        // local-agent: roles and strengths are the image tab's (the video tab's image is the start frame)
+                        onUpdate={isImageTab ? updateBlockMetadata : undefined}
                       />
                       <textarea
+                        ref={textareaRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onPaste={handlePaste}
@@ -553,7 +647,9 @@ export function Thread() {
                         placeholder={
                           isChatTab
                             ? "メッセージ（/search で検索、/write で文章、/code でプログラム）"
-                            : "描きたい内容を日本語で（画像は 4 枚まで添付できます）"
+                            : isVideoTab
+                              ? "動かし方を日本語で（画像を 1 枚添付。空なら自然な動き）"
+                              : "描きたい内容を日本語で（画像は 4 枚まで添付できます）"
                         }
                         className="field-sizing-content max-h-[40dvh] min-h-12 w-full min-w-0 resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
                       />
@@ -581,37 +677,48 @@ export function Thread() {
                             onChange={setChatMode}
                           />
                         )}
+                        {isVideoTab && videoOptions && (
+                          <VideoLengthSwitch
+                            choices={videoOptions.choices}
+                            value={videoSeconds}
+                            onChange={setVideoSeconds}
+                          />
+                        )}
                         <Label
                           htmlFor="file-input"
                           className={cn(
                             "flex shrink-0 cursor-pointer items-center gap-2",
                             isChatTab && "hidden",
                           )}
-                          title="Upload PDF or Image"
+                          title={
+                            isVideoTab ? "Upload Image" : "Upload PDF or Image"
+                          }
                         >
                           <Plus className="size-5 text-gray-600" />
                           <span className="text-sm whitespace-nowrap text-gray-600 max-sm:sr-only">
-                            Upload PDF or Image
+                            {isVideoTab ? "Upload Image" : "Upload PDF or Image"}
                           </span>
                         </Label>
                         <input
                           id="file-input"
                           type="file"
                           onChange={handleFileUpload}
-                          multiple
-                          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                          multiple={!isVideoTab}
+                          accept={
+                            isVideoTab
+                              ? "image/jpeg,image/png,image/gif,image/webp"
+                              : "image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                          }
                           className="hidden"
                         />
                         {/* local-agent: the model of the next message (Claude / Gemini style) */}
                         <div className="ml-auto flex min-w-0 items-center gap-2">
                           <ModelPicker
-                            key={isChatTab ? "inference" : "image"}
-                            kind={isChatTab ? "inference" : "image"}
+                            key={pickerKind}
+                            kind={pickerKind}
                             apiUrl={stream.apiUrl}
-                            value={isChatTab ? inferenceModel : imageModel}
-                            onChange={
-                              isChatTab ? setInferenceModel : setImageModel
-                            }
+                            value={pickerModel}
+                            onChange={setPickerModel}
                             className="min-w-0"
                           />
                           {stream.isLoading ? (
@@ -627,9 +734,15 @@ export function Thread() {
                             <Button
                               type="submit"
                               className="shrink-0 shadow-md transition-all"
+                              title={
+                                needsImage
+                                  ? "動画にする画像を 1 枚添付してください"
+                                  : undefined
+                              }
                               disabled={
                                 isLoading ||
-                                (!input.trim() && contentBlocks.length === 0)
+                                (!input.trim() && contentBlocks.length === 0) ||
+                                needsImage
                               }
                             >
                               Send
@@ -666,5 +779,6 @@ export function Thread() {
         </div>
       </div>
     </div>
+    </VideoHandoffContext.Provider>
   );
 }

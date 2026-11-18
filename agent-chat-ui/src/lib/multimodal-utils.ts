@@ -54,6 +54,43 @@ export async function fileToBase64(file: File): Promise<string> {
   });
 }
 
+// local-agent: a video the video graph returns. The host serves the mp4 (GET /media/video/<id>.mp4) and the
+// message carries only its URL, so threads stay small (docs/image-to-video-design.md §6.4).
+export interface VideoBlock {
+  type: "video";
+  mimeType: string;
+  url: string;
+  metadata?: {
+    name?: string;
+    width?: number;
+    height?: number;
+    frames?: number;
+    fps?: number;
+    seconds?: number;
+  };
+}
+
+export function isVideoBlock(block: unknown): block is VideoBlock {
+  return (
+    typeof block === "object" &&
+    block !== null &&
+    (block as { type?: unknown }).type === "video" &&
+    typeof (block as { url?: unknown }).url === "string" &&
+    typeof (block as { mimeType?: unknown }).mimeType === "string"
+  );
+}
+
+/** A URL the host returned (e.g. "/media/video/<id>.mp4"), resolved under the LangGraph URL the UI talks to.
+ * The API URL's own path is kept (a proxied "http://host/api" -> "http://host/api/media/..."). */
+export function resolveHostUrl(url: string, apiUrl: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  const base =
+    typeof window === "undefined"
+      ? apiUrl
+      : new URL(apiUrl, window.location.href).toString();
+  return new URL(url.replace(/^\/+/, ""), base.replace(/\/*$/, "/")).toString();
+}
+
 // Type guard for Base64ContentBlock
 export function isBase64ContentBlock(
   block: unknown,

@@ -1,18 +1,22 @@
-// local-agent: 画像 / チャット tabs (Grok-style split). A tab selects the LangGraph graph:
-// 画像 = graph "agent" (the image generation graph), チャット = graph "chat" (conversation and Tor web search).
+// local-agent: 画像 / チャット / 動画 tabs (Grok-style split). A tab selects the LangGraph graph:
+// 画像 = graph "agent" (the image generation graph), チャット = graph "chat" (conversation and Tor web search),
+// 動画 = graph "video" (one image -> a short video, docs/image-to-video-design.md).
 // Threads stay separate because the history list is filtered by graph_id.
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useQueryState } from "nuqs";
-import { Image as ImageIcon, MessageSquare } from "lucide-react";
+import { Film, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useThreads } from "@/providers/Thread";
+import type { VideoOptions } from "./model-picker";
 
 export const IMAGE_GRAPH = process.env.NEXT_PUBLIC_ASSISTANT_ID || "agent";
 export const CHAT_GRAPH = "chat";
+export const VIDEO_GRAPH = "video";
 
 const TABS = [
   { id: IMAGE_GRAPH, label: "画像", icon: ImageIcon },
   { id: CHAT_GRAPH, label: "チャット", icon: MessageSquare },
+  { id: VIDEO_GRAPH, label: "動画", icon: Film },
 ];
 
 const STORAGE_KEY = "local-agent:last-thread:";
@@ -38,36 +42,53 @@ export function useActiveTab(): string {
   return assistantId || IMAGE_GRAPH;
 }
 
-export function ModeTabs({ className }: { className?: string }) {
+/** Switch tabs: back to that tab's last thread, or a new thread (``newThread``, e.g. the image -> video hand-off). */
+export function useSwitchTab(): (
+  tab: string,
+  options?: { newThread?: boolean },
+) => void {
   const [assistantId, setAssistantId] = useQueryState("assistantId");
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads, setThreadsLoading } = useThreads();
   const active = assistantId || IMAGE_GRAPH;
-  const first = useRef(true);
+  return useCallback(
+    (tab: string, options?: { newThread?: boolean }) => {
+      if (tab === active && !options?.newThread) return;
+      remember(active, threadId);
+      setThreadId(options?.newThread ? null : recall(tab));
+      setAssistantId(tab);
+    },
+    [active, threadId, setAssistantId, setThreadId],
+  );
+}
+
+// The graph whose threads the history list shows. Module-level, not per instance: ModeTabs is mounted in the
+// start screen and in the conversation header, and a switch that crosses the two would otherwise mount a fresh
+// copy that skipped its first run and left the list on the previous graph.
+let historyGraph: string | null = null;
+
+export function ModeTabs({ className }: { className?: string }) {
+  const [threadId] = useQueryState("threadId");
+  const active = useActiveTab();
+  const select = useSwitchTab();
+  const { getThreads, setThreads, setThreadsLoading } = useThreads();
 
   useEffect(() => {
     remember(active, threadId);
   }, [active, threadId]);
 
-  // The history list loads once on mount; reload it for the other graph after a switch.
+  // The history list loads once on mount (ThreadHistory); reload it for the other graph after a switch.
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
+    if (historyGraph === null || historyGraph === active) {
+      historyGraph = active;
       return;
     }
+    historyGraph = active;
     setThreadsLoading(true);
     getThreads()
       .then(setThreads)
       .catch(console.error)
       .finally(() => setThreadsLoading(false));
-  }, [getThreads, setThreads, setThreadsLoading]);
-
-  const select = (tab: string) => {
-    if (tab === active) return;
-    remember(active, threadId);
-    setThreadId(recall(tab));
-    setAssistantId(tab);
-  };
+  }, [active, getThreads, setThreads, setThreadsLoading]);
 
   return (
     <div
@@ -199,6 +220,97 @@ export function ChatModeSwitch({
           )}
         >
           {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// local-agent: the video tab's length (sent as config.configurable.video_seconds). The host offers the choices
+// (GET /models "video_options", capped by its VIDEO_MAX_SECONDS); the pick is a per-browser convenience and falls
+// back to the host's default when the host no longer offers it.
+const SECONDS_KEY = "local-agent:video-seconds";
+const secondsListeners = new Set<() => void>();
+let memorySeconds: number | null = null; // used when the browser refuses storage
+
+function readSeconds(): number | null {
+  try {
+    const value = Number(window.localStorage.getItem(SECONDS_KEY));
+    return Number.isFinite(value) && value > 0 ? value : memorySeconds;
+  } catch {
+    return memorySeconds;
+  }
+}
+
+function subscribeSeconds(listener: () => void) {
+  secondsListeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    secondsListeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
+/** The picked length in seconds, or null when the host sent no choices (nothing is sent then). */
+export function useVideoSeconds(
+  options: VideoOptions | null | undefined,
+): [number | null, (seconds: number) => void] {
+  const stored = useSyncExternalStore(subscribeSeconds, readSeconds, () => null);
+  const choices = options?.choices ?? [];
+  const value = !options
+    ? null
+    : stored !== null && choices.includes(stored)
+      ? stored
+      : options.default_seconds;
+  const update = (seconds: number) => {
+    memorySeconds = seconds;
+    try {
+      window.localStorage.setItem(SECONDS_KEY, String(seconds));
+    } catch {
+      // storage unavailable: the choice lasts for this page only
+    }
+    secondsListeners.forEach((listener) => listener());
+  };
+  return [value, update];
+}
+
+export function VideoLengthSwitch({
+  choices,
+  value,
+  onChange,
+  className,
+}: {
+  choices: number[];
+  value: number | null;
+  onChange: (seconds: number) => void;
+  className?: string;
+}) {
+  if (!choices.length) return null;
+  return (
+    <div
+      role="radiogroup"
+      aria-label="動画の長さ"
+      className={cn(
+        "bg-background inline-flex shrink-0 items-center gap-0.5 rounded-full border p-0.5",
+        className,
+      )}
+    >
+      {choices.map((seconds) => (
+        <button
+          key={seconds}
+          type="button"
+          role="radio"
+          aria-checked={value === seconds}
+          title={`約 ${seconds} 秒の動画を作ります（長いほど時間がかかります）`}
+          onClick={() => onChange(seconds)}
+          className={cn(
+            "cursor-pointer rounded-full px-3 py-1 text-xs whitespace-nowrap transition-colors",
+            value === seconds
+              ? "bg-foreground text-background font-semibold"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {seconds} 秒
         </button>
       ))}
     </div>

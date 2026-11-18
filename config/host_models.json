@@ -1,5 +1,5 @@
 {
-  "_comment": "Models the host lets a client pick (docs/host-model-selection-design.md). Clients send an id and show the label. No absolute paths and no secrets here. Inference models are sections of the llama.cpp router preset (scripts/setup-llm writes tools/llm/models.ini from this file); their GGUF comes from config/llm_model.json or config/search_models.json, their 'params' are llama-server options (long names without --). Image models name a ComfyUI file ('ckpt': checkpoints/ or diffusion_models/), the family of workflows/<family>/ and their own sampler 'params'; 'endpoint' marks an inference model on another host (a llama.cpp server or an OpenAI-compatible service: kind, url, model, optional api_key; docs/remote-llm-design.md). 'loras' are applied in order as \"<file>:<weight>\". 'downloads' are the extra files the setup fetches from Hugging Face. Parameters come from each model's published recommendations (sources in docs/configuration.md).",
+  "_comment": "Models the host lets a client pick (docs/host-model-selection-design.md). Clients send an id and show the label. No absolute paths and no secrets here. Inference models are sections of the llama.cpp router preset (scripts/setup-llm writes tools/llm/models.ini from this file); their GGUF comes from config/llm_model.json or config/search_models.json, their 'params' are llama-server options (long names without --). Image models name a ComfyUI file ('ckpt': checkpoints/ or diffusion_models/), the family of workflows/<family>/ and their own sampler 'params'; 'endpoint' marks an inference model on another host (a llama.cpp server or an OpenAI-compatible service: kind, url, model, optional api_key; docs/remote-llm-design.md). 'loras' are applied in order as \"<file>:<weight>\". 'downloads' are the extra files the setup fetches from Hugging Face (keyed by family or by model id). Video models (docs/image-to-video-design.md) name the two Wan 2.2 experts, the distill LoRAs their sampler values assume and the kemono LoRAs, both per expert ({\"high\": [...], \"low\": [...]}, the image format); an empty list means no LoRA. Parameters come from each model's published recommendations (sources in docs/configuration.md).",
   "inference": [
     {
       "id": "qwen3.8-27b-abliterated",
@@ -130,6 +130,42 @@
                  "width": 1024, "height": 1024}
     }
   ],
+  "video": [
+    {
+      "id": "wan22-i2v-a14b-q3",
+      "label": "Wan 2.2 I2V A14B（Q3_K_M・省メモリ）",
+      "family": "wan22",
+      "experts": {"high": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf", "low": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf"},
+      "models": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae_name": "wan_2.1_vae.safetensors"},
+      "distill_loras": {
+        "high": ["wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"],
+        "low": ["wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"]
+      },
+      "loras": {
+        "high": ["Furry Enhancer Wan2.2 V3 High Noise I2V.safetensors:1.0"],
+        "low": ["Furry Enhancer Wan2.2 V3 Low Noise I2V .safetensors:1.0"]
+      },
+      "params": {"steps": 4, "split_step": 2, "cfg": 1.0, "shift": 5.0, "sampler_name": "euler", "scheduler": "simple",
+                 "fps": 16, "max_pixels": 399360, "frames": 81, "prompt_prefix": ""}
+    },
+    {
+      "id": "wan22-i2v-a14b-q4",
+      "label": "Wan 2.2 I2V A14B（Q4_K_M・画質優先）",
+      "family": "wan22",
+      "experts": {"high": "Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf", "low": "Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"},
+      "models": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae_name": "wan_2.1_vae.safetensors"},
+      "distill_loras": {
+        "high": ["wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"],
+        "low": ["wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"]
+      },
+      "loras": {
+        "high": ["Furry Enhancer Wan2.2 V3 High Noise I2V.safetensors:1.0"],
+        "low": ["Furry Enhancer Wan2.2 V3 Low Noise I2V .safetensors:1.0"]
+      },
+      "params": {"steps": 4, "split_step": 2, "cfg": 1.0, "shift": 5.0, "sampler_name": "euler", "scheduler": "simple",
+                 "fps": 16, "max_pixels": 399360, "frames": 81, "prompt_prefix": ""}
+    }
+  ],
   "downloads": {
     "krea2": [
       {"folder": "text_encoders", "repo": "Comfy-Org/Krea-2", "file": "text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
@@ -142,6 +178,35 @@
        "size": 1192135096, "sha256": "cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba"},
       {"folder": "vae", "repo": "circlestone-labs/Anima", "file": "split_files/vae/qwen_image_vae.safetensors",
        "size": 253806246, "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"}
+    ],
+    "wan22": [
+      {"folder": "text_encoders", "repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+       "file": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+       "size": 6735906897, "sha256": "c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68"},
+      {"folder": "vae", "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "file": "split_files/vae/wan_2.1_vae.safetensors",
+       "size": 253815318, "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b"},
+      {"folder": "loras", "repo": "lightx2v/Wan2.2-Distill-Loras",
+       "file": "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+       "size": 634645944, "sha256": "887c3bdeb74e83859c920438e16ca31f39ab18ce189abc5f0e36f8348c5bbb19"},
+      {"folder": "loras", "repo": "lightx2v/Wan2.2-Distill-Loras",
+       "file": "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+       "size": 739472104, "sha256": "8833bd4fd7c8eabebf0bc8ee5cfaf47f4f310ce116928a02c1adf8941dd4b0f1"}
+    ],
+    "wan22-i2v-a14b-q4": [
+      {"folder": "diffusion_models", "repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+       "file": "HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf",
+       "size": 9651728896, "sha256": "836250abfaa3411694e2c9cf3a0cc18265329d5156d81aa116d5366b0f8f02e7"},
+      {"folder": "diffusion_models", "repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+       "file": "LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf",
+       "size": 9651728896, "sha256": "e2f98d834af009d035c6b0918268f2eba0aa8a63025ce942277e2384d40b0866"}
+    ],
+    "wan22-i2v-a14b-q3": [
+      {"folder": "diffusion_models", "repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+       "file": "HighNoise/Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf",
+       "size": 7176106496, "sha256": "ac3a72d74330e030fe2ded047b0ef9afc21dd90afc4f300c7aa79e1b0f9dd940"},
+      {"folder": "diffusion_models", "repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+       "file": "LowNoise/Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf",
+       "size": 7176106496, "sha256": "4472e4e30a9729da0e0de36c708c45344a70799d431b17371b0c513d20a1351b"}
     ]
   }
 }

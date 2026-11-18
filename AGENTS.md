@@ -4,12 +4,13 @@
 
 ## 目的
 
-LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から日本語の指示を送り、この端末（Windows、または Apple silicon の macOS）の上だけで、静止画の生成・会話・Tor 経由の検索・文章・コード・コーディングエージェントを行う。クラウド API は使わない。
+LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から日本語の指示を送り、この端末（Windows、または Apple silicon の macOS）の上だけで、静止画と短い動画の生成・会話・Tor 経由の検索・文章・コード・コーディングエージェントを行う。クラウド API は使わない。
 
 - **画像タブ**: LangGraph が ComfyUI へ投入し、ComfyUI のワークフローが llama.cpp のルータの LLM でタグ（または英語の説明文）を作り、LLM を unload してから拡散モデルで静止画を作る。画像はこの端末に保存し、同じ画像を UI に返す。
 - **チャットタブ**: 会話、Tor 経由の検索（出典と主張の突き合わせ付き）、文章、コード（承認後に Docker で実行）、自律モード。
+- **動画タブ**: 画像 1 枚と日本語の指示を LangGraph が ComfyUI へ投入し、ワークフローの中で LLM が英語の動きの説明を作り、LLM を unload してから Wan 2.2 I2V（umT5 → High → Low の順に 1 つずつ。ケモノ向けの LoRA）で短い動画を作る。動画はこの端末に保存し、LangGraph が UI に配信する。
 - **cirka**: 利用者の端末で動く CUI。モデルはこの端末の LLM を `POST /coder/turn` で使い、ツールは cirka の端末で実行する。
-- 推論モデルと画像モデルは `config/host_models.json` の一覧から、Web は送信ボタン横、cirka は `/model`・`/image-model` で選ぶ。推論モデルには別ホストの llama.cpp や OpenAI 互換サービス（項目の `endpoint`）も並べられ、チャットタブと `/coder/turn` だけがそれを使う。
+- 推論モデル・画像モデル・動画モデルは `config/host_models.json` の一覧から、Web は送信ボタン横、cirka は `/model`・`/image-model` で選ぶ。推論モデルには別ホストの llama.cpp や OpenAI 互換サービス（項目の `endpoint`）も並べられ、チャットタブと `/coder/turn` だけがそれを使う。
 
 ## 文書
 
@@ -18,7 +19,7 @@ LAN 内の別ホストのブラウザ（agent-chat-ui）や CUI（cirka）から
 | [docs/specification.md](docs/specification.md) | 変えてはいけない仕様の詳細（プロセスの分担、待受、ComfyUI と LLM の契約、チャットタブ、cirka、画像の返却、UI の変更範囲、受け入れ条件） |
 | [docs/decisions.md](docs/decisions.md) | 実装時に決めたことと理由、版ごとの経緯 |
 | [docs/models.md](docs/models.md) | 採用モデルの選定理由と評価、採らなかったもの。モデルを足す・設定値を変えるときに先に読み、結果をここに追記する |
-| 設計書（`docs/*-design.md`、`docs/*-work-instruction.md`） | 機能ごとの設計と実装記録。ComfyUI と LLM の連携は [llm-comfyui-workflow-design.md](docs/llm-comfyui-workflow-design.md)、LLM サーバは [llamacpp-router-design.md](docs/llamacpp-router-design.md)、モデルの選択と macOS は [host-model-selection-design.md](docs/host-model-selection-design.md)、別ホストの LLM は [remote-llm-design.md](docs/remote-llm-design.md) |
+| 設計書（`docs/*-design.md`、`docs/*-work-instruction.md`） | 機能ごとの設計と実装記録。ComfyUI と LLM の連携は [llm-comfyui-workflow-design.md](docs/llm-comfyui-workflow-design.md)、動画タブは [image-to-video-design.md](docs/image-to-video-design.md)、LLM サーバは [llamacpp-router-design.md](docs/llamacpp-router-design.md)、モデルの選択と macOS は [host-model-selection-design.md](docs/host-model-selection-design.md)、別ホストの LLM は [remote-llm-design.md](docs/remote-llm-design.md) |
 | [docs/architecture.md](docs/architecture.md) | ファイルの配置、ワークフローのノード、UI の変更点、ログ |
 | [docs/setup.md](docs/setup.md) / [usage.md](docs/usage.md) / [configuration.md](docs/configuration.md) / [troubleshooting.md](docs/troubleshooting.md) / [third-party-licenses.md](docs/third-party-licenses.md) | 利用者向けの詳細 |
 | [CHANGELOG.md](CHANGELOG.md) | 版ごとの変更 |
@@ -28,10 +29,11 @@ ComfyUI と LLM サーバの呼び出し順、ノード ID、プロンプト契�
 ## 構成
 
 ```
-他ホストのブラウザ ─> agent-chat-ui（:3000）─> LangGraph（:2024。graph agent = 画像、chat = チャット、
-                                                 http.app = /coder/turn・/coder/health・/models）
+他ホストのブラウザ ─> agent-chat-ui（:3000）─> LangGraph（:2024。graph agent = 画像、chat = チャット、video = 動画、
+                                                 http.app = /coder/turn・/coder/health・/models・/media/video）
 別ホストの cirka ──────────────────────────────> LangGraph
 LangGraph ─> ComfyUI（127.0.0.1:8188）─> llama.cpp ルータ（127.0.0.1:8080）  画像: LLM → eject → 拡散モデル
+                                                                          動画: LLM → eject → umT5 → High → Low（1 つずつ）
 LangGraph ─> llama.cpp ルータ / 検索用 llama-server（127.0.0.1:18181〜）/ Tor（127.0.0.1:9050）/ Docker
 ```
 
@@ -41,11 +43,11 @@ LangGraph ─> llama.cpp ルータ / 検索用 llama-server（127.0.0.1:18181〜
 
 ## 固定の規則
 
-- LangGraph は画像タブの LLM 呼び出しを置き換えない。タグ生成、eject、モデルの読み込みは ComfyUI のワークフロー内で行う。LangGraph が LLM を直接呼ぶのは、チャットタブと `/coder/turn` だけ（別ホストの推論モデルを選んだときはその接続先。unload せず、つながらなければ理由を返して別のモデルへ替えない）。
-- LLM と拡散モデルは同時に常駐させない。順序は「LLM がタグを返す → `eject` が unload を確認 → `ckpt` が読み込み → KSampler」で固定。ComfyUI の中で GGUF を動かさない。
+- LangGraph は画像タブと動画タブの LLM 呼び出しを置き換えない。タグ（動画は動きの説明）の生成、eject、モデルの読み込みは ComfyUI のワークフロー内で行う。LangGraph が LLM を直接呼ぶのは、チャットタブと `/coder/turn` だけ（別ホストの推論モデルを選んだときはその接続先。unload せず、つながらなければ理由を返して別のモデルへ替えない）。
+- LLM と拡散モデルは同時に常駐させない。画像の順序は「LLM がタグを返す → `eject` が unload を確認 → `ckpt` が読み込み → KSampler」で固定。動画は「LLM が説明を返す → `eject` → umT5 → `release_te` → High → `release_high` → Low → `release_low` → デコード」で、大きなモデルは 1 つずつ載せる。ComfyUI の中で LLM の GGUF を動かさない（llama-cpp-python を入れない）。動画モデルの重みを ComfyUI-GGUF で読むことだけは例外。
 - ノード ID、LLM の出力の JSON 契約（`{"positive","negative"}`）、unload の順は変えない。LangGraph が書き換えてよいのはマップのスロットと LoRA の挿入だけ。
-- モデル、LoRA、モデルごとのパラメータは `config/host_models.json` に書く（`.env` やコードに直書きしない）。クライアントは id を送り、ホストは未知・使えない id を拒否して、別のモデルへ自動で替えない。
-- 画像タブ・チャットタブ・`/coder/turn` は `job_lock` で直列化する。同時に複数の生成を走らせない。
+- モデル、LoRA、モデルごとのパラメータは `config/host_models.json` に書く（`.env` やコードに直書きしない）。動画モデルも同じ。`.env` に置くのは端末の性能に合わせる値（`VIDEO_*` など）だけ。クライアントは id を送り、ホストは未知・使えない id を拒否して、別のモデルへ自動で替えない。
+- 画像タブ・チャットタブ・動画タブ・`/coder/turn` は `job_lock` で直列化する。同時に複数の生成を走らせない。
 - 検索の通信は LangGraph だけが Tor（`socks5h://`）経由で開く。コードの実行は承認後に `sandbox.py` の Docker だけで行う。
 - cirka のツールは cirka の端末のワークスペースの中だけで実行する。ホストはツールを実行せず、会話やファイルの中身を残さない。
 
@@ -54,9 +56,9 @@ LangGraph ─> llama.cpp ルータ / 検索用 llama-server（127.0.0.1:18181〜
 ## 禁止
 
 - LLM のチャット GUI、MCP、ImageMCP から ComfyUI を叩く経路。LangGraph が ComfyUI の LLM 呼び出しと eject を置き換えること。
-- LLM とチェックポイントの同時常駐、ComfyUI 内での GGUF 常駐。
+- LLM とチェックポイント（動画モデルを含む）の同時常駐、動画の High と Low の同時常駐、ComfyUI 内での LLM の GGUF 常駐。
 - クラウド API へのフォールバック、LangSmith クラウドへのデプロイを代わりにすること。
-- 動画生成ワークフロー（Wan、LTX など）。設計書 §5 の薄い `frontend/`。
+- 動画タブの「画像から動画」以外の動画生成（画像タブ・チャットタブ・cirka から動画モデルを読むこと、テキストだけからの動画など）。設計書 §5 の薄い `frontend/`。
 - 検索でのクラウド検索 API、CAPTCHA の突破、指紋偽装、`.onion` の巡回、Tor を通らない通信。
 - コードを承認なしで、または `sandbox.py` 以外で実行すること。コンテナに docker.sock、ホーム、リポジトリ、`.env` を渡すこと。速いモードで実行すること。
 - 思考トークンを回答本文に混ぜること。文章生成に検索モデルや画像用プロンプトを使うこと。
@@ -75,8 +77,8 @@ LangGraph ─> llama.cpp ルータ / 検索用 llama-server（127.0.0.1:18181〜
 
 | 場所 | 内容 |
 |---|---|
-| `src/furry_agent/` | LangGraph のグラフ（`graph.py` 画像、`chat_graph.py` チャット）、`coder_gate.py`（`/coder/turn`）、`models_api.py`（`/models`）、`model_catalog.py`、`mlx_router.py`（macOS） |
-| `comfyui_nodes/furry_ja/` | ComfyUI のカスタムノード（eject、ckpt、split など） |
+| `src/furry_agent/` | LangGraph のグラフ（`graph.py` 画像、`chat_graph.py` チャット、`video_graph.py` 動画）、`coder_gate.py`（`/coder/turn`）、`models_api.py`（`/models`）、`media_api.py`（`/media/video`）、`model_catalog.py`、`mlx_router.py`（macOS） |
+| `comfyui_nodes/furry_ja/` | ComfyUI のカスタムノード（eject、ckpt、split、動画の段ごとの読み込みと release など） |
 | `workflows/` | ワークフローのテンプレートとマップ（`scripts/build_workflows.py` が `prompts/` から生成。手で直さない） |
 | `prompts/` | システムプロンプト |
 | `config/` | `host_models.json`（選べるモデル）、`llm_model.json`（27B）、`search_models.json`（検索モデル） |

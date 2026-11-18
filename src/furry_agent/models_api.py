@@ -18,9 +18,10 @@ from starlette.responses import JSONResponse
 
 from furry_agent.comfy_client import ComfyClient
 from furry_agent.llm_client import LlamaRouter, RemoteLLM, remote_error
-from furry_agent.model_catalog import (CatalogError, HostCatalog, InferenceModel, default_ids, image_unavailable,
-                                       inference_unavailable, load_catalog)
+from furry_agent.model_catalog import (VIDEO_LOADERS, CatalogError, HostCatalog, InferenceModel, default_ids,
+                                       image_unavailable, inference_unavailable, load_catalog, video_unavailable)
 from furry_agent.templates import TemplateError, load_map
+from furry_agent.video_plan import VideoRequestError, VideoSettings, video_options
 
 log = logging.getLogger("furry_agent.models")
 PROBE_S = 4.0
@@ -63,12 +64,14 @@ def _remote_info(model: InferenceModel) -> dict | None:
     return {"kind": model.endpoint.kind, "host": urlparse(url).netloc if url else "", "model": name}
 
 
-async def _comfy_files(comfy: ComfyClient, families: set[str]) -> tuple[dict | None, list[str] | None]:
+async def _comfy_files(comfy: ComfyClient, families: set[str], video_families: set[str] = frozenset()
+                       ) -> tuple[dict | None, list[str] | None, set[str] | None]:
+    """(family -> slot -> files ComfyUI offers, LoRA files, node classes); all None when ComfyUI is down."""
     try:
         info = await asyncio.wait_for(comfy.object_info(max_age_s=30.0), PROBE_S * 3)
     except Exception as exc:  # ComfyUI is down: files are checked again when a run queues
         log.info("models: ComfyUI not reachable (%s)", type(exc).__name__)
-        return None, None
+        return None, None, None
 
     def choices(node: str, field: str) -> list[str]:
         try:
@@ -80,24 +83,36 @@ async def _comfy_files(comfy: ComfyClient, families: set[str]) -> tuple[dict | N
     for family in families:
         loaders = LOADERS["sdxl" if family == "sdxl" else "dit"]
         out[family] = {slot: choices(node, field) for slot, (node, field) in loaders.items()}
+    for family in video_families:
+        out[family] = {slot: choices(node, field) for slot, (node, field) in VIDEO_LOADERS.items()}
     loras = choices("LoraLoader", "lora_name")
-    return out, loras
+    return out, loras, set(info)
+
+
+def _video_settings() -> VideoSettings:
+    try:
+        return VideoSettings.from_env()
+    except VideoRequestError as exc:  # a bad VIDEO_* value is reported by the run; the list still answers
+        log.warning("models: %s", exc)
+        return VideoSettings()
 
 
 async def describe(catalog: HostCatalog, *, llm_url: str, comfy: ComfyClient) -> dict:
     families = {m.family for m in catalog.image.values()}
+    video_families = {m.family for m in catalog.video.values()}
     maps = {}
-    for family in families:
+    for family in families | video_families:
         try:
             maps[family] = await asyncio.to_thread(load_map, family)
         except TemplateError:
             continue
     remotes = [m for m in catalog.inference.values() if m.remote]
-    router, (files, loras), *answers = await asyncio.gather(
-        _router_models(llm_url), _comfy_files(comfy, families), *(_remote_models(m) for m in remotes))
+    router, (files, loras, nodes), *answers = await asyncio.gather(
+        _router_models(llm_url), _comfy_files(comfy, families, video_families), *(_remote_models(m) for m in remotes))
     remote = {m.id: answer for m, answer in zip(remotes, answers)}
     no_inference = await asyncio.to_thread(inference_unavailable, catalog, router, remote)
     no_image = image_unavailable(catalog, maps, files, loras)
+    no_video = video_unavailable(catalog, maps, files, loras, nodes)
     return {
         "defaults": default_ids(catalog),
         "inference": [{"id": m.id, "label": m.label, "available": m.id not in no_inference,
@@ -109,6 +124,14 @@ async def describe(catalog: HostCatalog, *, llm_url: str, comfy: ComfyClient) ->
                    "prompt_style": m.prompt_style, "loras": m.lora_text, "params": m.params,
                    "available": m.id not in no_image, "reason": no_image.get(m.id, "")}
                   for m in catalog.image.values()],
+        # Video models: the params are the family's defaults with the entry's own on top (the long negative left out).
+        "video": [{"id": m.id, "label": m.label, "family": m.family,
+                   "family_label": (maps.get(m.family) or {}).get("label", m.family),
+                   "params": {k: v for k, v in {**(maps.get(m.family) or {}).get("defaults", {}), **m.params}.items()
+                              if k != "negative"},
+                   "loras": m.lora_text, "available": m.id not in no_video, "reason": no_video.get(m.id, "")}
+                  for m in catalog.video.values()],
+        "video_options": video_options(_video_settings()),
     }
 
 

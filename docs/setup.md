@@ -80,6 +80,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `-GpuOffload 0.45`（既定） | LLM の層のうち GPU に置く割合（0〜1） |
 | `-SkipLLM` / `-SkipComfyUI` | どちらかの設定を飛ばす |
 | `-SkipReferenceModels` | 参照画像用のノードとモデル（約 6GB）を飛ばす |
+| `-SkipVideo` | 動画タブのノードとモデル（既定の動画モデルで 23〜28GB）を飛ばす（v0.14.0） |
 | `-SkipSearch` | チャットタブの検索の準備（Tor、検索モデル約 20GB、probe）を飛ばす |
 | `-SkipProbe` | 検索モデルの検証（probe、数分）だけを飛ばす |
 
@@ -149,6 +150,20 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `custom_nodes\comfyui_controlnet_aux\ckpts\...` | DWPose（ONNX、CPU で実行）と Depth Anything V2 Small |
 
 実行時にモデルを自動ダウンロードするノードはありません（すべてこのスクリプトで事前に取得します）。
+
+**動画タブのノードとモデル**（`scripts\setup-video-models.ps1`、v0.14.0。`setup.ps1 -SkipVideo` で省略可。画像タブとチャットタブはこれが無くても動きます）
+
+既定の動画モデル（`.env` の `DEFAULT_VIDEO_MODEL`、空なら `config/host_models.json` の `video` の先頭）の分だけ用意します。ほかのモデルも入れるときは `-Ids wan22-i2v-a14b-q4,wan22-i2v-a14b-q3`。何度実行しても安全で、終わったら ComfyUI を再起動します。
+
+| 対象 | 内容 | 置き場（git 管理外） |
+|---|---|---|
+| [city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) | Wan 2.2 の GGUF を PyTorch で読むノード（検証済みコミットに固定）。依存は `gguf` だけ。llama-cpp-python は入れない | `tools\comfyui\custom_nodes\ComfyUI-GGUF` |
+| Wan 2.2 I2V A14B の GGUF（High / Low） | [QuantStack/Wan2.2-I2V-A14B-GGUF](https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF)。Q3_K_M は 1 本 7.2GB、Q4_K_M は 9.7GB | `models\diffusion_models` |
+| umT5-XXL fp8、Wan 2.1 VAE | Comfy-Org の再配布（テキストエンコーダ 6.7GB、VAE 0.25GB） | `models\text_encoders`、`models\vae` |
+| lightx2v の 4 ステップ LoRA（High / Low） | [lightx2v/Wan2.2-Distill-Loras](https://huggingface.co/lightx2v/Wan2.2-Distill-Loras) の `…_4step_1022`（0.64GB / 0.74GB） | `models\loras` |
+| ケモノ向けの LoRA | Furry Enhancer の Wan 2.2 V3（I2V 用の High Noise / Low Noise の 2 ファイル）。Civitai から**自分で入手**して、以前の ComfyUI のモデルフォルダ（`Documents\ComfyUI\models\loras` など）か `tools\comfyui\models\loras` に置く。スクリプトは取り込むだけで、取得はしない | `models\loras` |
+
+Hugging Face のファイルは、ほかのモデルと同じく Hugging Face のキャッシュ経由で取得し（この端末に既にあれば取得しない）、`config/host_models.json` の `downloads` に固定した SHA-256 と照合します。置き場に同じファイルがあれば取り直さず、照合だけで終わります（2 回目以降。この端末で約 1 分）。Hugging Face からの取得が止まるときは、同じファイルを手で置いてから再実行できます（[troubleshooting.md](troubleshooting.md)）。置いていないファイルがある動画モデルは、画面の一覧で理由つきで使えないと表示されます。
 
 **チャットタブの検索**（`setup.ps1 -SkipSearch` で省略可。画像タブはこれが無くても動きます）
 

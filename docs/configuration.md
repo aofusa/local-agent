@@ -51,6 +51,7 @@
 | `HOST_MODELS_PATH` | `config/host_models.json` | モデルの一覧 |
 | `DEFAULT_INFERENCE_MODEL` | 空 | 推論モデルを指定しない実行のモデル。空ならルータの `LLM_MODEL` と `LLM_CONTEXT`（v0.11 までと同じ） |
 | `DEFAULT_IMAGE_MODEL` | 一覧の先頭（`yiffinhell-vantablack`） | 画像モデルを指定しない実行のモデル |
+| `DEFAULT_VIDEO_MODEL` | 一覧の先頭（`wan22-i2v-a14b-q3`） | 動画モデルを指定しない実行のモデル（v0.14.0）。`setup-video-models` もこのモデルを用意する |
 | `HOST_MODELS_DISABLE` | 空 | カンマ区切りの id を使えないものとして出す |
 
 チェックポイント、系統、LoRA は画像モデルの項目です。以前の版の `.env` に残っている `CKPT_NAME`、`COMFY_MODEL_FAMILY`、`LORAS`、`CHROMA_LORAS`、`CHROMA_UNET_NAME`、`LMSTUDIO_*`、`LOCAL_DOC_ROOTS`、`DOC_EXTENSIONS` は削除してください（読みません）。`CHROMA_TEXT_ENCODER` / `CHROMA_VAE` / `CHROMA_WEIGHT_DTYPE` / `CHROMA_MAX_PIXELS` / `CHROMA_STEPS` はこの端末の Chroma の部品と速さの調整として残ります。
@@ -113,6 +114,65 @@
 テキストエンコーダと VAE（`downloads`）は `setup-image-models.ps1` / `.sh` が Hugging Face から取得し、SHA-256 を照合します（Krea 2: [Comfy-Org/Krea-2](https://huggingface.co/Comfy-Org/Krea-2)、Anima: [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima)）。Civitai のチェックポイントは取得しません（利用者が置く）。
 
 モデルを足すときは一覧に 1 件足すだけです（id は英小文字・数字・`.`・`-`）。系統は `sdxl` / `flux` / `krea2` / `anima` から選び、`prompt_style` は系統に合わせます（`sdxl`・`anima` は `danbooru`、`flux`・`krea2` は `prose`）。
+
+### 動画モデル（`config/host_models.json` の `video`、v0.14.0）
+
+動画タブ（[image-to-video-design.md](image-to-video-design.md)）のモデルです。選定の理由と評価は [models.md](models.md#動画モデルv0140)。
+
+```json
+{
+  "id": "wan22-i2v-a14b-q3",
+  "label": "Wan 2.2 I2V A14B（Q3_K_M・省メモリ）",
+  "family": "wan22",
+  "experts": {"high": "Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf", "low": "Wan2.2-I2V-A14B-LowNoise-Q3_K_M.gguf"},
+  "models": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae_name": "wan_2.1_vae.safetensors"},
+  "distill_loras": {"high": ["wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"],
+                    "low": ["wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors:1.0"]},
+  "loras": {"high": ["Furry Enhancer Wan2.2 V3 High Noise I2V.safetensors:1.0"],
+            "low": ["Furry Enhancer Wan2.2 V3 Low Noise I2V .safetensors:1.0"]},
+  "params": {"steps": 4, "split_step": 2, "cfg": 1.0, "shift": 5.0, "sampler_name": "euler", "scheduler": "simple",
+             "fps": 16, "max_pixels": 399360, "frames": 81, "prompt_prefix": ""}
+}
+```
+
+| キー | 内容 |
+|---|---|
+| `experts` | Wan 2.2 A14B の 2 つのモデル（High Noise が最初のステップ、Low Noise が残り）。`.gguf` は ComfyUI-GGUF、`.safetensors` は標準のローダーで読む |
+| `models` | テキストエンコーダ（umT5）と VAE。省くと系統のマップ（`workflows/maps/wan22.json`）の値 |
+| `distill_loras` | サンプリングの値と組の蒸留 LoRA（lightx2v の 4 ステップ）。使わないモデルは書かず、`params` を 20 ステップ・cfg 3.5 などにする |
+| `loras` | ケモノ向けの LoRA。書き方は画像モデルの `loras` と同じ（`"<ファイル>:<強度>"` を書いた順に当てる。強度は 0 より大きく 2 以下。空の配列かキーを省くと当てない）。Wan 2.2 は High と Low の 2 つのモデルなので `high` と `low` に分けて書き、両方に当てるときは両方に書く。ComfyUI に無い LoRA を書いたモデルは、一覧で理由つきで使えない |
+| `params` | `steps`、`split_step`（High が受け持つステップ数）、`cfg`、`shift`、`sampler_name`、`scheduler`、`fps`、`max_pixels`（モデルが扱える 1 フレームの画素数）、`frames`（扱える最長のフレーム数、4k+1）、`prompt_prefix`（LoRA のトリガー語。positive の先頭に足す）、`negative` |
+
+| id | エキスパート | LoRA | 既定値 | 出典 |
+|---|---|---|---|---|
+| `wan22-i2v-a14b-q3` | Q3_K_M（1 本 7.2GB）。この端末の既定 | lightx2v 4 ステップ 1022 + Furry Enhancer Wan 2.2 V3 I2V（High / Low） | 4 steps（2 + 2）/ cfg 1 / shift 5 / euler simple / 16fps / 480p・81 フレームまで | [lightx2v/Wan2.2-Distill-Loras](https://huggingface.co/lightx2v/Wan2.2-Distill-Loras)（4 ステップ、CFG 1、shift 5、euler）、ComfyUI の Wan 2.2 14B I2V テンプレート（16fps、81 フレーム、832×480） |
+| `wan22-i2v-a14b-q4` | Q4_K_M（1 本 9.7GB）。画質優先。この端末でも動く（GPU に載らず CPU 側から読む形になり、速さは Q3_K_M と同じくらいだが RAM を約 2.4GB 多く使う）。GPU のメモリが 10GB を超える環境なら既定にしてよい | 同上 | 同上 | 同上 |
+
+モデルのファイル（エキスパート、umT5、VAE、lightx2v の LoRA）は `setup-video-models.ps1` が Hugging Face から取得し、SHA-256 を照合します（`downloads` の `wan22` と各 id）。ケモノ向けの LoRA は Civitai から利用者が入手して置きます（取得はしません）。動画モデルの id の付け方は画像モデルと同じで、系統は今は `wan22` だけです。
+
+## 動画タブの調整（`VIDEO_*`、v0.14.0）
+
+モデルの情報（ファイル、LoRA、モデル固有の値）は `config/host_models.json` に、この端末の性能に合わせる値は `.env` に置きます（`CHROMA_MAX_PIXELS` と同じ扱い）。空なら既定値（この端末に合わせた値）を使い、LangGraph の再起動で反映します。LoRA の有無と強度は `.env` では変えません。
+
+| キー | 既定 | 説明 |
+|---|---|---|
+| `VIDEO_MAX_PIXELS` | 307200（480×640 相当） | 1 フレームの画素数の上限。開始画像の縦横比を保ち、16 の倍数に切り下げる（832×1216 の画像なら 448×656）。0 でモデルの上限（832×480 相当）だけ |
+| `VIDEO_SECONDS` | 3 | 長さを選ばなかったときの秒数（16fps で 4k+1 フレームに丸める: 3 秒 = 49 フレーム） |
+| `VIDEO_MAX_SECONDS` | 5 | 選べる長さの上限（UI の 2 / 3 / 5 秒のうち、これを超えるものは出ない。モデルの `frames` も上限） |
+| `VIDEO_VAE_TILE` | 256 | VAE のタイルデコードの一辺（ピクセル。重なりは 1/4、最大 64）。0 でタイルなし |
+| `VIDEO_VAE_TEMPORAL` | 16 | VAE が一度にデコードするフレーム数（重なり 4）。0 で分けない |
+| `VIDEO_TEXT_ENCODER_DEVICE` | `default` | umT5 を動かす場所。`cpu` にすると GPU のメモリを使わない（遅くなる） |
+| `VIDEO_CRF` | 20 | h264 の画質（小さいほど高画質でファイルが大きい） |
+
+ほかに効く既存のキー: `COMFYUI_EXTRA_ARGS`（ComfyUI の起動引数）、`AGENT_IDLE_TIMEOUT_S`（ComfyUI の進捗が途切れたときの打ち切り。長い動画で 1 ステップがこれを超えるなら増やす）、`HOST_MODELS_DISABLE`。
+
+ほかの環境の目安（未確認の推定。GPU のメモリ量で選ぶ）:
+
+| 環境 | モデル | `VIDEO_MAX_PIXELS` | `VIDEO_SECONDS` / `VIDEO_MAX_SECONDS` |
+|---|---|---|---|
+| この端末（Radeon 890M、共有メモリ 24GB、PyTorch から見える GPU 9.2GB） | `wan22-i2v-a14b-q3` | 307200 | 3 / 5 |
+| 10〜12GB の dGPU（RTX 3080 10GB、RTX 3060 12GB など） | `wan22-i2v-a14b-q4` | 0（832×480） | 5 / 5 |
+| 16GB 以上の dGPU | `wan22-i2v-a14b-q4` | 0 | 5 / 5（`AGENT_IDLE_TIMEOUT_S` は既定のままでよい） |
 
 ## 量と長さの上限（v0.10.0）
 

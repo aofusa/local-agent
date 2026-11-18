@@ -41,6 +41,7 @@ from furry_agent.job_lock import job_lock
 from furry_agent.llm_client import LlamaRouter, idle_timeout
 from furry_agent.model_catalog import (CatalogError, ModelChoiceError, default_ids, load_catalog, requested_id,
                                        resolve_inference)
+from furry_agent.media_api import video_endpoint
 from furry_agent.models_api import models_endpoint
 from furry_agent.router import CHAT, Route as ChatRoute
 
@@ -374,9 +375,10 @@ async def health_endpoint(request: Request):
     return JSONResponse({"ok": True, "gate": "coder", "version": 1, "llm": reachable, "lmstudio": reachable,
                          "model": model, "context": context,
                          "inference_default": defaults["inference"], "image_default": defaults["image"],
-                         "busy": job_lock.holder, "graphs": ["agent", "chat"]})
+                         "busy": job_lock.holder, "graphs": ["agent", "chat", "video"]})
 
 
 app = Starlette(routes=[Route("/coder/turn", turn_endpoint, methods=["POST"]),
                         Route("/coder/health", health_endpoint, methods=["GET"]),
-                        Route("/models", models_endpoint, methods=["GET"])])
+                        Route("/models", models_endpoint, methods=["GET"]),
+                        Route("/media/video/{name}", video_endpoint, methods=["GET"])])
